@@ -1,0 +1,84 @@
+{
+  "name": "@workspace-extensions/typecheck-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "displayName": "Typecheck Service",
+    "icon": "./assets/icon.svg",
+    "entry": "index.ts",
+    "sourcemap": true,
+    "extension": {
+      "activationEvents": [
+        "onInvoke"
+      ],
+      "methodAuthority": {
+        "checkPanel": {
+          "effect": {
+            "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
+          }
+        },
+        "check": {
+          "effect": {
+            "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
+          }
+        },
+        "getTypeInfo": {
+          "effect": {
+            "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
+          }
+        },
+        "getCompletions": {
+          "effect": {
+            "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
+          }
+        },
+        "getBrowserTypeDefinitions": {
+          "effect": {
+            "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
+          }
+        }
+      }
+    },
+    "authority": {
+      "provides": [],
+      "requests": [
+        {
+          "capability": "context.boundary",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "critical",
+          "evidence": "intentional-broad"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@vibestudio/env-paths": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@vibestudio/typecheck": "workspace:*",
+    "@vibestudio/workspace-contracts": "workspace:*"
+  }
+}

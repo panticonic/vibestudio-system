@@ -1,0 +1,410 @@
+import React from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Button } from "./ui/primitives";
+import { radius, spacing, type } from "../design/tokens";
+import type { StackNavigationProp } from "@workspace/mobile-navigation";
+import { useAtomValue, useSetAtom } from "jotai";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+import { resetToNativeBootstrap } from "../services/auth";
+import { readClipboardText } from "../services/nativeCapabilities";
+import {
+  loadShellCredential,
+  clearShellCredential,
+} from "../services/mobileCredentials";
+import { parseConnectLink } from "@vibestudio/shared/connect";
+import {
+  MobileHostTargetApprovalRequiredError,
+  ShellClient,
+} from "../services/shellClient";
+import {
+  serverUrlAtom,
+  isAuthenticatedAtom,
+  authLoadingAtom,
+  authErrorAtom,
+  pairingIdentityAtom,
+} from "../state/authAtoms";
+import {
+  connectionStatusAtom,
+  workspaceReadinessAtom,
+} from "../state/connectionAtoms";
+import {
+  panelTreeRevisionAtom,
+  shellClientAtom,
+} from "../state/shellClientAtom";
+import {
+  createMobileWorkspaceDirectory,
+  type MobileWorkspaceDirectory,
+} from "../services/workspaceDirectory";
+import { workspaceDirectoryAtom } from "../state/workspaceDirectoryAtom";
+import { themeColorsAtom } from "../state/themeAtoms";
+import { VibestudioLogo } from "./VibestudioLogo";
+
+function smokePhase(phase: string, details?: Record<string, unknown>): void {
+  const suffix = details ? ` ${JSON.stringify(details)}` : "";
+  console.log(`[VibestudioMobileSmoke] phase=${phase}${suffix}`);
+}
+
+type LoginScreenNavigationProp = StackNavigationProp<
+  RootStackParamList,
+  "Login"
+>;
+
+interface LoginScreenProps {
+  navigation: LoginScreenNavigationProp;
+}
+
+export function LoginScreen({ navigation }: LoginScreenProps) {
+  const [retryNonce, setRetryNonce] = React.useState(0);
+  const colors = useAtomValue(themeColorsAtom);
+
+  const setServerUrlAtom = useSetAtom(serverUrlAtom);
+  const setAuthenticated = useSetAtom(isAuthenticatedAtom);
+  const setAuthLoading = useSetAtom(authLoadingAtom);
+  const setAuthError = useSetAtom(authErrorAtom);
+  const setConnectionStatus = useSetAtom(connectionStatusAtom);
+  const setWorkspaceReadiness = useSetAtom(workspaceReadinessAtom);
+  const setPairingIdentity = useSetAtom(pairingIdentityAtom);
+  const setShellClient = useSetAtom(shellClientAtom);
+  const setWorkspaceDirectory = useSetAtom(workspaceDirectoryAtom);
+  const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
+  const authLoading = useAtomValue(authLoadingAtom);
+  const authError = useAtomValue(authErrorAtom);
+  const [connectionPhase, setConnectionPhase] = React.useState(
+    "Reading saved pairing…",
+  );
+  const [connectionAttempt, setConnectionAttempt] = React.useState(0);
+  const [needsHostApproval, setNeedsHostApproval] = React.useState(false);
+  const cancelConnectionRef = React.useRef<(() => void) | null>(null);
+
+  const resetToBootstrap = React.useCallback(
+    async (clearPairing: boolean) => {
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        if (clearPairing) await clearShellCredential();
+        await resetToNativeBootstrap();
+      } catch (error) {
+        setAuthLoading(false);
+        setAuthError(
+          error instanceof Error
+            ? error.message
+            : "Could not return to pairing.",
+        );
+      }
+    },
+    [setAuthError, setAuthLoading],
+  );
+
+  const handleResetToBootstrap = React.useCallback(() => {
+    Alert.alert(
+      "Replace this pairing?",
+      "Retry first if the server may only be temporarily unavailable. Re-pairing removes this device's saved connection.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Re-pair",
+          style: "destructive",
+          onPress: () => void resetToBootstrap(true),
+        },
+      ],
+    );
+  }, [resetToBootstrap]);
+
+  const handlePastePairingLink = React.useCallback(async () => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const rawUrl = (await readClipboardText()).trim();
+      if (!rawUrl) {
+        throw new Error(
+          "Clipboard is empty. Copy a Vibestudio pairing link first.",
+        );
+      }
+      // Validate the pasted link (shape + protocol version) BEFORE touching the
+      // stored credential. Clearing first meant clipboard garbage — or an https
+      // pair link that Android hands straight to the app — wiped the only saved
+      // pairing and stranded the device. Only a well-formed current link may
+      // proceed; anything else surfaces a clear error and leaves the credential
+      // intact so the device can still reconnect.
+      const parsed = parseConnectLink(rawUrl);
+      if (parsed.kind === "error") {
+        throw new Error(
+          `That doesn't look like a valid Vibestudio pairing link. ${parsed.reason}`,
+        );
+      }
+      await Linking.openURL(rawUrl);
+      // Opening a URL is not proof that iOS delivered it back to this app. Keep
+      // the working credential until a successful pairing overwrites it.
+    } catch (error) {
+      setAuthLoading(false);
+      setAuthError(
+        error instanceof Error ? error.message : "Could not open pairing link.",
+      );
+    }
+  }, [setAuthError, setAuthLoading]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let pendingDirectory: MobileWorkspaceDirectory | null = null;
+    const abort = new AbortController();
+
+    const finishConnectedClient = (client: ShellClient) => {
+      smokePhase("workspace-connected");
+
+      setShellClient(client);
+      setServerUrlAtom(client.serverUrl);
+      setAuthenticated(true);
+      setAuthLoading(false);
+      setAuthError(null);
+
+      navigation.replace("Main");
+    };
+
+    const connect = async () => {
+      setAuthLoading(true);
+      setAuthError(null);
+      setNeedsHostApproval(false);
+      setConnectionAttempt(0);
+      setWorkspaceReadiness("connecting");
+      setConnectionPhase("Reading saved pairing…");
+      try {
+        smokePhase("workspace-login-connect-start");
+        // Native bootstrap persists the shared Iroh endpoint identity and the
+        // shell credential. Workspace reach is refreshed after authentication.
+        const stored = await loadShellCredential();
+        smokePhase("workspace-login-credentials", {
+          hasShellCredential: Boolean(stored),
+        });
+        if (!stored) {
+          throw new Error(
+            "No Vibestudio pairing is stored on this device. Scan a pairing QR code from a trusted desktop or terminal.",
+          );
+        }
+        if (stored.schemaVersion !== 5) {
+          throw new Error(
+            "The saved mobile connection has not completed its required migration.",
+          );
+        }
+        setPairingIdentity({
+          server: "Paired workspace server",
+          deviceId: stored.credential.deviceId,
+        });
+        setConnectionPhase("Opening your workspaces…");
+        cancelConnectionRef.current = () => {
+          cancelled = true;
+          abort.abort();
+          setAuthLoading(false);
+          setAuthError(
+            "Connection cancelled. Your saved pairing is unchanged.",
+          );
+        };
+        const directory = await createMobileWorkspaceDirectory(
+          stored,
+          abort.signal,
+        );
+        pendingDirectory = directory;
+        if (cancelled) {
+          await directory.dispose();
+          return;
+        }
+        const system = directory.sessions.get(directory.systemWorkspaceId)!;
+        setWorkspaceDirectory(directory);
+        pendingDirectory = null;
+        setConnectionStatus(system.client.transport.status);
+        setWorkspaceReadiness("shell-ready");
+        finishConnectedClient(system.client);
+        cancelConnectionRef.current = null;
+      } catch (error) {
+        await pendingDirectory?.dispose();
+        pendingDirectory = null;
+        if (cancelled) return;
+        setAuthLoading(false);
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Could not open the selected workspace.";
+        if (error instanceof MobileHostTargetApprovalRequiredError) {
+          setNeedsHostApproval(true);
+          setAuthError(
+            "The workspace's mobile app needs your approval before it can run.",
+          );
+          return;
+        }
+        smokePhase("workspace-login-error", {
+          message,
+          name: error instanceof Error ? error.name : typeof error,
+          stack:
+            error instanceof Error && error.stack
+              ? error.stack.split("\n").slice(0, 5).join(" || ")
+              : undefined,
+        });
+        setAuthError(message);
+      }
+    };
+
+    void connect();
+
+    return () => {
+      cancelled = true;
+      if (pendingDirectory) void pendingDirectory.dispose();
+      if (cancelConnectionRef.current) abort.abort();
+      cancelConnectionRef.current = null;
+    };
+  }, [
+    navigation,
+    retryNonce,
+    setAuthError,
+    setAuthLoading,
+    setAuthenticated,
+    setConnectionStatus,
+    setPanelTreeRevision,
+    setServerUrlAtom,
+    setShellClient,
+    setWorkspaceDirectory,
+    setPairingIdentity,
+  ]);
+
+  return (
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
+      <ScrollView
+        contentContainerStyle={styles.content}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+      >
+        <VibestudioLogo size={156} variant="logo" style={styles.brandMark} />
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+          Your workspaces, together
+        </Text>
+
+        {authLoading ? (
+          <View style={styles.loadingBlock}>
+            <ActivityIndicator color={colors.primary} size="large" />
+            <Text style={[styles.message, { color: colors.textSecondary }]}>
+              {connectionPhase}
+              {connectionAttempt > 0 ? ` Attempt ${connectionAttempt}.` : ""}
+            </Text>
+            <Button
+              label="Cancel"
+              variant="outline"
+              onPress={() => cancelConnectionRef.current?.()}
+              style={styles.fullButton}
+            />
+          </View>
+        ) : null}
+
+        {authError ? (
+          <View style={styles.errorBlock}>
+            <View
+              style={[
+                styles.errorCallout,
+                {
+                  backgroundColor: colors.dangerSoft,
+                  borderColor: colors.danger,
+                },
+              ]}
+            >
+              <Text
+                style={[type.bodyStrong, { color: colors.danger }]}
+                accessibilityRole="alert"
+              >
+                {authError}
+              </Text>
+              <Text
+                style={[
+                  type.caption,
+                  styles.calloutHint,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                {needsHostApproval
+                  ? "Review the workspace app in the pairing screen. Your saved pairing will stay intact."
+                  : "Retry keeps your saved pairing. Only re-pair if you want to replace this connection."}
+              </Text>
+            </View>
+            <Button
+              label={needsHostApproval ? "Review and approve" : "Retry"}
+              variant="filled"
+              onPress={() =>
+                needsHostApproval
+                  ? void resetToBootstrap(false)
+                  : setRetryNonce((value) => value + 1)
+              }
+              style={styles.fullButton}
+            />
+            <Button
+              label="Paste pairing link"
+              variant="outline"
+              onPress={() => void handlePastePairingLink()}
+              style={styles.fullButton}
+            />
+            <Button
+              label="Re-pair device…"
+              variant="outline"
+              onPress={handleResetToBootstrap}
+              style={styles.fullButton}
+            />
+          </View>
+        ) : null}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  content: {
+    alignItems: "center",
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: spacing.xl,
+  },
+  brandMark: {
+    marginBottom: spacing.lg,
+  },
+  subtitle: {
+    ...type.body,
+    fontSize: 16,
+    marginBottom: spacing.xxl,
+    textAlign: "center",
+  },
+  loadingBlock: {
+    alignItems: "center",
+    gap: spacing.md,
+    width: "100%",
+  },
+  errorBlock: {
+    alignItems: "center",
+    gap: spacing.md,
+    width: "100%",
+  },
+  message: {
+    ...type.caption,
+    textAlign: "center",
+  },
+  errorCallout: {
+    width: "100%",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.lg,
+    gap: spacing.xs,
+  },
+  calloutHint: {
+    marginTop: spacing.xs,
+  },
+  fullButton: {
+    width: "100%",
+  },
+});

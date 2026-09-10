@@ -1,0 +1,91 @@
+---
+name: appdev
+description: Create or modify trusted workspace apps for Electron, React Native, or terminal targets.
+---
+
+# Trusted app development
+
+Apps under `apps/` are approved client runtimes. Panels are UI surfaces, workers
+and DOs are sandboxed services, extensions are trusted Node services.
+
+Desktop and mobile load their approved client implementation from the acting
+user's private System workspace. Focusing Personal or a shared workspace changes
+the resource session, not the client source. System is ordinary workspace source;
+its location alone grants neither host authority nor access to another workspace.
+Native app units, including supervised terminal apps, are hosted only in a
+designated System workspace. Other workspaces may contain and build their source
+for authoring, but do not stage native app launch reviews or runtime principals.
+Native code follows the platform execution contract: Unix uses MXC resource
+admission; Windows native processes run with the host OS user's permissions.
+Workspace RPC checks do not imply universal native filesystem or network isolation.
+
+## Read by task
+
+| Task                                                    | Reference                                                           |
+| ------------------------------------------------------- | ------------------------------------------------------------------- |
+| Package, manifest, source, dependencies, panel commands | [AUTHORING.md](AUTHORING.md#hosting-panel-contributed-commands)     |
+| External dependencies, overrides, and patches           | [workspace dependency resolution](../workspace-dev/DEPENDENCIES.md) |
+| Electron, React Native, or terminal contracts           | [TARGETS.md](TARGETS.md)                                            |
+| Capability declarations                                 | [CAPABILITIES.md](CAPABILITIES.md)                                  |
+| Semantic development and diagnostics                    | [DEV_LOOP.md](DEV_LOOP.md)                                          |
+| Native bootstrap, pairing, mobile artifacts             | [MOBILE.md](MOBILE.md)                                              |
+| Remote clients and credentials                          | [REMOTE_CLIENTS.md](REMOTE_CLIENTS.md)                              |
+| Focused checks and smoke coverage                       | [TESTING.md](TESTING.md)                                            |
+
+Read only references relevant to the target and change.
+
+## Invariants
+
+- Build production-ready systems. Apps are trusted workspace infrastructure,
+  not throwaway prototypes: design for real use from the start with proper state
+  persistence, error handling, principled authority, and tested edge cases.
+- Do not populate apps with hardcoded demo or fake data — build real empty states,
+  real data-entry flows, and real persistence.
+- Do not leave any 'prototype' UI element stubs without implemented functionality.
+  No empty 'share' buttons unless you implement it, no user account badge unless
+  there is an account system, no breadcrumbs if you can't navigate anything.
+- `@workspace-apps/<name>` maps to `apps/<name>`. Identity comes from the
+  package manifest and approved build, not display path.
+- Give each app a semantic `vibestudio.icon` per the [icon
+  guide](../workspace-dev/references/icons.md). Use `@workspace/ui/icons` for
+  host UI icons.
+- Declare only the capabilities the target requires; let the normal review flow
+  approve them.
+- Read [Vibestudio VCS](../vibestudio-vcs/SKILL.md) before editing managed
+  source. Check the working head, commit the complete local chain, and publish
+  explicitly.
+- Electron layout hosts declare `panel-hosting`. React Native pairing must work
+  in the shipped bootstrap before a workspace bundle exists. Terminal apps run
+  only as explicitly activated supervised processes.
+- Treat an app that creates or changes user data as requiring durable storage
+  unless the user explicitly describes that data as disposable. Put that data
+  in a Durable Object service that owns SQLite for live interactive data.
+  Use version-controlled project files when content benefits from history and
+  collaboration; client component state and process memory are presentation
+  state, not persistence.
+- Respect the user's live light/dark choice and use responsive layouts. For
+  panel UI, follow [the theme contract](../workspace-dev/WORKFLOW.md#theme-and-layout):
+  automatic React mounting supplies the theme wrapper, custom CSS must consume
+  theme-aware colors, and `usePanelTheme()` is for code that needs appearance.
+  For native client UI, use the target's existing appearance state. Verify both
+  appearances and live switching when creating or restyling UI.
+- Panel commands are generic and host-local: panels own command meaning; apps
+  own presentation and routing.
+
+## Workflow
+
+For original illustrations, creative content, or other purposeful visual assets,
+follow [creative imagery and visual assets](../workspace-dev/SKILL.md#creative-imagery-and-visual-assets).
+Use this when imagery enriches the app's content or experience, including games,
+learning tools, storytelling, and visual exploration.
+
+Create `apps/<name>` with package name `@workspace-apps/<name>`, declare it
+under `apps:` in `meta/vibestudio.yml`. Use live generated docs and manifest
+schema for exact fields.
+
+Run the smallest target-specific checks from [TESTING.md](TESTING.md). Use
+[system testing](../system-testing/SKILL.md) when a change crosses startup,
+pairing, shell UI, mobile bootstrap, or client-auth boundaries.
+
+Use [workspace development](../workspace-dev/SKILL.md) for panels and workers,
+[extension development](../extensiondev/SKILL.md) for trusted Node services.

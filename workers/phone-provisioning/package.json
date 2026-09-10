@@ -1,0 +1,64 @@
+{
+  "name": "@workspace-workers/phone-provisioning",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "title": "Phone Provisioning",
+    "icon": "📱",
+    "kind": "worker",
+    "entry": "index.ts",
+    "durable": {
+      "classes": [
+        {
+          "className": "PhoneProvisioningDO",
+          "rpcSchema": "vibestudio.phone-provisioning.v1"
+        }
+      ]
+    },
+    "authority": {
+      "provides": [
+        {
+          "name": "mobile.devices.read",
+          "title": "View available mobile devices",
+          "action": "view available mobile devices",
+          "tier": "gated",
+          "sensitivity": "read",
+          "resourceType": "mobile-device",
+          "presentation": {
+            "domain": "people",
+            "verb": "see"
+          },
+          "notability": "everyday",
+          "grantScopes": [
+            "once"
+          ]
+        },
+        {
+          "name": "mobile.provision",
+          "title": "Install and pair a mobile device",
+          "action": "install and pair a mobile device",
+          "tier": "gated",
+          "sensitivity": "admin",
+          "resourceType": "mobile-device",
+          "presentation": {
+            "domain": "people",
+            "verb": "manage"
+          },
+          "notability": "headline",
+          "grantScopes": [
+            "once"
+          ]
+        }
+      ],
+      "requests": []
+    }
+  },
+  "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
+    "@workspace/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}
