@@ -1,0 +1,491 @@
+// @vitest-environment jsdom
+import {
+  ApprovalPresentationContext,
+  useApprovalPresentationController,
+} from "./ApprovalPresentationContext";
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { atom, getDefaultStore, useAtom, useAtomValue } from "jotai";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { WorkspaceDesktop } from "./WorkspaceDesktop";
+import {
+  useWorkspaceNavigationHost,
+  useWorkspaceDesktopHost,
+  useWorkspaceVisible,
+} from "../shell/workspaceContext";
+import { effectiveThemeAtom, themeModeAtom } from "../state/themeAtoms";
+const nativeSync = vi.hoisted(() => ({
+  snapshot: { error: null as string | null },
+  listeners: new Set<() => void>(),
+}));
+const api = vi.hoisted(() => {
+  const catalog = [
+    {
+      workspaceId: "personal",
+      name: "personal-opaque",
+      privateRole: "personal",
+      running: true,
+      pendingApprovalCount: 0,
+      lastOpened: 0,
+    },
+    {
+      workspaceId: "system",
+      name: "system-opaque",
+      privateRole: "system",
+      running: true,
+      pendingApprovalCount: 0,
+      lastOpened: 0,
+    },
+    {
+      workspaceId: "garden",
+      name: "Garden",
+      running: true,
+      pendingApprovalCount: 0,
+      lastOpened: 0,
+    },
+  ];
+  const calls = new Map<
+    string,
+    {
+      create: ReturnType<typeof vi.fn>;
+      close: ReturnType<typeof vi.fn>;
+      surface: ReturnType<typeof vi.fn>;
+    }
+  >();
+  return {
+    catalog,
+    calls,
+    route: vi.fn(async () => {}),
+    list: vi.fn(async () => catalog),
+    incomingSurface: vi.fn(async (): Promise<unknown> => null),
+    open: vi.fn(async (id: string) => {
+      const create = vi.fn(async () => ({ id: "panel" }));
+      const close = vi.fn();
+      const surface = vi.fn(async () => {});
+      calls.set(id, { create, close, surface });
+      return {
+        close,
+        client: {
+          panel: { createAboutPanel: create },
+          app: { openShellSurface: surface },
+          shellApproval: { listPending: async () => [] },
+          events: {
+            on: () => () => {},
+            subscribe: async () => {},
+            unsubscribe: async () => {},
+          },
+        },
+      };
+    }),
+  };
+});
+vi.mock("../shell/client", () => ({
+  nativePanelPresentation: {
+    setFocusedWorkspace: vi.fn(async () => {}),
+    subscribe: (listener: () => void) => {
+      nativeSync.listeners.add(listener);
+      return () => nativeSync.listeners.delete(listener);
+    },
+    getSnapshot: () => nativeSync.snapshot,
+  },
+  app: { getInfo: async () => ({ initialFocusedWorkspaceId: "personal" }) },
+  createWorkspaceShellClient: api.open,
+  systemWorkspaceId: Promise.resolve("system"),
+  hubControl: {
+    ensureUserWorkspaces: async () => ({
+      personal: api.catalog[0],
+      system: api.catalog[1],
+    }),
+    listWorkspaces: api.list,
+    routeWorkspace: api.route,
+  },
+  directEvents: { on: () => () => {} },
+  incomingShellSurface: { getPending: api.incomingSurface },
+  incomingPanelLocation: {
+    onLocation: () => () => {},
+    getPending: async () => null,
+  },
+}));
+const draft = atom("");
+vi.mock("./PanelApp", () => ({
+  PanelApp: function RetainedDraft() {
+    const owner = useWorkspaceNavigationHost();
+    const visible = useWorkspaceVisible();
+    const [value, setValue] = useAtom(draft);
+    const appearance = useAtomValue(effectiveThemeAtom);
+    return (
+      <input
+        aria-label={`${owner?.workspaceId} draft`}
+        data-visible={String(visible)}
+        data-appearance={appearance}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+      />
+    );
+  },
+}));
+vi.mock("./ThemeSettings", () => ({ ThemeSettings: () => null }));
+vi.mock("./ConnectionStatusBadge", () => ({
+  ConnectionStatusBadge: () => null,
+}));
+function Desktop({ children }: { children?: ReactNode }) {
+  const presentation = useApprovalPresentationController(
+    useShellWorkspaceClient(),
+  );
+  return (
+    <ApprovalPresentationContext.Provider value={presentation}>
+      <WorkspaceDesktop>{children}</WorkspaceDesktop>
+    </ApprovalPresentationContext.Provider>
+  );
+}
+function OpenWorkspace({ workspaceId }: { workspaceId: string }) {
+  const desktop = useWorkspaceDesktopHost();
+  return (
+    <button
+      onClick={() =>
+        void desktop.openWorkspace(workspaceId).catch(() => undefined)
+      }
+    >
+      Open created workspace
+    </button>
+  );
+}
+describe("desktop workspace ownership", () => {
+  it("resolves a newly-created catalog entry into a retained owner before focusing it", async () => {
+    const result = render(
+      <Desktop>
+        <OpenWorkspace workspaceId="created" />
+      </Desktop>,
+    );
+    try {
+      await screen.findByLabelText("personal draft");
+      await waitFor(() =>
+        expect(api.route).toHaveBeenCalledWith({ workspaceId: "personal" }),
+      );
+      const createdEntry = {
+        workspaceId: "created",
+        name: "Created",
+        running: true,
+        pendingApprovalCount: 0,
+        lastOpened: 0,
+      };
+      api.list.mockResolvedValueOnce([...api.catalog, createdEntry]);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open created workspace" }),
+      );
+
+      const created = await screen.findByLabelText("created draft");
+      await waitFor(() =>
+        expect(created.getAttribute("data-visible")).toBe("true"),
+      );
+      expect(api.open).toHaveBeenCalledWith("created");
+      expect(api.route).toHaveBeenCalledWith({ workspaceId: "created" });
+    } finally {
+      result.unmount();
+      api.list.mockImplementation(async () => api.catalog);
+    }
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "keeps the later selection when a delayed lookup settles: %s",
+    async (outcome) => {
+      const result = render(
+        <Desktop>
+          <OpenWorkspace workspaceId="later-created" />
+        </Desktop>,
+      );
+      let finish!: (entries: typeof api.catalog) => void;
+      let fail!: (error: Error) => void;
+      try {
+        await screen.findByLabelText("personal draft");
+        await waitFor(() =>
+          expect(
+            screen
+              .getByLabelText("personal draft")
+              .getAttribute("data-visible"),
+          ).toBe("true"),
+        );
+        api.list.mockImplementationOnce(
+          () =>
+            new Promise((resolve, reject) => {
+              finish = resolve;
+              fail = reject;
+            }),
+        );
+        api.route.mockClear();
+        fireEvent.click(
+          screen.getByRole("button", { name: "Open created workspace" }),
+        );
+        await waitFor(() => expect(finish).toBeDefined());
+        fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+        await waitFor(() =>
+          expect(
+            screen.getByLabelText("system draft").getAttribute("data-visible"),
+          ).toBe("true"),
+        );
+        await act(async () => {
+          if (outcome === "resolve")
+            finish([
+              ...api.catalog,
+              {
+                workspaceId: "later-created",
+                name: "Created",
+                running: true,
+                pendingApprovalCount: 0,
+                lastOpened: 0,
+              },
+            ]);
+          else fail(new Error("Delayed lookup failed"));
+        });
+        expect(screen.queryByText("Delayed lookup failed")).toBeNull();
+        expect(
+          screen.getByLabelText("system draft").getAttribute("data-visible"),
+        ).toBe("true");
+        expect(api.route.mock.calls).toEqual([[{ workspaceId: "system" }]]);
+        expect(screen.queryByLabelText("later-created draft")).toBeNull();
+      } finally {
+        result.unmount();
+        api.list.mockImplementation(async () => api.catalog);
+      }
+    },
+  );
+
+  it("shows an authoritative catalog failure while selecting a newly-created id", async () => {
+    const result = render(
+      <Desktop>
+        <OpenWorkspace workspaceId="missing-created" />
+      </Desktop>,
+    );
+    try {
+      await screen.findByLabelText("personal draft");
+      await waitFor(() =>
+        expect(api.route).toHaveBeenCalledWith({ workspaceId: "personal" }),
+      );
+      api.list.mockRejectedValueOnce(new Error("Catalog refresh unavailable"));
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open created workspace" }),
+      );
+
+      expect(
+        await screen.findByText("Catalog refresh unavailable"),
+      ).toBeTruthy();
+      expect(api.open).not.toHaveBeenCalledWith("missing-created");
+    } finally {
+      result.unmount();
+      api.list.mockImplementation(async () => api.catalog);
+    }
+  });
+  it("clears the native presentation error when the compositor recovers without a workspace switch", async () => {
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      act(() => {
+        nativeSync.snapshot = { error: "Native presentation disconnected" };
+        for (const listener of nativeSync.listeners) listener();
+      });
+      expect(screen.getByText("Native presentation disconnected")).toBeTruthy();
+      act(() => {
+        nativeSync.snapshot = { error: null };
+        for (const listener of nativeSync.listeners) listener();
+      });
+      expect(screen.queryByText("Native presentation disconnected")).toBeNull();
+      expect(
+        screen.getByLabelText("personal draft").getAttribute("data-visible"),
+      ).toBe("true");
+    } finally {
+      result.unmount();
+      nativeSync.snapshot = { error: null };
+    }
+  });
+
+  it("keeps a delayed startup link in its captured workspace after focus changes", async () => {
+    let finish!: (target: unknown) => void;
+    api.incomingSurface.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      await waitFor(() => expect(finish).toBeDefined());
+      fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+      await waitFor(() =>
+        expect(
+          screen.getByLabelText("system draft").getAttribute("data-visible"),
+        ).toBe("true"),
+      );
+      await act(async () => {
+        finish({ kind: "about", page: "permissions" });
+      });
+      expect(
+        api.calls.get("personal")?.surface,
+      ).toHaveBeenCalledExactlyOnceWith({ kind: "about", page: "permissions" });
+      expect(api.calls.get("system")?.surface).not.toHaveBeenCalled();
+    } finally {
+      result.unmount();
+    }
+  });
+
+  it("preserves explicit System focus when slower initial Personal loading finishes", async () => {
+    const createOwner = api.open.getMockImplementation()!;
+    let finishPersonal!: () => void;
+    const personalOpening = new Promise<void>((resolve) => {
+      finishPersonal = resolve;
+    });
+    api.open.mockImplementation(async (id) => {
+      const owner = await createOwner(id);
+      if (id === "personal") await personalOpening;
+      return owner;
+    });
+    api.route.mockClear();
+    const result = render(<Desktop />);
+    try {
+      const system = await screen.findByLabelText("system draft");
+      fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+      await waitFor(() =>
+        expect(system.getAttribute("data-visible")).toBe("true"),
+      );
+      await act(async () => {
+        finishPersonal();
+      });
+      await screen.findByLabelText("personal draft");
+      expect(system.getAttribute("data-visible")).toBe("true");
+      expect(api.route.mock.calls).toEqual([[{ workspaceId: "system" }]]);
+    } finally {
+      finishPersonal();
+      result.unmount();
+      api.open.mockImplementation(createOwner);
+    }
+  });
+
+  it("keeps independent retained drafts and captures New in the chosen workspace", async () => {
+    const result = render(<Desktop />);
+    const personal = await screen.findByLabelText("personal draft");
+
+    expect(api.calls.has("garden")).toBe(false);
+    fireEvent.change(personal, { target: { value: "Personal draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open Garden" }));
+    const garden = await screen.findByLabelText("garden draft");
+    fireEvent.change(garden, { target: { value: "Garden draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open Personal" }));
+    await waitFor(() =>
+      expect(personal.getAttribute("data-visible")).toBe("true"),
+    );
+    expect((personal as HTMLInputElement).value).toBe("Personal draft");
+    expect((garden as HTMLInputElement).value).toBe("Garden draft");
+    expect(garden.getAttribute("data-visible")).toBe("false");
+    fireEvent.click(
+      screen.getByRole("button", { name: "New panel in Garden" }),
+    );
+    await waitFor(() =>
+      expect(api.calls.get("garden")?.create).toHaveBeenCalledWith("new"),
+    );
+    expect(api.calls.get("personal")?.create).not.toHaveBeenCalled();
+    expect(api.open.mock.calls.filter(([id]) => id === "garden")).toHaveLength(
+      1,
+    );
+    expect(screen.queryByText("personal-opaque")).toBeNull();
+    result.unmount();
+    for (const owner of api.calls.values())
+      expect(owner.close).toHaveBeenCalledTimes(1);
+  });
+  it("opens a workspace with pending reviews without replacing Personal focus", async () => {
+    const garden = api.catalog.find((entry) => entry.workspaceId === "garden")!;
+    garden.pendingApprovalCount = 2;
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("garden draft");
+      await waitFor(() =>
+        expect(
+          screen.getByLabelText("personal draft").getAttribute("data-visible"),
+        ).toBe("true"),
+      );
+      expect(
+        screen.getByLabelText("garden draft").getAttribute("data-visible"),
+      ).toBe("false");
+    } finally {
+      result.unmount();
+      garden.pendingApprovalCount = 0;
+    }
+  });
+  it("releases a pending workspace owner when access disappears during startup", async () => {
+    const result = render(<Desktop />);
+    await screen.findByLabelText("personal draft");
+    await screen.findByLabelText("system draft");
+    const createOwner = api.open.getMockImplementation()!;
+    let finishOpening!: () => void;
+    const opening = new Promise<void>((resolve) => {
+      finishOpening = resolve;
+    });
+    api.calls.delete("garden");
+    api.open.mockImplementationOnce(async (id) => {
+      const owner = await createOwner(id);
+      await opening;
+      return owner;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open Garden" }));
+    await waitFor(() => expect(api.calls.has("garden")).toBe(true));
+    const garden = api.catalog.pop()!;
+    try {
+      fireEvent(window, new Event("focus"));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("button", { name: "Open Garden" }),
+        ).toBeNull(),
+      );
+      await act(async () => {
+        finishOpening();
+      });
+      await waitFor(() =>
+        expect(api.calls.get("garden")?.close).toHaveBeenCalledTimes(1),
+      );
+      expect(screen.queryByLabelText("garden draft")).toBeNull();
+      expect(
+        screen.getByLabelText("personal draft").getAttribute("data-visible"),
+      ).toBe("true");
+    } finally {
+      finishOpening();
+      result.unmount();
+      api.catalog.push(garden);
+    }
+  });
+
+  it("follows the window's appearance choice into every retained workspace", async () => {
+    // The chrome's theme control writes the window store; each workspace
+    // renders in its own. Without the mirror the panels keep the appearance
+    // they read at mount and stop following the setting.
+    const window = getDefaultStore();
+    window.set(themeModeAtom, "dark");
+    const result = render(<Desktop />);
+    try {
+      const personal = await screen.findByLabelText("personal draft");
+      fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+      const system = await screen.findByLabelText("system draft");
+      await waitFor(() =>
+        expect(personal.getAttribute("data-appearance")).toBe("dark"),
+      );
+      expect(system.getAttribute("data-appearance")).toBe("dark");
+
+      await act(async () => {
+        window.set(themeModeAtom, "light");
+      });
+      await waitFor(() =>
+        expect(personal.getAttribute("data-appearance")).toBe("light"),
+      );
+      expect(system.getAttribute("data-appearance")).toBe("light");
+    } finally {
+      window.set(themeModeAtom, "system");
+      result.unmount();
+    }
+  });
+});
