@@ -1,0 +1,92 @@
+/**
+ * Open/close state for the two quickfire surfaces (quickfire-overlay-spec §7).
+ *
+ * Atoms rather than props because both sheets are opened from several places —
+ * the AppBar ✦ button, a long-press on the active panel pill, and commands that
+ * hand off to each other — and none of those should have to thread a callback
+ * through `MainScreen`.
+ */
+import { atom } from "jotai";
+import { shellClientAtom } from "./shellClientAtom";
+import type { QuickfireMode } from "@workspace/quickfire-core";
+
+export interface CommandSheetRequest {
+  /** Scope the sheet opens in. Long-press on the active panel opens "goto". */
+  mode: QuickfireMode;
+  /** Seed query, already stripped of its mode prefix. */
+  query?: string;
+}
+
+export const commandSheetAtom = atom<CommandSheetRequest | null>(null);
+
+export const openCommandSheetAtom = atom(
+  null,
+  (_get, set, request?: Partial<CommandSheetRequest>) => {
+    set(commandSheetAtom, {
+      mode: request?.mode ?? "all",
+      ...(request?.query ? { query: request.query } : {}),
+    });
+  },
+);
+
+export const dismissCommandSheetAtom = atom(null, (_get, set) => {
+  set(commandSheetAtom, null);
+});
+
+export interface QuickfireSheetRequest {
+  /** The panel slot the conversation binds to (§1.4). Absent for a `conversation` request. */
+  slotId?: string;
+  /** Captured with the target, so later focus changes cannot relabel this conversation. */
+  panelTitle?: string;
+  /**
+   * An existing channel to talk in — the conversation surface an agent's
+   * notification opens (messaging plan §4.8). Nothing is minted: the person
+   * joins as themself and replies thread under the escalated envelope.
+   */
+  conversation?: {
+    channelId: string;
+    channelTargetId: string;
+    contextId: string;
+    focusMessageId?: string;
+    replyTo?: { participantId: string; handle?: string };
+    title?: string;
+  };
+  /** Text to prefill the compose box with, e.g. from `>ask …`. */
+  draft?: string;
+  /**
+   * Send `draft` immediately instead of prefilling it. Set only when the tap
+   * that opened the sheet already *was* the send gesture (the palette's ask
+   * row), never when the user may still be typing.
+   */
+  send?: boolean;
+}
+
+export const quickfireSheetAtom = atom<QuickfireSheetRequest | null>(null);
+
+/**
+ * Opening the sheet over a slot IS the gesture that binds a conversation to it
+ * (§6.2), so this must only ever be set from an explicit user action — never
+ * from focus changes or navigation.
+ */
+export const openQuickfireSheetAtom = atom(
+  null,
+  (get, set, request: QuickfireSheetRequest) => {
+    const panelTitle =
+      request.panelTitle ??
+      (request.slotId
+        ? (get(shellClientAtom)?.panels.registry.getPanel(request.slotId)
+            ?.title ?? request.slotId)
+        : undefined);
+    set(quickfireSheetAtom, { ...request, panelTitle });
+  },
+);
+
+export const dismissQuickfireSheetAtom = atom(null, (_get, set) => {
+  set(quickfireSheetAtom, null);
+});
+
+/** Leave a cleared conversation and restore the ordinary command surface. */
+export const returnToCommandSheetAtom = atom(null, (_get, set) => {
+  set(quickfireSheetAtom, null);
+  set(commandSheetAtom, { mode: "all" });
+});
