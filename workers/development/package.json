@@ -1,0 +1,156 @@
+{
+  "name": "@workspace-workers/development",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "title": "System Development",
+    "icon": "🛠️",
+    "kind": "worker",
+    "entry": "index.ts",
+    "durable": {
+      "classes": [
+        {
+          "className": "DevelopmentDO",
+          "rpcSchema": "vibestudio.development.v1"
+        }
+      ]
+    },
+    "authority": {
+      "provides": [
+        {
+          "name": "development.sessions.destroy",
+          "title": "Destroy a development workspace",
+          "action": "permanently destroy a development workspace",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "development-workspace",
+          "presentation": {
+            "domain": "files",
+            "verb": "act"
+          },
+          "notability": "headline",
+          "grantScopes": [
+            "once"
+          ]
+        },
+        {
+          "name": "development.sessions.cleanup.retry",
+          "title": "Retry development-workspace cleanup",
+          "action": "retry permanent cleanup of a development workspace",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "development-workspace",
+          "presentation": {
+            "domain": "files",
+            "verb": "act"
+          },
+          "notability": "headline",
+          "grantScopes": [
+            "once"
+          ]
+        },
+        {
+          "name": "development.runs.force-retire",
+          "title": "Abandon development-build recovery",
+          "action": "permanently abandon recovery of a development build",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "development-run",
+          "presentation": {
+            "domain": "computer",
+            "verb": "manage"
+          },
+          "notability": "headline",
+          "grantScopes": [
+            "once"
+          ]
+        },
+        {
+          "name": "development.sessions.force-retire",
+          "title": "Abandon development-workspace recovery",
+          "action": "permanently abandon recovery of a development workspace",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "development-workspace",
+          "presentation": {
+            "domain": "files",
+            "verb": "manage"
+          },
+          "notability": "headline",
+          "grantScopes": [
+            "once"
+          ]
+        }
+      ],
+      "requests": [
+        {
+          "capability": "development.native.execute",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "context.semantic.fork",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "context.semantic.drop",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "development.native.session.retire",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "development.native.build.retire",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "workspace-service:gad.workspace",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@vibestudio/content-addressing": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@vibestudio/durable": "workspace:*",
+    "@vibestudio/rpc": "workspace:*",
+    "vitest": "^3.2.7"
+  }
+}

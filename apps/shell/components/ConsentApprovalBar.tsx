@@ -1,0 +1,1104 @@
+import {
+  isRpcConnectionLost,
+  rpcDestinationKey,
+  type RpcDestination,
+} from "@vibestudio/rpc";
+import { createPortal } from "react-dom";
+import { approvalPresentationKey } from "@vibestudio/shared/approvalPresentation";
+import { useApprovalPresentation } from "./ApprovalPresentationContext";
+import {
+  useShellWorkspaceClient,
+  useWorkspaceVisible,
+  useWorkspaceNavigationHost,
+  ShellWorkspaceClientContext,
+  WorkspaceVisibilityContext,
+} from "../shell/workspaceContext";
+/**
+ * ConsentApprovalBar — the approval coordinator. It owns the approval state
+ * (subscription, queue, minimized) and the RPC handlers, and renders the
+ * minimized **pill** in the notifications strip. The expanded **card** is hosted
+ * by the reusable content overlay (a native surface floating above the panels),
+ * driven here via `useShellContentOverlay`: this component pushes the current
+ * approval as props and runs the matching `shellApproval.*` call when the card
+ * emits an intent. The presentational card lives in `./ApprovalCard`.
+ */
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useAtomValue } from "jotai";
+import { Badge, Button, Flex, Text } from "@radix-ui/themes";
+import { ChevronRightIcon } from "@radix-ui/react-icons";
+import type {
+  ApprovalDecision,
+  PendingApproval,
+} from "@vibestudio/shared/approvals";
+import { getApprovalCopy } from "@vibestudio/shared/approvalCopy";
+import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
+import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
+import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
+import {
+  createApprovalStateController,
+  type ApprovalStateController,
+  SHELL_APPROVAL_PENDING_CHANGED_EVENT,
+} from "@vibestudio/shell-core/approvalState";
+
+import {
+  useShellContentOverlay,
+  type ContentOverlayBounds,
+} from "../shell/useShellContentOverlay";
+import { useShellEvent } from "../shell/useShellEvent";
+import { effectiveThemeAtom, themeConfigAtom } from "../state/themeAtoms";
+import { FOCUS_APPROVAL_REQUEST_EVENT } from "../commands/slate";
+import { useNavigationActions } from "./NavigationContext";
+import { ApprovalKindIcon } from "./ApprovalCard";
+import { ApprovalFullSurface } from "./ApprovalFullSurface";
+import { InstallReviewOutcomeNotice } from "./InstallReview";
+import {
+  approvalOpensFullSurface,
+  diffReviewPayloadHashes,
+  getDiffReviewPayload,
+  highestPendingTone,
+  resolveCallerInfo,
+  type ApprovalCardIntent,
+  type ApprovalTone,
+  type BlobResult,
+  type CallerInfo,
+  type WorkspaceHistoryTarget,
+} from "./approvalCardModel";
+import type { OverlayThemeInfo } from "../overlay/types";
+
+/**
+ * Id of the panel-region wrapper (rendered by PanelApp) whose rect anchors the
+ * floating approval card overlay to the top-right of the panel viewport.
+ */
+export const APPROVAL_OVERLAY_HOST_ID = "app-approval-host";
+/**
+ * Approval events are a prompt, not the source of truth. A workspace server
+ * can create an approval while the desktop event watch is being replaced or
+ * recovering, so periodically reconcile the small pending set as well. This
+ * keeps a user from being stranded behind an invisible approval without
+ * turning every render into an RPC call.
+ */
+const APPROVAL_RECONCILE_INTERVAL_MS = 5_000;
+
+/** Workspace source path of Workspace History (the file-inspection surface
+ *  the diff-review escape hatch deep-links into). */
+const WORKSPACE_HISTORY_SOURCE = "about/workspace-history";
+
+export type ApprovalSource = {
+  owner: RpcDestination;
+  shellApproval: import("../shell/workspaceClient").ShellWorkspaceClient["shellApproval"];
+  events: Pick<
+    import("../shell/workspaceClient").ShellWorkspaceClient["events"],
+    "subscribe" | "unsubscribe" | "on"
+  >;
+};
+
+export function ConsentApprovalBar({
+  source,
+}: { source?: ApprovalSource } = {}) {
+  const workspaceVisible = useWorkspaceVisible();
+  const presentation = useApprovalPresentation();
+  const publicationOwner = useRef(Symbol("workspace-approvals")).current;
+  const presentationOwner = useId();
+  const workspaceNavigation = useWorkspaceNavigationHost();
+  const workspaceId = workspaceNavigation?.workspaceId ?? "system";
+  const workspaceClient = useShellWorkspaceClient();
+  const { unitIcons, account, blobstore, panel, shellPresence } =
+    workspaceClient;
+  const { events, shellApproval } = source ?? workspaceClient;
+  const owner = useMemo<RpcDestination>(
+    () => source?.owner ?? { kind: "workspace", workspaceId },
+    [source, workspaceId],
+  );
+  const ownerKey = rpcDestinationKey(owner);
+
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [pendingAccess, setPendingAccess] = useState<PendingApproval[]>([]);
+  const approvalController = useRef<ApprovalStateController | null>(null);
+  const authoritativePending = useRef<PendingApproval[]>([]);
+  const [decisionError, setDecisionError] = useState<{
+    approvalId: string;
+    message: string;
+  } | null>(null);
+  /**
+   * Decisions are in flight per approval, not globally.
+   *
+   * An install review leaves the pending queue as soon as its decision is
+   * accepted, while the RPC can remain open until the resulting publication
+   * lands. The next review is therefore allowed to appear before the previous
+   * receipt returns. A single global lock made that next review look enabled
+   * while silently discarding its action. Keep the exact in-flight identities
+   * instead: duplicate answers to one review are blocked, independent reviews
+   * remain answerable.
+   */
+  const submittingApprovalIdsRef = useRef<Set<string>>(new Set());
+  const [submittingApprovalIds, setSubmittingApprovalIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  /**
+   * What came of the last install review (§7.2, "Result").
+   *
+   * It has to be held here rather than in the review, because the review is
+   * gone by the time there is anything to say: accepting removes the approval
+   * from the queue and unmounts the card that asked. This state is what lets
+   * `News added` / `Open News →` exist at all, and it is deliberately outside
+   * the queue — it never delays, hides, or replaces the next approval.
+   */
+  const [installResult, setInstallResult] =
+    useState<InstallReviewResolution | null>(null);
+  const transientWorkspaceReady =
+    installResult?.mode === "adopt-root" &&
+    installResult.decision === "accepted" &&
+    installResult.landing !== undefined &&
+    installResult.landing.failed.length === 0;
+  const installResultHasFailure =
+    (installResult?.landing?.failed.length ?? 0) > 0;
+  const installResultAutoDismissMs = installResultHasFailure
+    ? null
+    : transientWorkspaceReady
+      ? 5_000
+      : 8_000;
+
+  const [attentionSeq, setAttentionSeq] = useState(0);
+  const currentApprovalIdRef = useRef<string | null>(null);
+  const [keyboardFocusRequest, setKeyboardFocusRequest] = useState<{
+    approvalId: string;
+    sequence: number;
+  } | null>(null);
+  // Diff-review (P3.5): host-served blob cache, keyed by content hash, fetched
+  // lazily on the overlay surface's behalf (the surface has no RPC).
+  const [blobResults, setBlobResults] = useState<Record<string, BlobResult>>(
+    {},
+  );
+  const blobResultsRef = useRef(blobResults);
+  blobResultsRef.current = blobResults;
+  const inFlightBlobsRef = useRef<Set<string>>(new Set());
+  const seenApprovalIdsRef = useRef<Set<string>>(new Set());
+  const { navigateToId } = useNavigationActions();
+  const effectiveTheme = useAtomValue(effectiveThemeAtom);
+  const themeConfig = useAtomValue(themeConfigAtom);
+
+  // Results are transient confirmations. Failures are the exception: they name
+  // work that needs attention and remain until explicitly dismissed.
+  useEffect(() => {
+    if (!installResult || installResultAutoDismissMs === null) return;
+    const timer = window.setTimeout(() => {
+      setInstallResult((current) =>
+        current === installResult ? null : current,
+      );
+    }, installResultAutoDismissMs);
+    return () => window.clearTimeout(timer);
+  }, [installResult, installResultAutoDismissMs]);
+
+  useEffect(() => {
+    if (owner.kind !== "workspace") return;
+    const heartbeat = () => {
+      void shellPresence.heartbeat().catch((err: unknown) => {
+        if (!isRpcConnectionLost(err))
+          console.warn("[ConsentApprovalBar] heartbeat failed:", err);
+      });
+    };
+    heartbeat();
+    const intervalId = window.setInterval(heartbeat, 5_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  const focusCurrentApproval = useCallback(() => {
+    const approvalId = currentApprovalIdRef.current;
+    if (approvalId) {
+      presentation.expand();
+      setKeyboardFocusRequest((previous) => ({
+        approvalId,
+        sequence: (previous?.sequence ?? 0) + 1,
+      }));
+    }
+  }, [presentation.expand]);
+  useShellEvent("focus-approval-card", focusCurrentApproval);
+  // The same request from inside this document: `focus-approval-card` is a
+  // main→renderer shell event, so the quickfire slate's
+  // `authority.focus-approval` command cannot emit it and asks here instead.
+  useEffect(() => {
+    if (!workspaceVisible) return;
+    window.addEventListener(FOCUS_APPROVAL_REQUEST_EVENT, focusCurrentApproval);
+    return () =>
+      window.removeEventListener(
+        FOCUS_APPROVAL_REQUEST_EVENT,
+        focusCurrentApproval,
+      );
+  }, [focusCurrentApproval, workspaceVisible]);
+
+  useEffect(() => {
+    const controller = createApprovalStateController({
+      listPending: () => shellApproval.listPending(),
+      subscribePendingChanged: () =>
+        events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+      unsubscribePendingChanged: () =>
+        events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+      onPendingChanged: (listener) =>
+        events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, (payload) =>
+          listener(payload),
+        ),
+      filter: filterRuntimeApprovals,
+      onChange: (pending) => {
+        setQueueError(null);
+        authoritativePending.current = pending;
+        setPendingAccess(pending);
+      },
+      onError: (err, phase) => {
+        setQueueError(err instanceof Error ? err.message : String(err));
+        if (!isRpcConnectionLost(err))
+          console.warn(
+            `[ConsentApprovalBar] approval state ${phase} failed:`,
+            err,
+          );
+      },
+    });
+    approvalController.current = controller;
+    controller.start();
+    const reconcileId = window.setInterval(() => {
+      void controller.refresh("manual");
+    }, APPROVAL_RECONCILE_INTERVAL_MS);
+    return () => {
+      window.clearInterval(reconcileId);
+      approvalController.current = null;
+      controller.stop();
+    };
+  }, []);
+
+  // Replay the attention pulse whenever a not-yet-seen approval enters the queue.
+  useEffect(() => {
+    const ids = new Set(pendingAccess.map((approval) => approval.approvalId));
+    const hasNew = pendingAccess.some(
+      (approval) => !seenApprovalIdsRef.current.has(approval.approvalId),
+    );
+    seenApprovalIdsRef.current = ids;
+    if (hasNew) setAttentionSeq((seq) => seq + 1);
+  }, [pendingAccess]);
+
+  const { publish, remove } = presentation;
+  useEffect(() => {
+    publish(owner, publicationOwner, pendingAccess);
+  }, [publish, owner, publicationOwner, pendingAccess]);
+  useEffect(
+    () => () => remove(owner, publicationOwner),
+    [remove, owner, publicationOwner],
+  );
+
+  const orderedPending = useMemo(
+    () =>
+      pendingAccess
+        .map((approval, index) => ({ approval, index }))
+        .sort((left, right) => {
+          const isPreparing = (approval: PendingApproval) =>
+            approval.lifecycle?.state === "preparing" ? 1 : 0;
+          return (
+            isPreparing(left.approval) - isPreparing(right.approval) ||
+            left.index - right.index
+          );
+        })
+        .map(({ approval }) => approval),
+    [pendingAccess],
+  );
+  const browseIndex = presentation.entries.findIndex(
+    (entry) =>
+      approvalPresentationKey(entry) === presentation.state.selectedKey,
+  );
+  const current =
+    orderedPending.find(
+      (approval) =>
+        approvalPresentationKey({ owner, approvalId: approval.approvalId }) ===
+        presentation.state.selectedKey,
+    ) ?? null;
+  const presentationKey = current
+    ? JSON.stringify([ownerKey, current.approvalId, presentationOwner])
+    : null;
+  currentApprovalIdRef.current = current?.approvalId ?? null;
+  // Preparation is progress, not a decision yet. Every actionable approval is
+  // visible in app; `attention` only controls out-of-app notification policy.
+  const minimized =
+    current != null &&
+    (!presentation.state.open || current.lifecycle?.state === "preparing");
+  const queueLength = presentation.entries.length;
+  const canPrev = queueLength > 1 && browseIndex > 0;
+  const canNext = queueLength > 1 && browseIndex < queueLength - 1;
+  const resolvedCaller = current ? resolveCallerInfo(current) : null;
+  const currentCaller =
+    resolvedCaller && owner.kind === "hub"
+      ? { ...resolvedCaller, panelId: undefined }
+      : resolvedCaller;
+  const [callerIcon, setCallerIcon] = useState<{
+    approvalId: string;
+    owner: typeof unitIcons;
+    key: string;
+    url: string;
+  } | null>(null);
+  const callerIconSource = currentCaller?.iconSourcePath;
+  const callerIconPath = currentCaller?.icon;
+  useEffect(() => {
+    if (
+      owner.kind !== "workspace" ||
+      !current ||
+      !callerIconSource ||
+      !callerIconPath?.startsWith("./")
+    )
+      return;
+    let active = true;
+    const approvalId = current.approvalId;
+    const key = JSON.stringify([callerIconSource, callerIconPath, null, null]);
+    void unitIcons
+      .load(callerIconSource, callerIconPath)
+      .then((url) => {
+        if (active) setCallerIcon({ approvalId, owner: unitIcons, key, url });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [
+    ownerKey,
+    current?.approvalId,
+    callerIconSource,
+    callerIconPath,
+    unitIcons,
+  ]);
+  const sourceWorkspaceId =
+    current?.kind === "capability"
+      ? current.snapshot?.sourceWorkspaceId
+      : undefined;
+  const destinationWorkspaceId =
+    current?.kind === "capability"
+      ? (current.snapshot?.workspaceId ?? workspaceId)
+      : workspaceId;
+  const approvalWorkspaceLabel =
+    owner.kind === "hub"
+      ? "Server"
+      : sourceWorkspaceId && sourceWorkspaceId !== destinationWorkspaceId
+        ? `${workspaceNavigation?.workspaceNames[sourceWorkspaceId] ?? sourceWorkspaceId} → ${workspaceNavigation?.workspaceNames[destinationWorkspaceId] ?? workspaceNavigation?.workspaceLabel ?? destinationWorkspaceId}`
+        : workspaceNavigation?.workspaceLabel;
+
+  const diffReview = current ? getDiffReviewPayload(current) : null;
+  const diffHashes = diffReview
+    ? diffReviewPayloadHashes(diffReview)
+    : new Set<string>();
+  const payloadHashes = diffHashes;
+
+  useEffect(() => {
+    setDecisionError((error) =>
+      error && error.approvalId !== current?.approvalId ? null : error,
+    );
+    // A new approval starts with an empty blob cache — payload hashes are
+    // per-approval, and nothing should carry over between them.
+    setBlobResults({});
+    inFlightBlobsRef.current.clear();
+  }, [current?.approvalId]);
+
+  // Fetch one payload blob on the surface's behalf. Only hashes named in the
+  // current approval's payload are fetchable; any other hash is ignored.
+  const fetchBlob = (hash: string, refresh = false) => {
+    if (!current || !payloadHashes.has(hash)) return;
+    if (owner.kind !== "workspace") {
+      setBlobResults((previous) => ({
+        ...previous,
+        [hash]: { error: "This server request has no workspace file source." },
+      }));
+      return;
+    }
+    const existing = blobResultsRef.current[hash];
+    // Immutable successful content remains cached. A refresh is meaningful
+    // only for a prior missing/error result and never duplicates in-flight IO.
+    if (
+      (existing && (!refresh || "text" in existing)) ||
+      inFlightBlobsRef.current.has(hash)
+    ) {
+      return;
+    }
+    if (refresh) {
+      setBlobResults((previous) => {
+        if (!(hash in previous)) return previous;
+        const next = { ...previous };
+        delete next[hash];
+        return next;
+      });
+    }
+    inFlightBlobsRef.current.add(hash);
+    void blobstore
+      .getText(hash)
+      .then((text) =>
+        setBlobResults((prev) => ({
+          ...prev,
+          [hash]: text == null ? { missing: true } : { text },
+        })),
+      )
+      .catch((err: unknown) =>
+        setBlobResults((prev) => ({
+          ...prev,
+          [hash]: {
+            error: err instanceof Error ? err.message : "Blob fetch failed",
+          },
+        })),
+      )
+      .finally(() => inFlightBlobsRef.current.delete(hash));
+  };
+
+  // Measure the panel-region rect (the overlay anchor). Re-measure on resize.
+  const [anchorBounds, setAnchorBounds] = useState<ContentOverlayBounds | null>(
+    null,
+  );
+  useEffect(() => {
+    const measure = () => {
+      const host = presentation.anchorId
+        ? document.getElementById(presentation.anchorId)
+        : null;
+      const rect = host?.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) {
+        setAnchorBounds(null);
+        return;
+      }
+      const next = {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      };
+      setAnchorBounds((prev) =>
+        prev &&
+        prev.x === next.x &&
+        prev.y === next.y &&
+        prev.width === next.width &&
+        prev.height === next.height
+          ? prev
+          : next,
+      );
+    };
+    measure();
+    const host = presentation.anchorId
+      ? document.getElementById(presentation.anchorId)
+      : null;
+    const observer =
+      host && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(measure)
+        : null;
+    observer?.observe(host as Element);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [presentation.anchorId, current?.approvalId]);
+
+  // --- RPC handlers (recreated each render so they close over the latest
+  // `current`; the overlay hook always calls the freshest intent handler). ---
+  const decide = (decision: ApprovalDecision) => {
+    const approval = current;
+    if (!approval) return;
+    setDecisionError(null);
+    setPendingAccess((items) =>
+      items.filter((item) => item.approvalId !== approval.approvalId),
+    );
+    void shellApproval
+      .resolve(approval.approvalId, decision)
+      .catch((error: unknown) => reconcileFailedDecision(approval, error));
+  };
+  const submitClientConfig = (values: Record<string, string>) => {
+    if (current?.kind !== "client-config") return;
+    runApprovalAction(current, () =>
+      shellApproval.submitClientConfig(current.approvalId, values),
+    );
+  };
+  const submitCredentialInput = (values: Record<string, string>) => {
+    if (current?.kind !== "credential-input") return;
+    runApprovalAction(current, () =>
+      shellApproval.submitCredentialInput(current.approvalId, values),
+    );
+  };
+  const submitSecretInput = (values: Record<string, string>) => {
+    if (current?.kind !== "secret-input") return;
+    runApprovalAction(current, () =>
+      shellApproval.submitSecretInput(current.approvalId, values),
+    );
+  };
+  /**
+   * Answer a review and keep what the server says came of it.
+   *
+   * The call returns a typed resolution — heading, parts, entry point, landing —
+   * and dropping it on the floor is what used to make success unshowable. A
+   * throw is a different outcome from a resolution that reports failed parts:
+   * the first leaves the review pending (the card says so inline, from
+   * `decisionError`), the second means the decision was taken and the notice
+   * below has to name what did not survive it.
+   */
+  const resolveInstallReview = (resolution: TemplateInstallResolution) => {
+    if (current?.kind !== "unit-install-review") return;
+    const approval = current;
+    setInstallResult(null);
+    // Answering is the end of the review, not the beginning of a loading
+    // screen. The server deliberately keeps this RPC open after recording the
+    // decision so it can return the later landing receipt; leaving the decided
+    // approval in local state for that whole interval made startup reconciliation
+    // look like a very slow save. Retire it immediately, exactly as the standard
+    // approval path does, and restore the same snapshot only if the decision
+    // itself fails.
+    setPendingAccess((items) =>
+      items.filter((item) => item.approvalId !== approval.approvalId),
+    );
+    runApprovalAction(approval, async () => {
+      const outcome = await shellApproval.resolveInstallReview(
+        approval.approvalId,
+        resolution,
+      );
+      setInstallResult(outcome);
+    });
+  };
+  const resolveTaskRules = (
+    resolution:
+      | { decision: "accept"; selected: string[] }
+      | { decision: "cancel" },
+  ) => {
+    if (current?.kind !== "capability" || current.cardType !== "task.rules")
+      return;
+    const approval = current;
+    setPendingAccess((items) =>
+      items.filter((item) => item.approvalId !== approval.approvalId),
+    );
+    runApprovalAction(approval, () =>
+      shellApproval.resolveTaskRules(approval.approvalId, resolution),
+    );
+  };
+  const runApprovalAction = (
+    approval: PendingApproval,
+    action: () => Promise<unknown>,
+  ) => {
+    if (submittingApprovalIdsRef.current.has(approval.approvalId)) return;
+    submittingApprovalIdsRef.current.add(approval.approvalId);
+    setDecisionError(null);
+    setSubmittingApprovalIds(new Set(submittingApprovalIdsRef.current));
+    void action()
+      .catch((error: unknown) => reconcileFailedDecision(approval, error))
+      .finally(() => {
+        submittingApprovalIdsRef.current.delete(approval.approvalId);
+        setSubmittingApprovalIds(new Set(submittingApprovalIdsRef.current));
+      });
+  };
+  const reconcileFailedDecision = async (
+    approval: PendingApproval,
+    error: unknown,
+  ) => {
+    const controller = approvalController.current;
+    if (!controller) {
+      console.error("[ConsentApprovalBar] approval action failed:", error);
+      return;
+    }
+    await controller.refresh("manual");
+    if (approvalController.current !== controller) return;
+    // A denied decision can also mean the request was withdrawn or membership
+    // changed. Only the current authoritative queue can put a request back.
+    if (
+      authoritativePending.current.some(
+        (item) => item.approvalId === approval.approvalId,
+      )
+    ) {
+      console.error("[ConsentApprovalBar] approval action failed:", error);
+      setDecisionError({
+        approvalId: approval.approvalId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    // The request is gone from the authoritative queue, which is the outcome
+    // this reconciliation exists to reach: someone else resolved it, or it was
+    // withdrawn. Reporting that as a failure describes a race the user already
+    // won, and nothing is left for anyone to act on.
+    console.info(
+      "[ConsentApprovalBar] approval already resolved elsewhere; queue reconciled:",
+      error instanceof Error ? error.message : String(error),
+    );
+  };
+  // Diff-review escape hatch: reuse Workspace History if one exists
+  // (navigate it to the new target + focus), otherwise create one. The target
+  // rides along as launch state-args the panel consumes on mount/param-change.
+  const openInWorkspaceHistory = (target: WorkspaceHistoryTarget) => {
+    if (owner.kind !== "workspace") {
+      if (current)
+        setDecisionError({
+          approvalId: current.approvalId,
+          message: "This server request has no workspace history.",
+        });
+      return;
+    }
+    const stateArgs = { diffTarget: target };
+    void (async () => {
+      try {
+        const profile = await account.getProfile().catch(() => null);
+        // Reusing a colleague's panel changes their live navigation state. Only
+        // reuse within the acting account's owner group; if identity is
+        // temporarily unavailable, creating a fresh panel is the safe action.
+        let existingId: string | null = null;
+        let cursor: string | undefined;
+        while (profile && !existingId) {
+          const page = await panel.getTreePage({
+            group: { kind: "roots", ownerUserId: profile.userId },
+            ...(cursor ? { cursor } : {}),
+            limit: 100,
+          });
+          for (const node of page.nodes) {
+            const observation = await panel.observe(node.slotId);
+            if (observation.source === WORKSPACE_HISTORY_SOURCE) {
+              existingId = node.slotId;
+              break;
+            }
+          }
+          cursor = page.nextCursor ?? undefined;
+          if (!cursor) break;
+        }
+        if (existingId) {
+          await panel.navigate(existingId, WORKSPACE_HISTORY_SOURCE, {
+            stateArgs,
+          });
+          navigateToId(existingId);
+        } else {
+          await panel.createPanel(WORKSPACE_HISTORY_SOURCE, { stateArgs });
+        }
+      } catch (err: unknown) {
+        console.error(
+          "[ConsentApprovalBar] open-in-workspace-history failed:",
+          err,
+        );
+      }
+    })();
+  };
+
+  /**
+   * `Open News →` (§7.2).
+   *
+   * Not a new mechanism: a part's `repoPath` is the very thing this shell opens
+   * panels by. `PanelStack`, the notification bar's `openPanel` instruction and
+   * the diff-review escape hatch above all call `panel.createPanel(source)`, so
+   * the entry point inherits placement, focus and the panel tree instead of
+   * growing a second way to put something on screen.
+   *
+   * Panels only, and that is a fact about client apps rather than caution. An
+   * `app` part is host chrome: it is bound to a host target in `meta`, built
+   * without a panel loader, and mounted by the app orchestrator as the window's
+   * own view — one per host. `createPanel("apps/news")` would build the wrong
+   * artifact into a panel slot with the wrong preload. There is no "open this
+   * app" action in this shell to reuse, so the result reports the app landed
+   * and offers no link, rather than offering one that cannot work.
+   *
+   * The notice clears once the thing it points at is open: it exists to hand the
+   * user to what was just added, and it has done that. If the open fails the
+   * notice stays, because dismissing it would take the only remaining link with
+   * it.
+   */
+  const openEntryPoint = (
+    entryPoint: NonNullable<InstallReviewResolution["entryPoint"]>,
+  ) => {
+    void panel
+      .createPanel(entryPoint.repoPath, { title: entryPoint.title })
+      .then(() => setInstallResult(null))
+      .catch((err: unknown) => {
+        console.error("[ConsentApprovalBar] open entry point failed:", err);
+      });
+  };
+
+  const minimizeReview = () => {
+    presentation.minimize();
+  };
+
+  const handleIntent = (payload: unknown) => {
+    if (typeof payload !== "object" || payload === null) return;
+    const candidate = payload as { type?: unknown; approvalId?: unknown };
+    if (
+      typeof candidate.type !== "string" ||
+      typeof candidate.approvalId !== "string"
+    )
+      return;
+    const intent = payload as ApprovalCardIntent;
+    if (
+      !current ||
+      !presentation.state.open ||
+      intent.approvalId !== current.approvalId ||
+      intent.presentationKey !== presentationKey
+    )
+      return;
+    switch (intent.type) {
+      case "minimize":
+        minimizeReview();
+        return;
+      case "browse":
+        presentation.step(intent.dir === "prev" ? -1 : 1);
+        return;
+      case "show-panel":
+        if (owner.kind === "workspace" && currentCaller?.panelId)
+          navigateToId(currentCaller.panelId);
+        return;
+      case "decide":
+        decide(intent.decision);
+        return;
+      case "device-cancel":
+        decide("dismiss");
+        return;
+      case "submit-client-config":
+        submitClientConfig(intent.values);
+        return;
+      case "submit-credential-input":
+        submitCredentialInput(intent.values);
+        return;
+      case "submit-secret-input":
+        submitSecretInput(intent.values);
+        return;
+      case "resolve-install-review":
+        resolveInstallReview(intent.resolution);
+        return;
+      case "resolve-task-rules":
+        resolveTaskRules(intent.resolution);
+        return;
+      case "fetch-blob":
+        fetchBlob(intent.hash, intent.refresh);
+        return;
+      case "open-in-workspace-history":
+        openInWorkspaceHistory(intent.target);
+        return;
+    }
+  };
+
+  // Secret-input + device-code flows want keyboard focus on open; others stay
+  // hands-off so the panel keeps focus and remains clickable.
+  const needsFocus =
+    current?.kind === "client-config" ||
+    current?.kind === "credential-input" ||
+    current?.kind === "device-code";
+  const focusRequest =
+    current && keyboardFocusRequest?.approvalId === current.approvalId
+      ? `explicit:${current.approvalId}:${keyboardFocusRequest.sequence}`
+      : current && needsFocus
+        ? `initial:${current.approvalId}`
+        : undefined;
+
+  const theme = useMemo<OverlayThemeInfo>(
+    () => ({
+      appearance: effectiveTheme,
+      accentColor: themeConfig.accentColor,
+      grayColor: themeConfig.grayColor,
+      radius: themeConfig.radius,
+      scaling: themeConfig.scaling,
+      panelBackground: themeConfig.panelBackground,
+    }),
+    [
+      effectiveTheme,
+      themeConfig.accentColor,
+      themeConfig.grayColor,
+      themeConfig.panelBackground,
+      themeConfig.radius,
+      themeConfig.scaling,
+    ],
+  );
+
+  const overlayProps = useMemo(
+    () =>
+      current
+        ? {
+            workspaceLabel: approvalWorkspaceLabel,
+            presentationKey,
+            iconUrls:
+              callerIcon?.approvalId === current.approvalId &&
+              callerIcon.owner === unitIcons
+                ? { [callerIcon.key]: callerIcon.url }
+                : {},
+            approval: current,
+            queue:
+              queueLength > 1
+                ? { index: browseIndex, total: queueLength, canPrev, canNext }
+                : null,
+            decisionError:
+              decisionError && decisionError.approvalId === current.approvalId
+                ? decisionError.message
+                : null,
+            actionPending: submittingApprovalIds.has(current.approvalId),
+            diffReview,
+            blobResults,
+            appearance: effectiveTheme,
+          }
+        : null,
+    [
+      blobResults,
+      callerIcon,
+      unitIcons,
+      browseIndex,
+      canNext,
+      canPrev,
+      current,
+      decisionError,
+      diffReview,
+      effectiveTheme,
+      queueLength,
+      submittingApprovalIds,
+      approvalWorkspaceLabel,
+      presentationKey,
+    ],
+  );
+
+  /**
+   * Where this approval is hosted (§7.2, §7.8).
+   *
+   * A unit install review opens on the full surface — a window-sized dialog this
+   * chrome owns — and everything else keeps the floating content overlay. The
+   * two hosts are exclusive: the overlay is a native view above the panels, so
+   * leaving it up behind the dialog would float a second copy of the same
+   * decision over the first.
+   */
+  const fullSurface = current != null && approvalOpensFullSurface(current);
+  const overlayOpen =
+    current != null && !minimized && !fullSurface && anchorBounds != null;
+  const overlayOptions: Parameters<typeof useShellContentOverlay>[0] =
+    overlayOpen && current && anchorBounds
+      ? {
+          surface: "approval-card",
+          open: true,
+          bounds: anchorBounds,
+          focusRequest,
+          theme,
+          props: overlayProps,
+        }
+      : null;
+
+  /**
+   * The result of the last review, in the chrome strip (§7.2, §7.8).
+   *
+   * It sits beside whatever the queue is doing rather than in front of it: the
+   * next approval still opens, the pill still appears, and this line is only a
+   * report. That is why it renders on every branch below including the empty
+   * one — by the time there is a result there is usually no approval left, and
+   * a result that unmounted with the review would never be seen.
+   *
+   * The shape is the shell's existing post-action strip (`SavePasswordBar`'s
+   * confirmation, `UserNotificationBar`'s notice): a `data-shell-top-chrome`
+   * band above the panels, in normal DOM flow, that pushes content down instead
+   * of covering it. A successful workspace-adoption result is the exception:
+   * it is a brief confirmation with no link, because the workspace is already
+   * open. Results for later installs keep their link until followed or
+   * dismissed.
+   */
+  const resultNotice = installResult ? (
+    <div
+      data-shell-top-chrome="install-review-result"
+      className="install-review-result"
+    >
+      <InstallReviewOutcomeNotice
+        outcome={{ source: "resolved", resolution: installResult }}
+        compact
+        {...(!transientWorkspaceReady &&
+        owner.kind === "workspace" &&
+        installResult.entryPoint?.kind === "panel"
+          ? { onOpenEntryPoint: openEntryPoint }
+          : {})}
+        onDismiss={() => setInstallResult(null)}
+      />
+    </div>
+  ) : null;
+
+  const present = (body: ReactNode) =>
+    presentation.host
+      ? createPortal(
+          <ShellWorkspaceClientContext.Provider value={presentation.client}>
+            <WorkspaceVisibilityContext.Provider value={true}>
+              {queueError && (
+                <Flex
+                  role="alert"
+                  align="center"
+                  gap="3"
+                  p="3"
+                  style={{
+                    border: "1px solid var(--amber-7)",
+                    borderRadius: "var(--radius-3)",
+                    background: "var(--amber-2)",
+                    pointerEvents: "auto",
+                  }}
+                >
+                  <Flex
+                    direction="column"
+                    gap="1"
+                    style={{ flex: 1, minWidth: 0 }}
+                  >
+                    <Text size="2" weight="medium">
+                      {approvalWorkspaceLabel ?? workspaceId}: approvals
+                      couldn’t be loaded
+                    </Text>
+                    <Text size="1" color="gray">
+                      {queueError}
+                    </Text>
+                  </Flex>
+                  <Button
+                    size="1"
+                    variant="soft"
+                    onClick={() =>
+                      void approvalController.current?.refresh("manual")
+                    }
+                  >
+                    Retry
+                  </Button>
+                </Flex>
+              )}
+              <ApprovalNativePresentation
+                options={overlayOptions}
+                onIntent={handleIntent}
+              >
+                {body}
+              </ApprovalNativePresentation>
+            </WorkspaceVisibilityContext.Provider>
+          </ShellWorkspaceClientContext.Provider>,
+          presentation.host,
+          ownerKey,
+        )
+      : null;
+
+  if (!current || !currentCaller) return present(resultNotice);
+
+  // The full surface is chrome, not overlay: it renders here, in this document,
+  // so it can be a real dialog with the shell's focus behaviour. Closing it
+  // without deciding is the same act as minimizing the card — the review stays
+  // pending in the queue and the pill offers it back.
+  if (!minimized && fullSurface) {
+    return present(
+      <>
+        {resultNotice}
+        <ApprovalFullSurface
+          workspaceLabel={approvalWorkspaceLabel}
+          presentationKey={presentationKey ?? undefined}
+          approval={current}
+          caller={currentCaller}
+          queue={
+            queueLength > 1
+              ? { index: browseIndex, total: queueLength, canPrev, canNext }
+              : null
+          }
+          decisionError={
+            decisionError && decisionError.approvalId === current.approvalId
+              ? decisionError.message
+              : null
+          }
+          actionPending={submittingApprovalIds.has(current.approvalId)}
+          appearance={effectiveTheme}
+          emit={handleIntent}
+          onClose={minimizeReview}
+        />
+      </>,
+    );
+  }
+
+  // While expanded the card lives in the overlay surface — the chrome renders
+  // nothing but the last result. Minimized, it shows the pill in the
+  // notifications strip.
+  if (!minimized) return present(resultNotice);
+
+  return present(
+    <>
+      {resultNotice}
+      <ApprovalMinimizedPill
+        approval={current}
+        caller={currentCaller}
+        tone={highestPendingTone(
+          presentation.entries.map((entry) => entry.approval),
+        )}
+        count={presentation.entries.filter((entry) => entry.actionable).length}
+        workspaceLabel={approvalWorkspaceLabel}
+        attentionSeq={attentionSeq}
+        onExpand={() => {
+          setKeyboardFocusRequest((previous) => ({
+            approvalId: current.approvalId,
+            sequence: (previous?.sequence ?? 0) + 1,
+          }));
+          presentation.expand();
+        }}
+      />
+    </>,
+  );
+}
+
+function ApprovalNativePresentation({
+  options,
+  onIntent,
+  children,
+}: {
+  options: Parameters<typeof useShellContentOverlay>[0];
+  onIntent(payload: unknown): void;
+  children: ReactNode;
+}) {
+  useShellContentOverlay(options, onIntent);
+  return children;
+}
+
+function ApprovalMinimizedPill({
+  approval,
+  caller,
+  tone,
+  count,
+  workspaceLabel,
+  attentionSeq,
+  onExpand,
+}: {
+  approval: PendingApproval;
+  caller: CallerInfo;
+  tone: ApprovalTone;
+  count: number;
+  workspaceLabel?: string;
+  attentionSeq: number;
+  onExpand: () => void;
+}) {
+  const copy = getApprovalCopy(approval);
+  const multiple = count > 1;
+  const primary = multiple ? `${count} approvals waiting` : copy.title;
+  const secondary = multiple
+    ? `${copy.title} · ${caller.label}`
+    : `${caller.label} · ${caller.kindLabel.toLowerCase()}`;
+  return (
+    <div data-shell-top-chrome="approval-pill">
+      <button
+        type="button"
+        className="approval-pill"
+        data-approval-tone={tone}
+        data-approval-pill=""
+        onClick={onExpand}
+        aria-label={
+          multiple
+            ? `Review ${count} pending approvals`
+            : `Review approval: ${copy.title}`
+        }
+      >
+        <span
+          key={attentionSeq}
+          className="approval-pill-pulse"
+          aria-hidden="true"
+        />
+        <span className="approval-pill-icon">
+          <ApprovalKindIcon approval={approval} caller={caller} size={15} />
+        </span>
+        <Flex direction="column" style={{ minWidth: 0, flex: 1 }}>
+          <Text size="2" weight="bold" truncate>
+            {primary}
+          </Text>
+          <Text size="1" color="gray" truncate>
+            {workspaceLabel ? `${workspaceLabel} · ${secondary}` : secondary}
+          </Text>
+        </Flex>
+        {multiple ? (
+          <Badge color="gray" variant="soft" radius="full">
+            {count}
+          </Badge>
+        ) : null}
+        <Flex align="center" gap="1" className="approval-pill-cta">
+          <Text size="1" weight="medium">
+            Review
+          </Text>
+          <ChevronRightIcon />
+        </Flex>
+      </button>
+    </div>
+  );
+}
