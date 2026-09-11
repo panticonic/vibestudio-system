@@ -1,0 +1,867 @@
+import { createBridgeAdapter } from "./bridgeAdapter";
+import {
+  createRpcClient,
+  type RpcConnectionStatus,
+  type RpcEnvelope,
+} from "@vibestudio/rpc";
+import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
+import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
+import { HOST_COMMAND_CONTRIBUTION_EVENT } from "@vibestudio/shared/hostCommands";
+
+function createAdapter(
+  overrides?: Partial<Parameters<typeof createBridgeAdapter>[0]>,
+) {
+  return createBridgeAdapter({
+    workspaceId: "workspace-a",
+    panelManager: {} as never,
+    transport: {} as never,
+    callbacks: {
+      navigateToPanel: jest.fn(),
+      deliverToShell: jest.fn(),
+      openShellSurface: jest.fn(),
+    },
+    deliverToPanel: jest.fn(),
+    getPanelLease: jest.fn(),
+    ...overrides,
+  });
+}
+
+function makePanelSession(
+  overrides: Partial<IrohClientSession> = {},
+): IrohClientSession {
+  return {
+    callerId: jest.fn(() => "panel:runtime-a"),
+    isClosed: jest.fn(() => false),
+    close: jest.fn(),
+    onMessage: jest.fn(() => jest.fn()),
+    send: jest.fn(async () => undefined),
+    status: jest.fn(() => "connected" as RpcConnectionStatus),
+    ...overrides,
+  } as unknown as IrohClientSession;
+}
+
+function panelRequestEnvelope(requestId: string): RpcEnvelope {
+  const caller = { callerId: "panel:forged", callerKind: "panel" as const };
+  return {
+    from: caller.callerId,
+    target: "main",
+    delivery: { caller },
+    provenance: [caller],
+    message: {
+      type: "request",
+      requestId,
+      fromId: caller.callerId,
+      method: "workspace.getInfo",
+      args: [],
+    },
+  };
+}
+
+function shellContributionEnvelope(
+  event = HOST_COMMAND_CONTRIBUTION_EVENT,
+): RpcEnvelope {
+  const caller = { callerId: "panel:forged", callerKind: "panel" as const };
+  return {
+    from: caller.callerId,
+    target: "shell",
+    delivery: { caller },
+    provenance: [caller],
+    message: {
+      type: "event",
+      event,
+      fromId: caller.callerId,
+      payload: {
+        commands: [{ id: "chat-actions", label: "Conversation actions" }],
+      },
+    },
+  };
+}
+
+function stampedPanelEnvelope(requestId: string) {
+  return expect.objectContaining({
+    from: "panel:runtime-a",
+    delivery: expect.objectContaining({
+      caller: { callerId: "panel:runtime-a", callerKind: "panel" },
+    }),
+    provenance: [{ callerId: "panel:runtime-a", callerKind: "panel" }],
+    message: expect.objectContaining({ requestId, fromId: "panel:runtime-a" }),
+  });
+}
+
+describe("bridgeAdapter panel init", () => {
+  it("uses the mobile panel init provider when available", async () => {
+    const panelManager = { getPanelInit: jest.fn() };
+    const getPanelInit = jest.fn(async () => ({
+      entityId: "panel:nav-a",
+      connectionId: "conn-a",
+    }));
+    const adapter = createAdapter({
+      panelManager: panelManager as never,
+      transport: {} as never,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
+      getPanelInit,
+    });
+
+    await expect(
+      adapter.handle("panel:tree/panel-a", "getPanelInit", []),
+    ).resolves.toEqual({
+      entityId: "panel:nav-a",
+      connectionId: "conn-a",
+    });
+    expect(getPanelInit).toHaveBeenCalledWith("panel:tree/panel-a");
+    expect(panelManager.getPanelInit).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the panel manager init provider", async () => {
+    const panelManager = {
+      getPanelInit: jest.fn(async () => ({ entityId: "panel:nav-a" })),
+    };
+    const adapter = createAdapter({
+      panelManager: panelManager as never,
+      transport: {} as never,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
+    });
+
+    await expect(
+      adapter.handle("panel:tree/panel-a", "getPanelInit", []),
+    ).resolves.toEqual({
+      entityId: "panel:nav-a",
+    });
+    expect(panelManager.getPanelInit).toHaveBeenCalledWith(
+      "panel:tree/panel-a",
+    );
+  });
+});
+
+describe("bridgeAdapter CDP routing", () => {
+  it.each([
+    "getCdpEndpoint",
+    "navigate",
+    "goBack",
+    "goForward",
+    "stop",
+  ] as const)("rejects mobile CDP fast-path method %s", async (method) => {
+    const adapter = createAdapter();
+
+    await expect(
+      adapter.handle("panel:tree/panel-a", method, ["panel:tree/panel-b"]),
+    ).rejects.toThrow("CDP automation is routed through the server broker");
+  });
+});
+
+describe("bridgeAdapter panel session relay", () => {
+  it("keeps every shell envelope at the owning mobile host", async () => {
+    const deliverToShell = jest.fn();
+    const openPanelSession = jest.fn();
+    const contribution = shellContributionEnvelope();
+    const futureEvent = shellContributionEnvelope(
+      "runtime:future-shell-capability",
+    );
+    const adapter = createAdapter({
+      transport: { openPanelSession } as never,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell,
+        openShellSurface: jest.fn(),
+      },
+    });
+
+    await expect(
+      adapter.handle("panel:tree/panel-a", "postEnvelope", [contribution]),
+    ).resolves.toBeUndefined();
+    await expect(
+      adapter.handle("panel:tree/panel-a", "postEnvelope", [futureEvent]),
+    ).resolves.toBeUndefined();
+    expect(deliverToShell).toHaveBeenNthCalledWith(
+      1,
+      "panel:tree/panel-a",
+      contribution,
+    );
+    expect(deliverToShell).toHaveBeenNthCalledWith(
+      2,
+      "panel:tree/panel-a",
+      futureEvent,
+    );
+    expect(openPanelSession).not.toHaveBeenCalled();
+  });
+
+  it("reuses a session whose transport is reconnecting but not closed", async () => {
+    const warnSpy = jest
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    const session = makePanelSession({
+      status: jest.fn(() => "connecting" as RpcConnectionStatus),
+      isClosed: jest.fn(() => false),
+    });
+    const openPanelSession = jest.fn().mockResolvedValue(session);
+    const adapter = createAdapter({
+      panelManager: {} as never,
+      transport: { openPanelSession } as never,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
+      deliverToPanel: jest.fn(),
+      getPanelLease: jest.fn(() => ({
+        runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+        connectionId: "conn-a",
+      })),
+    });
+
+    await adapter.handle("panel:tree/panel-a", "postEnvelope", [
+      panelRequestEnvelope("msg-1"),
+    ]);
+    await waitFor(() =>
+      expect(session.send).toHaveBeenCalledWith(stampedPanelEnvelope("msg-1")),
+    );
+    await adapter.handle("panel:tree/panel-a", "postEnvelope", [
+      panelRequestEnvelope("msg-2"),
+    ]);
+    await waitFor(() =>
+      expect(session.send).toHaveBeenCalledWith(stampedPanelEnvelope("msg-2")),
+    );
+
+    expect(openPanelSession).toHaveBeenCalledTimes(1);
+    expect(session.close).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("reopens the panel session when the cached session is closed", async () => {
+    const warnSpy = jest
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    let firstClosed = false;
+    const firstSession = makePanelSession({
+      isClosed: jest.fn(() => firstClosed),
+    });
+    const secondSession = makePanelSession({
+      callerId: jest.fn(() => "panel:runtime-a"),
+    });
+    const openPanelSession = jest
+      .fn()
+      .mockResolvedValueOnce(firstSession)
+      .mockResolvedValueOnce(secondSession);
+    const adapter = createAdapter({
+      panelManager: {} as never,
+      transport: { openPanelSession } as never,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
+      deliverToPanel: jest.fn(),
+      getPanelLease: jest.fn(() => ({
+        runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+        connectionId: "conn-a",
+      })),
+    });
+
+    await adapter.handle("panel:tree/panel-a", "postEnvelope", [
+      panelRequestEnvelope("msg-1"),
+    ]);
+    await waitFor(() =>
+      expect(firstSession.send).toHaveBeenCalledWith(
+        stampedPanelEnvelope("msg-1"),
+      ),
+    );
+
+    firstClosed = true;
+    await adapter.handle("panel:tree/panel-a", "postEnvelope", [
+      panelRequestEnvelope("msg-2"),
+    ]);
+    await waitFor(() =>
+      expect(secondSession.send).toHaveBeenCalledWith(
+        stampedPanelEnvelope("msg-2"),
+      ),
+    );
+
+    expect(openPanelSession).toHaveBeenCalledTimes(2);
+    expect(openPanelSession).toHaveBeenNthCalledWith(
+      1,
+      "panel:runtime-a",
+      "conn-a",
+    );
+    expect(openPanelSession).toHaveBeenNthCalledWith(
+      2,
+      "panel:runtime-a",
+      "conn-a",
+    );
+    expect(firstSession.close).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("closes and reopens the panel session when the runtime lease key changes", async () => {
+    const warnSpy = jest
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    let lease = {
+      runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+      connectionId: "conn-a",
+    };
+    const firstSession = makePanelSession();
+    const secondSession = makePanelSession({
+      callerId: jest.fn(() => "panel:runtime-a"),
+    });
+    const openPanelSession = jest
+      .fn()
+      .mockResolvedValueOnce(firstSession)
+      .mockResolvedValueOnce(secondSession);
+    const adapter = createAdapter({
+      panelManager: {} as never,
+      transport: { openPanelSession } as never,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
+      deliverToPanel: jest.fn(),
+      getPanelLease: jest.fn(() => lease),
+    });
+
+    await adapter.handle("panel:tree/panel-a", "postEnvelope", [
+      panelRequestEnvelope("msg-1"),
+    ]);
+    await waitFor(() =>
+      expect(firstSession.send).toHaveBeenCalledWith(
+        stampedPanelEnvelope("msg-1"),
+      ),
+    );
+
+    lease = {
+      runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+      connectionId: "conn-b",
+    };
+    await adapter.handle("panel:tree/panel-a", "postEnvelope", [
+      panelRequestEnvelope("msg-2"),
+    ]);
+    await waitFor(() =>
+      expect(secondSession.send).toHaveBeenCalledWith(
+        stampedPanelEnvelope("msg-2"),
+      ),
+    );
+
+    expect(openPanelSession).toHaveBeenCalledTimes(2);
+    expect(openPanelSession).toHaveBeenNthCalledWith(
+      1,
+      "panel:runtime-a",
+      "conn-a",
+    );
+    expect(openPanelSession).toHaveBeenNthCalledWith(
+      2,
+      "panel:runtime-a",
+      "conn-b",
+    );
+    expect(firstSession.close).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("closes a cached session when the panel no longer has a runtime lease", async () => {
+    let hasLease = true;
+    const session = makePanelSession();
+    const adapter = createAdapter({
+      panelManager: {} as never,
+      transport: { openPanelSession: jest.fn(async () => session) } as never,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
+      deliverToPanel: jest.fn(),
+      getPanelLease: jest.fn(() =>
+        hasLease
+          ? {
+              runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+              connectionId: "conn-a",
+            }
+          : undefined,
+      ),
+    });
+
+    await adapter.handle("panel:tree/panel-a", "postEnvelope", [
+      panelRequestEnvelope("msg-1"),
+    ]);
+    await waitFor(() =>
+      expect(session.send).toHaveBeenCalledWith(stampedPanelEnvelope("msg-1")),
+    );
+
+    hasLease = false;
+    await expect(
+      adapter.handle("panel:tree/panel-a", "postEnvelope", [
+        panelRequestEnvelope("msg-2"),
+      ]),
+    ).rejects.toThrow("has no runtime lease yet");
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+// §1.6 upload hop: a panel's streaming request body crosses the postMessage
+// bridge as base64 chunk messages, reassembles host-side, and feeds the panel
+// session's streamReadable(); the response streams back through deliverToPanel
+// tagged __vibestudioBridgeStream, ack-gated.
+describe("bridgeAdapter upload streams", () => {
+  const PANEL = "panel:tree/panel-a";
+
+  function streamRequestEnvelope(): RpcEnvelope {
+    const caller = { callerId: "panel:forged", callerKind: "panel" as const };
+    return {
+      from: caller.callerId,
+      target: "main",
+      delivery: { caller },
+      provenance: [caller],
+      message: {
+        type: "stream-request",
+        requestId: "sreq-1",
+        fromId: caller.callerId,
+        method: "gateway.fetch",
+        args: [{ path: "/upload" }],
+      },
+    };
+  }
+
+  function base64Of(bytes: Uint8Array): string {
+    return Buffer.from(bytes).toString("base64");
+  }
+
+  async function drainStream(
+    stream: ReadableStream<Uint8Array>,
+  ): Promise<Uint8Array> {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
+    }
+    return Uint8Array.from(chunks.flatMap((chunk) => [...chunk]));
+  }
+
+  function makeUploadFixture(overrides?: {
+    streamReadable?: jest.Mock;
+    session?: Partial<IrohClientSession>;
+  }) {
+    const seen: { body?: Uint8Array; envelope?: RpcEnvelope } = {};
+    const streamReadable =
+      overrides?.streamReadable ??
+      jest.fn(
+        async (
+          envelope: RpcEnvelope,
+          _signal: AbortSignal,
+          body: ReadableStream<Uint8Array>,
+        ) => {
+          seen.envelope = envelope;
+          seen.body = await drainStream(body);
+          return {
+            status: 201,
+            statusText: "Created",
+            headers: [["content-type", "application/json"]],
+            finalUrl: "http://gw/upload",
+            body: new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new Uint8Array([9, 9]));
+                controller.close();
+              },
+            }),
+          };
+        },
+      );
+    const session = makePanelSession({
+      streamReadable,
+      ...overrides?.session,
+    } as never);
+    const delivered: Array<{
+      __vibestudioBridgeStream: boolean;
+      msg: { kind: string; opId?: string; seq?: number };
+    }> = [];
+    // Auto-ack response chunks like the injected panel bootstrap does.
+    const adapterBox: { current?: ReturnType<typeof createAdapter> } = {};
+    const deliverToPanel = jest.fn((_panelId: string, payload: unknown) => {
+      const tagged = payload as (typeof delivered)[number];
+      delivered.push(tagged);
+      if (tagged?.msg?.kind === "chunk") {
+        void adapterBox.current?.handle(PANEL, "streamAck", [
+          tagged.msg.opId,
+          tagged.msg.seq,
+        ]);
+      }
+    });
+    const adapter = createAdapter({
+      panelManager: {} as never,
+      transport: { openPanelSession: jest.fn(async () => session) } as never,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
+      deliverToPanel,
+      getPanelLease: jest.fn(() => ({
+        runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+        connectionId: "conn-a",
+      })),
+    });
+    adapterBox.current = adapter;
+    return { adapter, delivered, seen, streamReadable };
+  }
+
+  it("relays an upload: base64 body in, tagged ack-gated response out", async () => {
+    const { adapter, delivered, seen, streamReadable } = makeUploadFixture();
+
+    await adapter.handle(PANEL, "streamOpen", [
+      { opId: "op-1", envelope: streamRequestEnvelope(), bodyId: "b-1" },
+    ]);
+    await adapter.handle(PANEL, "streamBodyChunk", [
+      { bodyId: "b-1", seq: 1, chunk: base64Of(new Uint8Array([1, 2, 3])) },
+    ]);
+    await adapter.handle(PANEL, "streamBodyChunk", [
+      { bodyId: "b-1", seq: 2, done: true },
+    ]);
+
+    await waitFor(() => expect(delivered.at(-1)?.msg.kind).toBe("end"));
+    expect(streamReadable).toHaveBeenCalledTimes(1);
+    expect(seen.body).toEqual(new Uint8Array([1, 2, 3]));
+    expect(seen.envelope).toEqual(
+      expect.objectContaining({
+        from: "panel:runtime-a",
+        delivery: expect.objectContaining({
+          caller: { callerId: "panel:runtime-a", callerKind: "panel" },
+        }),
+        provenance: [{ callerId: "panel:runtime-a", callerKind: "panel" }],
+        message: expect.objectContaining({
+          requestId: "sreq-1",
+          fromId: "panel:runtime-a",
+        }),
+      }),
+    );
+    expect(delivered[0]).toMatchObject({
+      __vibestudioBridgeStream: true,
+      msg: { kind: "head", opId: "op-1", status: 201 },
+    });
+    const chunk = delivered.find((entry) => entry.msg.kind === "chunk");
+    expect(chunk?.msg).toMatchObject({
+      opId: "op-1",
+      seq: 1,
+      chunk: base64Of(new Uint8Array([9, 9])),
+    });
+  });
+
+  it("rejects body chunks with no open upload stream (fail-loud ack)", async () => {
+    const { adapter } = makeUploadFixture();
+    await expect(
+      adapter.handle(PANEL, "streamBodyChunk", [
+        { bodyId: "nope", seq: 1, chunk: base64Of(new Uint8Array([1])) },
+      ]),
+    ).rejects.toThrow(/No open bridge upload stream/);
+  });
+
+  it("streamAbort aborts the in-flight session stream", async () => {
+    let seenSignal: AbortSignal | null = null;
+    const streamReadable = jest.fn(
+      (_envelope: unknown, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          seenSignal = signal;
+          signal.addEventListener("abort", () =>
+            reject(new Error("aborted upstream")),
+          );
+        }),
+    );
+    const { adapter } = makeUploadFixture({ streamReadable });
+
+    await adapter.handle(PANEL, "streamOpen", [
+      { opId: "op-1", envelope: streamRequestEnvelope(), bodyId: "b-1" },
+    ]);
+    await waitFor(() => expect(streamReadable).toHaveBeenCalled());
+    await adapter.handle(PANEL, "streamAbort", ["op-1"]);
+
+    await waitFor(() => expect(seenSignal?.aborted).toBe(true));
+    await expect(
+      adapter.handle(PANEL, "streamBodyChunk", [
+        { bodyId: "b-1", seq: 1, chunk: base64Of(new Uint8Array([1])) },
+      ]),
+    ).rejects.toThrow(/unknown bodyId/);
+  });
+
+  it("fails loudly when the panel session cannot stream a request body", async () => {
+    const { adapter, delivered } = makeUploadFixture({
+      streamReadable: undefined as never,
+      session: { streamReadable: undefined },
+    });
+
+    await adapter.handle(PANEL, "streamOpen", [
+      { opId: "op-1", envelope: streamRequestEnvelope(), bodyId: "b-1" },
+    ]);
+
+    await waitFor(() => expect(delivered.at(-1)?.msg.kind).toBe("error"));
+    expect((delivered.at(-1)?.msg as { message?: string }).message).toMatch(
+      /require the Iroh transport/,
+    );
+  });
+
+  it("closePanelSession tears down the panel's upload relay", async () => {
+    const streamReadable = jest.fn(
+      (_envelope: unknown, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("closed")));
+        }),
+    );
+    const { adapter } = makeUploadFixture({ streamReadable });
+
+    await adapter.handle(PANEL, "streamOpen", [
+      { opId: "op-1", envelope: streamRequestEnvelope(), bodyId: "b-1" },
+    ]);
+    await waitFor(() => expect(streamReadable).toHaveBeenCalled());
+    adapter.closePanelSession(PANEL);
+
+    await expect(
+      adapter.handle(PANEL, "streamBodyChunk", [
+        { bodyId: "b-1", seq: 1, chunk: base64Of(new Uint8Array([1])) },
+      ]),
+    ).rejects.toThrow(/No open bridge upload stream/);
+  });
+});
+
+async function waitFor(assertion: () => void): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  throw lastError;
+}
+
+describe("bridgeAdapter native app navigation", () => {
+  function fixture() {
+    let lease = {
+      runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+      connectionId: "connection-a",
+    };
+    const session = makePanelSession();
+    const openPanelSession = jest.fn(async () => session);
+    const openShellSurface = jest.fn();
+    const deliverToPanel = jest.fn();
+    const adapter = createAdapter({
+      transport: {
+        selfId: "shell:device",
+        status: "connected",
+        openPanelSession,
+      } as never,
+      getPanelLease: () => lease,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface,
+      },
+      deliverToPanel,
+    });
+    const request = (method: string, args: unknown[] = []) => {
+      const envelope = panelRequestEnvelope("native-request");
+      if (envelope.message.type !== "request")
+        throw new Error("Expected request");
+      envelope.message.method = method;
+      envelope.message.args = args;
+      return envelope;
+    };
+    return {
+      adapter,
+      session,
+      openPanelSession,
+      openShellSurface,
+      deliverToPanel,
+      request,
+      replaceLease: () => {
+        lease = { ...lease, connectionId: "connection-b" };
+      },
+    };
+  }
+
+  it("authenticates the managed lease and replies with captured identity without relaying native navigation", async () => {
+    const f = fixture();
+    const target = { kind: "settings", section: "devices" };
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.openShellSurface", [target]),
+    ]);
+    expect(f.openPanelSession).toHaveBeenCalledWith(
+      "panel:runtime-a",
+      "connection-a",
+    );
+    expect(f.openShellSurface).toHaveBeenCalledWith(target);
+    expect(f.session.send).not.toHaveBeenCalled();
+    expect(f.deliverToPanel).toHaveBeenCalledWith(
+      "panel:tree/a",
+      expect.objectContaining({
+        from: "main",
+        target: "panel:runtime-a",
+        delivery: {
+          caller: {
+            callerId: "shell:device",
+            callerKind: "shell",
+            workspaceId: "workspace-a",
+          },
+        },
+        message: {
+          type: "response",
+          requestId: "native-request",
+          result: undefined,
+        },
+      }),
+    );
+  });
+
+  it("settles the real panel RPC client through the native response carrier", async () => {
+    const f = fixture();
+    let receive!: (envelope: RpcEnvelope) => void;
+    f.deliverToPanel.mockImplementation(
+      (_panelId: string, envelope: RpcEnvelope) => receive(envelope),
+    );
+    const rpc = createRpcClient({
+      selfId: "panel:runtime-a",
+      callerKind: "panel",
+      transport: {
+        send: async (envelope) => {
+          await f.adapter.handle("panel:tree/a", "postEnvelope", [envelope]);
+        },
+        onMessage: (handler) => {
+          receive = handler;
+          return () => {};
+        },
+      },
+    });
+    await expect(
+      rpc.call("main", "app.describeShellSurfaces", []),
+    ).resolves.toEqual({ surfaces: ["settings", "workspace-chooser"] });
+    await expect(
+      rpc.call("main", "app.openShellSurface", [
+        { kind: "settings", section: "connection" },
+      ]),
+    ).resolves.toBeUndefined();
+    expect(f.openShellSurface).toHaveBeenCalledWith({
+      kind: "settings",
+      section: "connection",
+    });
+    await expect(
+      rpc.call("main", "app.openShellSurface", [
+        { kind: "settings", section: "apps" },
+      ]),
+    ).rejects.toThrow("Mobile settings do not include");
+    expect(f.session.send).not.toHaveBeenCalled();
+  });
+
+  it("describes only supported mobile native surfaces", async () => {
+    const f = fixture();
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.describeShellSurfaces"),
+    ]);
+    expect(f.deliverToPanel).toHaveBeenCalledWith(
+      "panel:tree/a",
+      expect.objectContaining({
+        message: {
+          type: "response",
+          requestId: "native-request",
+          result: { surfaces: ["settings", "workspace-chooser"] },
+        },
+      }),
+    );
+    expect(f.openShellSurface).not.toHaveBeenCalled();
+  });
+
+  it("returns the mobile host's truthful app and connection information", async () => {
+    const f = fixture();
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.getInfo"),
+    ]);
+    expect(f.deliverToPanel).toHaveBeenCalledWith(
+      "panel:tree/a",
+      expect.objectContaining({
+        message: {
+          type: "response",
+          requestId: "native-request",
+          result: {
+            version: "0.1.0",
+            connectionMode: "remote",
+            connectionStatus: "connected",
+            remoteTransport: null,
+          },
+        },
+      }),
+    );
+    expect(f.session.send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: "about", page: "new" },
+    { kind: "settings", section: "apps" },
+    { kind: "settings", section: 42 },
+  ])(
+    "returns an error for an unsupported or malformed surface %j",
+    async (target) => {
+      const f = fixture();
+      await f.adapter.handle("panel:tree/a", "postEnvelope", [
+        f.request("app.openShellSurface", [target]),
+      ]);
+      expect(f.openShellSurface).not.toHaveBeenCalled();
+      expect(f.session.send).not.toHaveBeenCalled();
+      expect(f.deliverToPanel).toHaveBeenCalledWith(
+        "panel:tree/a",
+        expect.objectContaining({
+          message: expect.objectContaining({
+            type: "response",
+            requestId: "native-request",
+            error: expect.any(String),
+          }),
+        }),
+      );
+    },
+  );
+
+  it("rejects cross-workspace addressing without executing native navigation", async () => {
+    const f = fixture();
+    const envelope = f.request("app.openShellSurface", [{ kind: "settings" }]);
+    envelope.destination = { kind: "workspace", workspaceId: "workspace-b" };
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [envelope]);
+    expect(f.openShellSurface).not.toHaveBeenCalled();
+    expect(f.deliverToPanel).toHaveBeenCalledWith(
+      "panel:tree/a",
+      expect.objectContaining({
+        message: expect.objectContaining({
+          errorCode: "EACCES",
+          errorKind: "access",
+        }),
+      }),
+    );
+  });
+
+  it("does not navigate or reply into a replacement after session validation awaits", async () => {
+    const f = fixture();
+    let resolve!: (session: IrohClientSession) => void;
+    f.openPanelSession.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.openShellSurface", [{ kind: "settings" }]),
+    ]);
+    f.replaceLease();
+    resolve(f.session);
+    await expect(pending).rejects.toThrow("no longer hosted here");
+    expect(f.openShellSurface).not.toHaveBeenCalled();
+    expect(f.deliverToPanel).not.toHaveBeenCalled();
+  });
+});

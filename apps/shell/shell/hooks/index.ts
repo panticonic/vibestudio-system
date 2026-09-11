@@ -1,0 +1,57 @@
+/**
+ * Shell Hooks - React hooks for shell functionality.
+ *
+ * These hooks provide access to panel tree data and other shell features.
+ */
+
+// Panel tree hooks - synchronous, derived from event-based context
+export {
+  PanelTreeProvider,
+  usePanelTree,
+  useRootPanels,
+  useSiblings,
+  useAncestors,
+  useFullPanel,
+  useDescendantSiblingGroups,
+  flattenTree,
+  getProjection,
+  removeChildrenOf,
+  findParentAtDepth,
+  type PanelTreeViewNode,
+  type PanelSummary,
+  type PanelAncestor,
+  type DescendantSiblingGroup,
+  type FullPanel,
+  type FlattenedPanel,
+} from "./PanelTreeContext.js";
+
+// Placement drags: one owner for "a panel is being dragged into a position"
+export {
+  LayoutDragProvider,
+  useLayoutDrag,
+  type PanelDragSource,
+  type PlacementHost,
+} from "./LayoutDragContext.js";
+
+// Drag-and-drop context for panel tree
+export {
+  PanelDndProvider,
+  usePanelDndTree,
+  usePanelDndDrag,
+  INDENTATION_WIDTH,
+  END_DROP_ZONE_ID,
+} from "./PanelDndContext.js";
+
+// Workspace user presence (WP8 §4) — colours/labels the forest owner bands.
+export {
+  useWorkspacePresence,
+  type WorkspacePresenceEntry,
+  type WorkspacePresenceByUser,
+} from "./useWorkspacePresence.js";
+
+export {
+  useAccountProfiles,
+  useCurrentAccountProfile,
+  type CurrentAccountProfileState,
+  type ShellAccountProfile,
+} from "./useAccountProfiles.js";
