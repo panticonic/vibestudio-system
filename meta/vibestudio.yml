@@ -43,26 +43,6 @@ services:
       - vibestudio.images.v1
     source: workers/images
     title: Generated image assets
-  - action: run workspace tests and record results
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-        - session
-    description: Run this workspace's test suite and record results.
-    durableObject:
-      className: TestkitDriverDO
-    name: testkit-driver
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: act
-    protocols:
-      - vibestudio.testkit-driver.v1
-    source: workers/testkit-driver
-    title: Test runner
   - action: manage connected phones
     authority:
       binding: declared
@@ -105,9 +85,6 @@ singletonObjects:
   - className: ImagesDO
     key: workspace-images
     source: workers/images
-  - className: TestkitDriverDO
-    key: workspace-testkit-driver
-    source: workers/testkit-driver
   - className: PhoneProvisioningDO
     key: workspace-phone-provisioning
     source: workers/phone-provisioning
@@ -140,25 +117,19 @@ template:
     - extensions/mobile-debug
     - extensions/react-native
     - extensions/typecheck-service
-    - packages/agentic-session
     - packages/mobile-navigation
     - packages/terminal-host-protocol
     - packages/workspace-transfer
     - skills/appdev
     - skills/local-models
-    - skills/mobile-system-testing
     - skills/performance
     - skills/phone-setup
     - skills/remote-access
     - skills/server-logs
-    - skills/system-testing
     - workers/development
     - workers/images
     - workers/phone-provisioning
     - workers/system-agent
-    - workers/system-test-runner
-    - workers/test-agent
-    - workers/testkit-driver
 trust:
   chromeApps:
     - apps/shell
