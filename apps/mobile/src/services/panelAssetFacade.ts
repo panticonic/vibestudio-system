@@ -33,7 +33,6 @@
 
 import TcpSocket from "react-native-tcp-socket";
 import { Buffer } from "buffer";
-import type { ReadableStream } from "node:stream/web";
 import {
   FORWARD_REQUEST_HEADERS,
   STRIP_RESPONSE_HEADERS,

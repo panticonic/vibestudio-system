@@ -49,6 +49,15 @@ export class TestRunner {
   private cancellationError: Error | null = null;
   private readonly activeWaits = new Set<AbortController>();
   private wakeSuiteSchedulers: (() => void) | null = null;
+  /** Test agents executing on this instance right now. Wall-clock delivery
+   * budgets are only meaningful when a test had the instance to itself, so
+   * each test records the most company it actually had. */
+  private activeTestExecutions = 0;
+  /** In-flight executions watching that count. A test that is merely overlapped
+   * in the middle — started alone, finished alone — shared the instance just as
+   * much as one that started alongside another, so every execution has to see
+   * each arrival rather than only sampling its own endpoints. */
+  private readonly concurrencyObservers = new Set<(active: number) => void>();
 
   constructor(
     private runner: HeadlessRunner,
@@ -250,6 +259,25 @@ export class TestRunner {
   async runOne(
     test: TestCase,
   ): Promise<{ result: TestResult; execution: TestExecutionResult }> {
+    this.activeTestExecutions += 1;
+    let peak = this.activeTestExecutions;
+    const observe = (active: number): void => {
+      peak = Math.max(peak, active);
+    };
+    this.concurrencyObservers.add(observe);
+    for (const watcher of this.concurrencyObservers) watcher(this.activeTestExecutions);
+    try {
+      return await this.runOneExecution(test, () => peak);
+    } finally {
+      this.concurrencyObservers.delete(observe);
+      this.activeTestExecutions -= 1;
+    }
+  }
+
+  private async runOneExecution(
+    test: TestCase,
+    observeConcurrency: () => number,
+  ): Promise<{ result: TestResult; execution: TestExecutionResult }> {
     const startTime = Date.now();
     const testTimeoutMs =
       this.opts?.testTimeoutMs ??
@@ -369,19 +397,28 @@ export class TestRunner {
           ),
         };
       };
+      // An orchestrator does more than take agent turns: it spawns sessions,
+      // drives panels, and waits on the harness. Only the turns carried the
+      // test deadline, so anything else that failed to settle ran forever —
+      // one cdp scenario held a run in `orchestration` for five and a half
+      // hours. `timeoutMs` bounds the test, not just its turns.
       const execution = test.orchestrate
-        ? await test.orchestrate({
-            runner: testRunner,
-            remainingTimeMs,
-            sendAndWait: async (targetSession, prompt, phase) => {
-              const completed = await sendAndCapture(
-                targetSession,
-                prompt,
-                phase,
-              );
-              return completed.response;
-            },
-          })
+        ? await this.withTimeout(
+            test.orchestrate({
+              runner: testRunner,
+              remainingTimeMs,
+              sendAndWait: async (targetSession, prompt, phase) => {
+                const completed = await sendAndCapture(
+                  targetSession,
+                  prompt,
+                  phase,
+                );
+                return completed.response;
+              },
+            }),
+            remainingTimeMs(),
+            `Timed out running test "${test.name}": its orchestration did not settle within ${testTimeoutMs}ms`,
+          )
         : await (async (): Promise<TestExecutionResult> => {
             session = await testRunner.spawn();
             enterPhase("agent-turn");
@@ -531,6 +568,10 @@ export class TestRunner {
           outcome.execution.diagnostics = {
             ...(outcome.execution.diagnostics ?? {}),
             ...sharedDiagnostics,
+            // Recorded with the measurement so every later reader — the
+            // bounded failure packet and the trajectory alike — reaches the
+            // same verdict without re-deriving how loaded the instance was.
+            concurrentTestAgents: observeConcurrency(),
           };
           const latencyViolations = channelDeliveryLatencyViolations(
             outcome.execution.diagnostics,
@@ -793,6 +834,33 @@ export class TestRunner {
             `expected each turn to use primary-only calls or ${policy.primaryModel} calls ending in failure followed only by ${fallbackModel}`,
         );
       }
+      // The transition check already knows which turns fell back; report them
+      // so the run record answers what happened, rather than only refusing a
+      // transition that should not have.
+      if (fallbackModel && typeof this.runner.recordModelFallbackActivations === "function") {
+        const observed = [...callsByTurn.values()].flatMap((turnCalls) => {
+          const refs = turnCalls.map((call) => String(call?.["ref"] ?? ""));
+          const fallbackIndex = refs.indexOf(fallbackModel);
+          if (fallbackIndex <= 0) return [];
+          const failedPrimary = turnCalls[fallbackIndex - 1];
+          const fallbackCall = turnCalls[fallbackIndex];
+          return [
+            {
+              at: String(
+                fallbackCall?.["startedAt"] ?? failedPrimary?.["completedAt"] ?? "",
+              ),
+              fromModel: policy.primaryModel,
+              toModel: fallbackModel,
+              failureCode: String(
+                failedPrimary?.["error"] ?? configuredFallbackTrigger(policy) ?? "unknown",
+              ),
+            },
+          ];
+        });
+        if (observed.length > 0) {
+          this.runner.recordModelFallbackActivations(session, testName, observed);
+        }
+      }
     }
     const metered = calls.some((call) => {
       const usage = asRecord(call?.["usage"]);
@@ -819,6 +887,19 @@ export class TestRunner {
     }
     return evidence;
   }
+}
+
+/**
+ * The configured trigger, used only when a failed call carries no error text.
+ * The policy declares this as a list, but a caller-supplied policy view may
+ * carry the single trigger as a string — indexing that would yield a letter.
+ */
+function configuredFallbackTrigger(policy: {
+  fallbackOn?: readonly string[] | string | null;
+}): string | null {
+  const configured = policy.fallbackOn;
+  if (Array.isArray(configured)) return configured[0] ?? null;
+  return typeof configured === "string" ? configured : null;
 }
 
 function recordCleanupFailure(

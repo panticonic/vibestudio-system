@@ -96,7 +96,7 @@ the template so it is available for debugging, but it stays dormant until the sh
 `runtime.supervision.activate({ kind: "app", releaseId:
 "@workspace-apps/remote-cli" })` starts it.
 
-Initial source comes from the selected distribution's explicit inventory:
+Initial source comes from the selected template's explicit inventory:
 Personal and System have different source sets. Importing or copying source
 does not copy approvals or grants. Unit admission, capability changes, source
 changes, dependency changes, and target changes use the normal approval path.

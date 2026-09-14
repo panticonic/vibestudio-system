@@ -147,6 +147,15 @@ export interface FailureDiagnostic {
     counteractedChangeCount: number;
   } | null;
   channelDeliveryLatency: ChannelDeliveryLatencySummary | null;
+  /**
+   * Whatever an orchestrated scenario recorded for itself.
+   *
+   * An orchestrator's validator often grades harness-collected evidence rather
+   * than the trajectory — grant snapshots, phase coordinates, probe readings.
+   * Dropping that from the failure report leaves the one reason the test
+   * failed the only thing a reader cannot see.
+   */
+  orchestration: Record<string, string> | null;
   participants: Array<{
     id: string;
     name?: string;
@@ -261,7 +270,7 @@ function summarizeFailure(
       .slice(-limits.invocations)
       .map((failure) => ({
         ...failure,
-        ...(failure.error ? { error: clip(failure.error, limits.text) } : {}),
+        ...(failure.error ? { error: windowText(failure.error, limits.text) } : {}),
       })),
     trajectoryReview: entryExecution["trajectoryReview"] ?? null,
     debugEvents,
@@ -269,6 +278,7 @@ function summarizeFailure(
     cleanupFailures: entryExecution["cleanupFailures"] ?? [],
     workspaceRepoFixture: summarizeWorkspaceRepoFixture(entryExecution["diagnostics"]),
     channelDeliveryLatency,
+    orchestration: summarizeOrchestrationDiagnostics(entryExecution["diagnostics"], limits),
     participants,
     likelyIssue: entry.result.passed
       ? unexpectedToolFailures.length > 0
@@ -282,6 +292,30 @@ function summarizeFailure(
           channelDeliveryLatency?.violations ?? []
         ),
   };
+}
+
+/** Keys with their own dedicated summary above; everything else is carried. */
+const SUMMARIZED_DIAGNOSTIC_KEYS = new Set([
+  "workspaceRepoFixture",
+  "channelDeliveryLatency",
+]);
+
+function summarizeOrchestrationDiagnostics(
+  diagnostics: TestSuiteResultEntry["execution"]["diagnostics"],
+  limits: DiagnosticLimits,
+): FailureDiagnostic["orchestration"] {
+  if (!diagnostics) return null;
+  const carried: Record<string, string> = {};
+  for (const [key, value] of Object.entries(diagnostics)) {
+    if (SUMMARIZED_DIAGNOSTIC_KEYS.has(key) || value === undefined) continue;
+    // Windowed, not head-clipped, for the same reason a tool error is: this is
+    // structured evidence a validator graded on, and the field that explains a
+    // verdict is as likely to sit at the end as the start. A scheduled-
+    // automation record lost its `notifications` array to a head clip while
+    // keeping the `runs` that were never in question.
+    carried[key] = windowText(safeJson(value), limits.text);
+  }
+  return Object.keys(carried).length > 0 ? carried : null;
 }
 
 function summarizeWorkspaceRepoFixture(
@@ -637,6 +671,22 @@ function safeJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * Keep both ends of an error, because a head-clip drops the diagnosis.
+ *
+ * Tool errors lead with a preamble and an absolute path — "Build failed with 1
+ * error:" plus a hundred characters of workspace path — and say which file and
+ * what went wrong only after that. Clipping the head kept the sentence every
+ * build failure shares and threw away the one part that differed.
+ */
+function windowText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  const head = Math.floor(limit * 0.45);
+  const tail = limit - head;
+  const elided = value.length - limit;
+  return `${value.slice(0, head)}… [${elided} chars elided] …${value.slice(value.length - tail)}`;
 }
 
 function clip(value: string, limit: number): string {

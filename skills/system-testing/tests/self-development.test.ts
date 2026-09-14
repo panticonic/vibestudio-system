@@ -12,7 +12,7 @@ function execution(
     method: string;
     result: unknown;
   }>,
-  prerequisite = { available: true, reason: null as string | null }
+  prerequisite = { available: true, reason: null as string | null },
 ): TestExecutionResult {
   return {
     duration: 0,
@@ -22,14 +22,16 @@ function execution(
         scenario,
         source: "system-test-harness",
         operations,
-        prerequisite
-      }
-    }
+        prerequisite,
+      },
+    },
   };
 }
 
 function validate(name: string, value: unknown) {
-  const test = selfDevelopmentTests.find((candidate) => candidate.name === name);
+  const test = selfDevelopmentTests.find(
+    (candidate) => candidate.name === name,
+  );
   if (!test) throw new Error(`Missing ${name}`);
   const operations: Array<{
     service: "development" | "vcs" | "attachedHosts";
@@ -40,7 +42,7 @@ function validate(name: string, value: unknown) {
     operations.unshift({
       service: "vcs",
       method: "edit",
-      result: { applicationId: "application:dirty" }
+      result: { applicationId: "application:dirty" },
     });
   }
   if (name === "self-development-native-checkpoint") {
@@ -53,9 +55,9 @@ function validate(name: string, value: unknown) {
           executorId: "executor",
           available: true,
           unavailableReason: null,
-          interactiveTerminal: true
-        }
-      ]
+          interactiveTerminal: true,
+        },
+      ],
     });
   }
   if (name === "self-development-build-failure-recovery") {
@@ -68,18 +70,18 @@ function validate(name: string, value: unknown) {
       {
         service: "development",
         method: "faultFailBuildAfterSnapshotRetained",
-        result: evidence.armed
+        result: evidence.armed,
       },
       {
         service: "development",
         method: "events",
-        result: { events: evidence.events, nextAfter: null }
+        result: { events: evidence.events, nextAfter: null },
       },
       {
         service: "development",
         method: "retry",
-        result: evidence.recovered
-      }
+        result: evidence.recovered,
+      },
     );
   }
   if (name === "self-development-child-eval") {
@@ -88,9 +90,9 @@ function validate(name: string, value: unknown) {
       {
         service: "attachedHosts",
         method: "eval.start",
-        result: evidence.started
+        result: evidence.started,
       },
-      { service: "attachedHosts", method: "eval.get", result: evidence.result }
+      { service: "attachedHosts", method: "eval.get", result: evidence.result },
     );
   }
   if (name === "self-development-child-approval") {
@@ -102,13 +104,13 @@ function validate(name: string, value: unknown) {
       {
         service: "attachedHosts",
         method: "permissions.list",
-        result: evidence.invocation
+        result: evidence.invocation,
       },
       {
         service: "attachedHosts",
         method: "listApprovalAudit.after",
-        result: { events: evidence.events, nextCursor: null }
-      }
+        result: { events: evidence.events, nextCursor: null },
+      },
     );
   }
   return test.validate(execution(name, operations));
@@ -117,7 +119,9 @@ function validate(name: string, value: unknown) {
 describe("self-development semantic validators", () => {
   it("classifies every receipt-driven scenario as harness validation", () => {
     expect(selfDevelopmentTests).not.toHaveLength(0);
-    expect(selfDevelopmentTests.every((test) => test.validation === "harness")).toBe(true);
+    expect(
+      selfDevelopmentTests.every((test) => test.validation === "harness"),
+    ).toBe(true);
   });
 
   it("binds a current-host client to typed ready attestation", () => {
@@ -127,7 +131,7 @@ describe("self-development semantic validators", () => {
       target: {
         kind: "client-device",
         client: "electron",
-        executorId: "shell:desktop"
+        executorId: "shell:desktop",
       },
       snapshot: {
         snapshotDigest: digest("a"),
@@ -136,13 +140,13 @@ describe("self-development semantic validators", () => {
           pairDigest: digest("c"),
           host: {
             repositoryId: "repository",
-            materializedTreeDigest: digest("d")
+            materializedTreeDigest: digest("d"),
           },
           base: {
             repositoryId: "base-repository",
-            materializedTreeDigest: digest("e")
-          }
-        }
+            materializedTreeDigest: digest("e"),
+          },
+        },
       },
       artifact: { executionDigest: digest("b") },
       client: {
@@ -150,11 +154,14 @@ describe("self-development semantic validators", () => {
         providerId: "desktop",
         childRuntimeId: "app:child",
         attestedAt: 2,
-        executionDigest: digest("b")
-      }
+        executionDigest: digest("b"),
+      },
     };
     expect(validate("self-development-current-client", run).passed).toBe(true);
-    expect(validate("self-development-current-client", { ...run, client: null }).passed).toBe(false);
+    expect(
+      validate("self-development-current-client", { ...run, client: null })
+        .passed,
+    ).toBe(false);
   });
 
   it("joins isolated readiness and route to one generation", () => {
@@ -166,14 +173,14 @@ describe("self-development semantic validators", () => {
       instance: {
         state: "ready",
         generationId: generation,
-        executionDigest: digest("a")
+        executionDigest: digest("a"),
       },
       artifact: { executionDigest: digest("a") },
       attachedHost: {
         state: "ready",
         childGenerationId: generation,
-        authorityCeilingDigest: digest("b")
-      }
+        authorityCeilingDigest: digest("b"),
+      },
     };
     expect(validate("self-development-isolated-host", run).passed).toBe(true);
     expect(
@@ -181,9 +188,9 @@ describe("self-development semantic validators", () => {
         ...run,
         attachedHost: {
           ...run.attachedHost,
-          childGenerationId: "2".repeat(32)
-        }
-      }).passed
+          childGenerationId: "2".repeat(32),
+        },
+      }).passed,
     ).toBe(false);
   });
 
@@ -196,9 +203,9 @@ describe("self-development semantic validators", () => {
         basis: {
           parentWorkingHead: {
             kind: "application",
-            applicationId: "application:dirty"
-          }
-        }
+            applicationId: "application:dirty",
+          },
+        },
       },
       run: {
         sessionId: "session",
@@ -215,13 +222,13 @@ describe("self-development semantic validators", () => {
               repoPath: "projects/vibestudio",
               repositoryState: {
                 kind: "application",
-                applicationId: "application:dirty"
+                applicationId: "application:dirty",
               },
               materializedTreeDigest: digest("e"),
-              contentRoot: `state:${digest("b")}`
+              contentRoot: `state:${digest("b")}`,
             },
-            base: { repositoryId: "base", materializedTreeDigest: digest("f") }
-          }
+            base: { repositoryId: "base", materializedTreeDigest: digest("f") },
+          },
         },
         artifact: {
           executionDigest: digest("c"),
@@ -231,19 +238,27 @@ describe("self-development semantic validators", () => {
             contentRoots: [
               {
                 repoPath: "projects/vibestudio",
-                stateHash: `state:${digest("b")}`
-              }
-            ]
-          }
-        }
-      }
+                stateHash: `state:${digest("b")}`,
+              },
+            ],
+          },
+        },
+      },
     };
-    expect(validate("self-development-dirty-semantic-state", value).passed).toBe(true);
-    value.run.snapshot.pair.host.repositoryState.applicationId = "application:other";
-    expect(validate("self-development-dirty-semantic-state", value).passed).toBe(false);
-    value.run.snapshot.pair.host.repositoryState.applicationId = "application:dirty";
+    expect(
+      validate("self-development-dirty-semantic-state", value).passed,
+    ).toBe(true);
+    value.run.snapshot.pair.host.repositoryState.applicationId =
+      "application:other";
+    expect(
+      validate("self-development-dirty-semantic-state", value).passed,
+    ).toBe(false);
+    value.run.snapshot.pair.host.repositoryState.applicationId =
+      "application:dirty";
     value.run.state = "failed";
-    expect(validate("self-development-dirty-semantic-state", value).passed).toBe(false);
+    expect(
+      validate("self-development-dirty-semantic-state", value).passed,
+    ).toBe(false);
   });
 
   it("requires one exact checkpoint import in the development child", () => {
@@ -260,14 +275,18 @@ describe("self-development semantic validators", () => {
           imported: {
             contextId: "child",
             eventId: "event:checkpoint",
-            importedRepositoryIds: ["repository:projects/vibestudio"]
-          }
-        }
-      }
+            importedRepositoryIds: ["repository:projects/vibestudio"],
+          },
+        },
+      },
     };
-    expect(validate("self-development-native-checkpoint", session).passed).toBe(true);
+    expect(validate("self-development-native-checkpoint", session).passed).toBe(
+      true,
+    );
     session.native.lastCheckpoint.imported.contextId = "parent";
-    expect(validate("self-development-native-checkpoint", session).passed).toBe(false);
+    expect(validate("self-development-native-checkpoint", session).passed).toBe(
+      false,
+    );
   });
 
   it("joins failure and recovery by the same run id", () => {
@@ -276,14 +295,14 @@ describe("self-development semantic validators", () => {
         faultId: "fault",
         runId: "run",
         phase: "after-snapshot-retained",
-        armedAt: 1
+        armedAt: 1,
       },
       failed: {
         runId: "run",
         state: "failed",
         repair: {
           retryable: true,
-          primaryError: { code: "ESYSTEMTEST_INJECTED_BUILD" }
+          primaryError: { code: "ESYSTEMTEST_INJECTED_BUILD" },
         },
         commitPoint: "snapshot-retained",
         snapshot: {
@@ -292,9 +311,9 @@ describe("self-development semantic validators", () => {
             kind: "combined",
             pairDigest: digest("b"),
             host: { repositoryId: "host", materializedTreeDigest: digest("c") },
-            base: { repositoryId: "base", materializedTreeDigest: digest("d") }
-          }
-        }
+            base: { repositoryId: "base", materializedTreeDigest: digest("d") },
+          },
+        },
       },
       recovered: {
         runId: "run",
@@ -306,9 +325,9 @@ describe("self-development semantic validators", () => {
             kind: "combined",
             pairDigest: digest("b"),
             host: { repositoryId: "host", materializedTreeDigest: digest("c") },
-            base: { repositoryId: "base", materializedTreeDigest: digest("d") }
-          }
-        }
+            base: { repositoryId: "base", materializedTreeDigest: digest("d") },
+          },
+        },
       },
       events: [
         {
@@ -316,14 +335,18 @@ describe("self-development semantic validators", () => {
           payload: {
             code: "ESYSTEMTEST_INJECTED_BUILD",
             faultId: "fault",
-            phase: "after-snapshot-retained"
-          }
-        }
-      ]
+            phase: "after-snapshot-retained",
+          },
+        },
+      ],
     };
-    expect(validate("self-development-build-failure-recovery", value).passed).toBe(true);
+    expect(
+      validate("self-development-build-failure-recovery", value).passed,
+    ).toBe(true);
     value.recovered.runId = "other";
-    expect(validate("self-development-build-failure-recovery", value).passed).toBe(false);
+    expect(
+      validate("self-development-build-failure-recovery", value).passed,
+    ).toBe(false);
   });
 
   it("joins ordinary child eval evidence to an attached run", () => {
@@ -333,13 +356,13 @@ describe("self-development semantic validators", () => {
         instance: {
           state: "ready",
           generationId: generation,
-          executionDigest: digest("a")
+          executionDigest: digest("a"),
         },
         attachedHost: {
           state: "ready",
           sessionId: "attached",
-          childGenerationId: generation
-        }
+          childGenerationId: generation,
+        },
       },
       started: { runId: "eval-run" },
       result: {
@@ -348,9 +371,9 @@ describe("self-development semantic validators", () => {
         evalRunId: "eval-run",
         evalSnapshot: {
           status: "done",
-          result: { success: true, returnValue: 42 }
-        }
-      }
+          result: { success: true, returnValue: 42 },
+        },
+      },
     };
     expect(validate("self-development-child-eval", value).passed).toBe(true);
     value.result.developmentRunId = "other";
@@ -364,12 +387,12 @@ describe("self-development semantic validators", () => {
         attachedHost: {
           state: "ready",
           sessionId: "attached",
-          childGenerationId: "1".repeat(32)
-        }
+          childGenerationId: "1".repeat(32),
+        },
       },
       invocation: {
         developmentRunId: "run",
-        attachedHostSessionId: "attached"
+        attachedHostSessionId: "attached",
       },
       events: [
         {
@@ -384,13 +407,17 @@ describe("self-development semantic validators", () => {
           shownPresentationDigest: digest("c"),
           decision: "once",
           challengedAt: 1,
-          decidedAt: 2
-        }
-      ]
+          decidedAt: 2,
+        },
+      ],
     };
-    expect(validate("self-development-child-approval", value).passed).toBe(true);
+    expect(validate("self-development-child-approval", value).passed).toBe(
+      true,
+    );
     value.events[0]!.invocationSnapshotDigest = "claimed";
-    expect(validate("self-development-child-approval", value).passed).toBe(false);
+    expect(validate("self-development-child-approval", value).passed).toBe(
+      false,
+    );
   });
 
   it("requires typed stopped effects and a closed session", () => {
@@ -401,21 +428,25 @@ describe("self-development semantic validators", () => {
         state: "stopped",
         instance: { state: "stopped", stoppedAt: 3 },
         client: { state: "stopped" },
-        attachedHost: { state: "closed" }
+        attachedHost: { state: "closed" },
       },
       session: {
         sessionId: "session",
         state: "closed",
-        contextEffect: "retained"
-      }
+        contextEffect: "retained",
+      },
     };
     expect(validate("self-development-owned-cleanup", value).passed).toBe(true);
     value.run.instance.state = "ready";
-    expect(validate("self-development-owned-cleanup", value).passed).toBe(false);
+    expect(validate("self-development-owned-cleanup", value).passed).toBe(
+      false,
+    );
   });
 
   it("rejects agent-shaped evidence without a harness receipt", () => {
-    const test = selfDevelopmentTests.find(({ name }) => name === "self-development-current-client")!;
+    const test = selfDevelopmentTests.find(
+      ({ name }) => name === "self-development-current-client",
+    )!;
     expect(
       test.validate({
         duration: 0,
@@ -428,26 +459,29 @@ describe("self-development semantic validators", () => {
             complete: true,
             content: JSON.stringify({
               state: "ready",
-              client: { state: "ready" }
-            })
-          }
-        ] as TestExecutionResult["messages"]
-      }).passed
+              client: { state: "ready" },
+            }),
+          },
+        ] as TestExecutionResult["messages"],
+      }).passed,
     ).toBe(false);
   });
 
   it("makes missing executor/fault prerequisites explicit and non-passing", () => {
-    const test = selfDevelopmentTests.find(({ name }) => name === "self-development-build-failure-recovery")!;
+    const test = selfDevelopmentTests.find(
+      ({ name }) => name === "self-development-build-failure-recovery",
+    )!;
     expect(
       test.validate(
         execution(test.name, [], {
           available: false,
-          reason: "no reviewed disposable failure injector"
-        })
-      )
+          reason: "no reviewed disposable failure injector",
+        }),
+      ),
     ).toEqual({
       passed: false,
-      reason: "Self-development prerequisite unavailable: no reviewed disposable failure injector"
+      reason:
+        "Self-development prerequisite unavailable: no reviewed disposable failure injector",
     });
   });
 
@@ -455,7 +489,9 @@ describe("self-development semantic validators", () => {
     for (const test of selfDevelopmentTests) {
       expect(test.orchestrate, test.name).toBeTypeOf("function");
       expect(test.prompt, test.name).toContain("Harness-orchestrated");
-      expect(test.prompt, test.name).not.toMatch(/return .*receipt|use .* through eval/iu);
+      expect(test.prompt, test.name).not.toMatch(
+        /return .*receipt|use .* through eval/iu,
+      );
     }
   });
 
@@ -468,7 +504,7 @@ describe("self-development semantic validators", () => {
       target: {
         kind: "client-device",
         client: "electron",
-        executorId: "shell:desktop"
+        executorId: "shell:desktop",
       },
       snapshot: {
         snapshotDigest: digest("a"),
@@ -477,13 +513,13 @@ describe("self-development semantic validators", () => {
           pairDigest: digest("c"),
           host: {
             repositoryId: "repository",
-            materializedTreeDigest: digest("d")
+            materializedTreeDigest: digest("d"),
           },
           base: {
             repositoryId: "base-repository",
-            materializedTreeDigest: digest("e")
-          }
-        }
+            materializedTreeDigest: digest("e"),
+          },
+        },
       },
       artifact: { executionDigest: digest("b") },
       client: {
@@ -491,8 +527,8 @@ describe("self-development semantic validators", () => {
         providerId: "desktop",
         childRuntimeId: "app:child",
         attestedAt: 2,
-        executionDigest: digest("b")
-      }
+        executionDigest: digest("b"),
+      },
     };
     const calls: string[] = [];
     const runner = {
@@ -502,7 +538,7 @@ describe("self-development semantic validators", () => {
           contextId: "context",
           repositoryId: "repository",
           repoPath: "projects/vibestudio",
-          workingHead: { kind: "event", eventId: "main" }
+          workingHead: { kind: "event", eventId: "main" },
         };
       },
       resolveSelfDevelopmentBaseRepository: async () => {
@@ -510,8 +546,8 @@ describe("self-development semantic validators", () => {
         return {
           contextId: "context",
           repositoryId: "base-repository",
-          repoPath: "projects/vibestudio-workspace-base",
-          workingHead: { kind: "event", eventId: "main" }
+          repoPath: "projects/vibestudio-base",
+          workingHead: { kind: "event", eventId: "main" },
         };
       },
       callSelfDevelopment: async (method: string) => {
@@ -528,17 +564,20 @@ describe("self-development semantic validators", () => {
         if (method === "start") return { ...run, state: "accepted" };
         if (method === "get") return run;
         if (method === "stop") return { ...run, state: "stopped" };
-        if (method === "closeSession") return { sessionId: "session", state: "closed" };
+        if (method === "closeSession")
+          return { sessionId: "session", state: "closed" };
         throw new Error(`Unexpected method ${method}`);
-      }
+      },
     };
-    const test = selfDevelopmentTests.find(({ name }) => name === "self-development-current-client")!;
+    const test = selfDevelopmentTests.find(
+      ({ name }) => name === "self-development-current-client",
+    )!;
     const result = await test.orchestrate!({
       runner: runner as never,
       remainingTimeMs: () => 10_000,
       sendAndWait: async () => {
         throw new Error("Agent turn must not be used");
-      }
+      },
     });
     expect(test.validate(result)).toEqual({ passed: true, reason: undefined });
     expect(calls).toEqual([
@@ -550,7 +589,7 @@ describe("self-development semantic validators", () => {
       "development.start",
       "development.get",
       "development.stop",
-      "development.closeSession"
+      "development.closeSession",
     ]);
     expect(result.messages).toEqual([]);
   });

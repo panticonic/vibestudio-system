@@ -13,7 +13,6 @@ import type {
   nativeDevelopmentTerminalSnapshotSchema,
   preparedNativeBuildSchema
 } from "@vibestudio/service-schemas/developmentNative";
-import type { VcsInspectResult, VcsStatusResult } from "@vibestudio/service-schemas/vcs";
 import { canonicalJson } from "@vibestudio/content-addressing";
 import type { z } from "zod";
 import { DevelopmentStore, developmentSessionId } from "./DevelopmentStore.js";
@@ -23,7 +22,6 @@ type NativeReceipt = z.infer<typeof nativeDevelopmentSessionReceiptSchema>;
 type TerminalSnapshot = z.infer<typeof nativeDevelopmentTerminalSnapshotSchema>;
 type PreparedBuild = z.infer<typeof preparedNativeBuildSchema>;
 
-const WORKSPACE_SOURCE_PROTOCOL = "vibestudio.workspace-source.v1";
 const TERMINAL_RUN_STATES = new Set<DevelopmentRun["state"]>(["succeeded", "stopped", "failed", "cancelled"]);
 
 export class DevelopmentDO extends DurableObjectBase {
@@ -217,6 +215,17 @@ export class DevelopmentDO extends DurableObjectBase {
       disposition: "retain-context"
     });
     if (closing.state === "closed") return closing;
+    const cleanup = await this.reclaimSessionRunRoots(session.sessionId);
+    if (cleanup.length > 0) {
+      const diagnostics = cleanup.map((message) => toDiagnostic(new Error(message)));
+      return this.store.updateSession(session.sessionId, {
+        state: "requires-repair",
+        contextEffect: "retained",
+        primaryDiagnostic: diagnostics[0]!,
+        cleanupDiagnostics: diagnostics,
+        repairAttention: "actionable"
+      });
+    }
     return this.store.updateSession(session.sessionId, {
       state: "closed",
       contextEffect: "retained",
@@ -864,6 +873,22 @@ export class DevelopmentDO extends DurableObjectBase {
     });
   }
 
+  /**
+   * Read the adopted repository through the reviewed public VCS service.
+   *
+   * These two reads used to address the workspace-source Durable Object
+   * directly, which no userland receiver may do: that object admits the code
+   * principal only when its repository path is `vibestudio/internal`, so every
+   * open of a development session was refused with "relationship code-source
+   * not satisfied" before it could decide whether the repository was adopted.
+   * The session's semantic writes already go through the host adapter; only
+   * the reads had been left on the direct path.
+   *
+   * The public `vcs` service cannot serve it either: it authorizes reads
+   * against the caller's own reachable context graph, and the context being
+   * read belongs to the session's owner, not to this object. So the host
+   * performs the read and returns only the repository's presence and path.
+   */
   private async resolveRepository(
     contextId: string,
     repositoryId: string
@@ -871,22 +896,16 @@ export class DevelopmentDO extends DurableObjectBase {
     repoPath: string;
     sourceState: DevelopmentSession["basis"]["parentWorkingHead"];
   } | null> {
-    const workspaceSource = await this.resolveWorkspaceSource();
-    const status = await this.callSemanticRead<VcsStatusResult>(workspaceSource, "vcsStatus", {
-      contextId
-    });
     try {
-      const inspected = await this.callSemanticRead<VcsInspectResult>(workspaceSource, "vcsInspect", {
-        node: { kind: "repository", state: status.workingHead, repositoryId },
-        edgeLimit: 1
-      });
-      if (inspected.node.kind !== "repository" || inspected.node.value.kind !== "present") {
-        return null;
-      }
-      return {
-        repoPath: inspected.node.value.repoPath,
-        sourceState: status.workingHead
-      };
+      const resolved = await this.rpc.call<{
+        repoPath: string;
+        workingHead: DevelopmentSession["basis"]["parentWorkingHead"];
+      } | null>("main", "developmentNative.resolveAdoptedRepository", [
+        { contextId, repositoryId }
+      ]);
+      return resolved
+        ? { repoPath: resolved.repoPath, sourceState: resolved.workingHead }
+        : null;
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -900,55 +919,47 @@ export class DevelopmentDO extends DurableObjectBase {
     }
   }
 
-  private async callSemanticRead<T>(
-    workspaceSource: string,
-    method: "vcsStatus" | "vcsInspect",
-    input: unknown
-  ): Promise<T> {
-    const outcome = await this.rpc.call<
-      | { kind: "complete"; result: T }
-      | { kind: "effects-pending"; effects: readonly unknown[] }
-      | { kind: "host-read"; request: unknown }
-    >(workspaceSource, method, [this.semanticRequest(input)]);
-    if (outcome.kind !== "complete") {
-      throw coded("ESEMANTICREAD", `Development ${method} unexpectedly required ${outcome.kind}`);
-    }
-    return outcome.result;
-  }
-
-  private semanticRequest(input: unknown) {
-    const integrity = this.authorization?.contextIntegrity;
-    if (!integrity) {
-      throw coded("EACCES", "Development semantic reads require host-attested context integrity");
-    }
-    return {
-      input,
-      ingress: {
-        causalParent: null,
-        contextIntegrity:
-          integrity.class === "external"
-            ? {
-                class: "external" as const,
-                externalKeys: [...integrity.externalKeys]
-              }
-            : { class: "internal" as const, externalKeys: [] }
+  /**
+   * Give back every finished run's build root when its session ends.
+   *
+   * A run root holds the run's own source, base, toolchain, pnpm store, and
+   * isolated instance — gigabytes per run — and `developmentNative.retireBuild`
+   * is the only thing that removes it. Leaving that to an explicit agent call
+   * meant a run that merely finished, or timed out, kept its tree and (for an
+   * isolated host) its server process for as long as the workspace lived.
+   *
+   * A session that is closing already has no active run, so every remaining
+   * run is terminal and its root is nothing but reclaimable disk. Report a
+   * failure as a cleanup diagnostic rather than refusing the close: an
+   * unreclaimed root is a disk problem, not a reason to keep the session open.
+   */
+  private async reclaimSessionRunRoots(sessionId: string): Promise<string[]> {
+    const cleanup: string[] = [];
+    for (const run of this.store.listRuns({ sessionId })) {
+      if (!TERMINAL_RUN_STATES.has(run.state)) continue;
+      if (run.artifact === null && run.state === "cancelled") continue;
+      try {
+        await this.rpc.call("main", "developmentNative.retireBuild", [{ run }]);
+        this.store.transitionRun({
+          runId: run.runId,
+          expected: [run.state],
+          state: run.state,
+          artifact: null,
+          terminal: true,
+          message: "Exact native build root reclaimed when its session closed"
+        });
+      } catch (error) {
+        cleanup.push(
+          `run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`
+        );
       }
-    };
-  }
-
-  private async resolveWorkspaceSource(): Promise<string> {
-    const resolved = await this.rpc.call<{
-      kind: "durable-object" | "worker";
-      targetId?: string;
-    }>("main", "workers.resolveService", [WORKSPACE_SOURCE_PROTOCOL]);
-    if (resolved.kind !== "durable-object" || !resolved.targetId) {
-      throw new Error(`Workspace protocol ${WORKSPACE_SOURCE_PROTOCOL} must resolve to a Durable Object`);
     }
-    return resolved.targetId;
+    return cleanup;
   }
 
   private async retireSessionEffects(session: DevelopmentSession): Promise<DevelopmentSession> {
     const cleanup: string[] = [];
+    cleanup.push(...(await this.reclaimSessionRunRoots(session.sessionId)));
     if (session.mode === "native-tool") {
       const retired = await this.rpc.call<{
         retired: boolean;

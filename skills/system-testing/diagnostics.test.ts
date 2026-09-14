@@ -343,24 +343,30 @@ describe("system-testing diagnostics", () => {
       metrics: [
         {
           metric: "call-to-provider-execution",
+          baselineMs: 30000,
           budgetMs: 30000,
           maximumMs: 420,
           samples: 2,
           overBudget: false,
+          overBaseline: false,
           buckets: [{ upperBoundMs: 500, samples: 2, maximumMs: 420 }],
         },
         {
           metric: "publish-to-recipient-execution",
+          baselineMs: 30000,
           budgetMs: 30000,
           maximumMs: 34778,
           samples: 5,
           overBudget: true,
+          overBaseline: true,
           buckets: [
             { upperBoundMs: 1000, samples: 4, maximumMs: 900 },
             { upperBoundMs: 2147483647, samples: 1, maximumMs: 34778 },
           ],
         },
       ],
+      // This test measured one agent's spans, so the isolated ceiling applies.
+      concurrentTestAgents: 1,
     });
   });
 
@@ -391,6 +397,68 @@ describe("system-testing diagnostics", () => {
 
   it("omits the latency projection when channel delivery was never collected", () => {
     expect(summarizeEntry(entryWithMessages([])).channelDeliveryLatency).toBeNull();
+  });
+
+  it("keeps both ends of a long tool error so the diagnosis survives", () => {
+    const entry = entryWithMessages([]);
+    // The real shape: a shared preamble, a long absolute path, then the one
+    // part that differs between two build failures.
+    const error =
+      "[tool.verify:execute] unknown_tool_failure: [build.getTestArtifact] Build failed with 1 error:\n" +
+      "/tmp/vibestudio-selfdev/workspaces/system-ws/state/build-sources/".padEnd(600, "x") +
+      "/index.tsx:12:4: ERROR: Could not resolve \"./missing-module\"";
+    entry.execution.toolFailures = [
+      { id: "call-1", name: "verify", status: "error", error, source: "message" },
+    ] as never;
+
+    const [summary] = summarizeEntry(entry).toolFailures;
+    expect(summary?.error).toContain("Build failed with 1 error");
+    expect(summary?.error).toContain('Could not resolve "./missing-module"');
+    expect(summary?.error).toMatch(/chars elided/u);
+  });
+
+  it("leaves a tool error shorter than the limit untouched", () => {
+    const entry = entryWithMessages([]);
+    entry.execution.toolFailures = [
+      { id: "call-1", name: "verify", status: "error", error: "short", source: "message" },
+    ] as never;
+    expect(summarizeEntry(entry).toolFailures[0]?.error).toBe("short");
+  });
+
+  it("carries an orchestrated scenario's own evidence into the failure report", () => {
+    const entry = entryWithMessages([]);
+    entry.execution.diagnostics = {
+      chatTaskRuleReuse: {
+        afterFirstTurn: [{ id: "rule-1" }],
+        afterSecondTurn: [{ id: "rule-2" }],
+      },
+      // Keys with a dedicated projection are not repeated here.
+      workspaceRepoFixture: { testName: "fixture-test" },
+    };
+
+    const orchestration = summarizeEntry(entry).orchestration;
+    expect(Object.keys(orchestration ?? {})).toEqual(["chatTaskRuleReuse"]);
+    expect(orchestration?.["chatTaskRuleReuse"]).toContain("rule-2");
+  });
+
+  it("keeps the tail of a long orchestration record, where the verdict often sits", () => {
+    const entry = entryWithMessages([]);
+    entry.execution.diagnostics = {
+      scheduledNotification: {
+        runs: Array.from({ length: 40 }, (_, index) => ({ runId: `run-${index}`.padEnd(40, "x") })),
+        // The field the validator actually grades, last in the record.
+        notifications: [{ id: "notify-1" }, { id: "notify-2" }],
+      },
+    };
+
+    const carried = summarizeEntry(entry).orchestration?.["scheduledNotification"] ?? "";
+    expect(carried).toContain("runs");
+    expect(carried).toContain("notify-2");
+    expect(carried).toMatch(/chars elided/u);
+  });
+
+  it("omits the orchestration projection when a scenario recorded nothing", () => {
+    expect(summarizeEntry(entryWithMessages([])).orchestration).toBeNull();
   });
 
   it("includes bounded workspace repo fixture teardown diagnostics", () => {

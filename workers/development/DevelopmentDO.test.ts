@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+
 import { DURABLE_OBJECT_FRAMEWORK_RPC_METHODS } from "@vibestudio/durable";
 import { createTestDO } from "@vibestudio/durable/test-utils";
 import { rpcExposedMethodNames } from "@vibestudio/rpc";
@@ -57,7 +58,7 @@ describe("DevelopmentDO", () => {
     );
   });
 
-  it("supplies host-attested semantic ingress when resolving session repositories", async () => {
+  it("resolves session repositories through the reviewed public VCS surface", async () => {
     const { instance, callAs } = await development();
     const parentHead = { kind: "event" as const, eventId: "event:parent" };
     const childHead = { kind: "event" as const, eventId: "event:child" };
@@ -67,8 +68,16 @@ describe("DevelopmentDO", () => {
       async (target: string, method: string, args: unknown[]) => {
         if (target === "main" && method === "runtime.resolveContext")
           return "context:parent";
-        if (target === "main" && method === "workers.resolveService") {
-          return { kind: "durable-object", targetId: workspaceSource };
+        if (
+          target === "main" &&
+          method === "developmentNative.resolveAdoptedRepository"
+        ) {
+          const [input] = args as [{ contextId: string }];
+          return {
+            repoPath: "projects/vibestudio",
+            workingHead:
+              input.contextId === "context:parent" ? parentHead : childHead,
+          };
         }
         if (target === "main" && method === "runtime.forkSemanticContext") {
           expect(args).toEqual([
@@ -83,29 +92,6 @@ describe("DevelopmentDO", () => {
             parentContextId: "context:parent",
             parentWorkingHead: parentHead,
             childBaseState: childHead,
-          };
-        }
-        if (target === workspaceSource && method === "vcsStatus") {
-          const request = args[0] as { input: { contextId: string } };
-          return {
-            kind: "complete",
-            result: {
-              workingHead:
-                request.input.contextId === "context:parent"
-                  ? parentHead
-                  : childHead,
-            },
-          };
-        }
-        if (target === workspaceSource && method === "vcsInspect") {
-          return {
-            kind: "complete",
-            result: {
-              node: {
-                kind: "repository",
-                value: { kind: "present", repoPath: "projects/vibestudio" },
-              },
-            },
           };
         }
         if (
@@ -180,22 +166,24 @@ describe("DevelopmentDO", () => {
         },
       },
     });
-    const semanticCalls = rpcCall.mock.calls.filter(
-      ([target, method]) =>
-        target === workspaceSource && String(method).startsWith("vcs"),
-    );
-    expect(semanticCalls).toHaveLength(4);
-    for (const [, , args] of semanticCalls) {
-      expect(args).toEqual([
-        expect.objectContaining({
-          input: expect.any(Object),
-          ingress: {
-            causalParent: null,
-            contextIntegrity: { class: "internal", externalKeys: [] },
-          },
-        }),
-      ]);
-    }
+    // The owner's context and the forked child are both read through the host,
+    // which is the only principal the workspace-source receiver admits — and
+    // nothing addresses that object directly.
+    expect(
+      rpcCall.mock.calls
+        .filter(
+          ([target, method]) =>
+            target === "main" &&
+            method === "developmentNative.resolveAdoptedRepository",
+        )
+        .map(([, , args]) => args),
+    ).toEqual([
+      [{ contextId: "context:parent", repositoryId: "repository:vibestudio" }],
+      [{ contextId: "context:child", repositoryId: "repository:vibestudio" }],
+    ]);
+    expect(
+      rpcCall.mock.calls.filter(([target]) => target === workspaceSource),
+    ).toEqual([]);
     const sessionId = (
       opened as { kind: "opened"; session: { sessionId: string } }
     ).session.sessionId;

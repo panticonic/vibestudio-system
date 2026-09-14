@@ -134,7 +134,7 @@ export interface SystemTestRpcFaultEvidence {
 export interface SelfDevelopmentRepository {
   contextId: string;
   repositoryId: string;
-  repoPath: "projects/vibestudio" | "projects/vibestudio-workspace-base";
+  repoPath: "projects/vibestudio" | "projects/vibestudio-base";
   workingHead: VcsStateNodeRef;
 }
 
@@ -218,17 +218,22 @@ export class HeadlessRunner {
   /** Read the canonical user-facing permission inventory for harness assertions. */
   async listPermissions(): Promise<unknown[]> {
     const permissions = await rpc.call("main", "permissions.list", []);
-    if (!Array.isArray(permissions)) throw new Error("permissions.list returned no inventory");
+    if (!Array.isArray(permissions))
+      throw new Error("permissions.list returned no inventory");
     return permissions;
   }
 
   /** Read the installed unit/config projection used to bind permission evidence. */
-  async inspectInstalledWorkspace(): Promise<{ units: unknown[]; config: unknown }> {
+  async inspectInstalledWorkspace(): Promise<{
+    units: unknown[];
+    config: unknown;
+  }> {
     const [units, config] = await Promise.all([
       rpc.call("main", "build.listUnits", []),
       rpc.call("main", "workspace.getConfig", []),
     ]);
-    if (!Array.isArray(units)) throw new Error("build.listUnits returned no unit inventory");
+    if (!Array.isArray(units))
+      throw new Error("build.listUnits returned no unit inventory");
     return { units, config };
   }
 
@@ -363,6 +368,47 @@ export class HeadlessRunner {
       "- Do not search for, create, or substitute another fixture.\n\n" +
       prompt
     );
+  }
+
+  /**
+   * Record that a turn actually fell back, from the journaled model-execution
+   * evidence that already proves which model ran.
+   *
+   * Without this the policy reports the configured route and an empty
+   * activation list no matter what happened, so "inspect the run to confirm
+   * whether the fallback also failed" cannot be answered from the run record —
+   * the only trace is a per-test diagnostic string. `activeModel` deliberately
+   * stays as configured: which model the next session requests is the host's
+   * per-turn decision, and rewriting it here would make the harness start
+   * asking for the fallback directly.
+   */
+  recordModelFallbackActivations(
+    session: HeadlessSession,
+    testName: string | null,
+    activations: readonly Omit<ModelPolicyActivation, "testName">[],
+  ): void {
+    const sessionPolicy = this.shared.sessionPolicies.get(session);
+    const same = (
+      left: ModelPolicyActivation,
+      right: ModelPolicyActivation,
+    ): boolean =>
+      left.at === right.at &&
+      left.toModel === right.toModel &&
+      left.testName === right.testName;
+    for (const observed of activations) {
+      const activation: ModelPolicyActivation = { ...observed, testName };
+      // Evidence is captured once per phase, so the same turn is seen again on
+      // a later read; a run's activation list is the set of transitions, not
+      // how many times they were observed.
+      for (const policy of [sessionPolicy, this.shared.modelPolicy]) {
+        if (!policy) continue;
+        if (
+          !policy.activations.some((existing) => same(existing, activation))
+        ) {
+          policy.activations.push(activation);
+        }
+      }
+    }
   }
 
   /** Serializable evidence for inspect/status output. */
@@ -515,7 +561,10 @@ export class HeadlessRunner {
 
   async publishAtomicPanelStoreFixture() {
     const contextId = this.requireWorkspaceRepoFixtureLifecycle().taskContextId;
-    if (!contextId) throw new Error("Atomic panel-store fixture has no prepared task context");
+    if (!contextId)
+      throw new Error(
+        "Atomic panel-store fixture has no prepared task context",
+      );
     return publishAtomicPanelStoreFixture({ vcs, blobstore, contextId });
   }
 
@@ -616,16 +665,16 @@ export class HeadlessRunner {
           )}. All pre-existing repositories and every other newly created repository are outside the test scope.`
         : this.workspaceRepoFixture.kind === "created-repositories"
           ? `\n\nHarness-owned test scope: this task owns exactly ${this.workspaceRepoFixture.expectedSections.length} repositories that it creates, one under each of ${this.workspaceRepoFixture.expectedSections.map((section) => JSON.stringify(`${section}/`)).join(", ")}. All pre-existing repositories and every other newly created repository are outside the test scope.`
-        : this.workspaceRepoFixture.kind === "buildable-panel-with-derived"
-          ? `\n\nHarness-owned test scope: the disposable source repository ${JSON.stringify(
-              `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`,
-            )} is already present in this context. This task owns that source and exactly one derived repository it creates under ${JSON.stringify(
-              `${this.workspaceRepoFixture.section}/`,
-            )}; all other repositories are outside the test scope.`
-          : `\n\nHarness-owned test scope: the exact disposable repository ${JSON.stringify(
-              `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`,
-            )} is already present in this context. It is the only repository owned by this test; ` +
-            `all other repositories are outside the fixture scope.`
+          : this.workspaceRepoFixture.kind === "buildable-panel-with-derived"
+            ? `\n\nHarness-owned test scope: the disposable source repository ${JSON.stringify(
+                `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`,
+              )} is already present in this context. This task owns that source and exactly one derived repository it creates under ${JSON.stringify(
+                `${this.workspaceRepoFixture.section}/`,
+              )}; all other repositories are outside the test scope.`
+            : `\n\nHarness-owned test scope: the exact disposable repository ${JSON.stringify(
+                `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`,
+              )} is already present in this context. It is the only repository owned by this test; ` +
+              `all other repositories are outside the fixture scope.`
       : "";
     const rpcFaultEvidence: SystemTestRpcFaultEvidence[] = [];
     const occurrenceByOperation = new Map<string, number>();
@@ -1077,7 +1126,7 @@ export class HeadlessRunner {
 
   async resolveSelfDevelopmentBaseRepository(): Promise<SelfDevelopmentRepository> {
     const status = await vcs.status({ contextId: this.contextId });
-    const repoPath = "projects/vibestudio-workspace-base" as const;
+    const repoPath = "projects/vibestudio-base" as const;
     const repository = await vcs.resolveRepository({
       state: status.workingHead,
       repoPath,
@@ -1120,6 +1169,7 @@ export class HeadlessRunner {
       | "retry"
       | "checkpoint"
       | "inspectNative"
+      | "readNativeTerminal"
       | "writeNativeTerminal"
       | "stopNativeTool"
       | "closeSession",
