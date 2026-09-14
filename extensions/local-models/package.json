@@ -7,7 +7,9 @@
     "@workspace/model-catalog": "workspace:*"
   },
   "devDependencies": {
-    "@panticonic/builtin": "workspace:*"
+    "@panticonic/builtin": "workspace:*",
+    "@workspace-workers/pubsub-channel": "workspace:*",
+    "@workspace/agentic-do": "workspace:*"
   },
   "vibestudio": {
     "displayName": "Local Models",

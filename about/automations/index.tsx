@@ -51,7 +51,7 @@ import type {
   MissionRecord,
   MissionRunRecord,
 } from "@vibestudio/automation/mission";
-import { AboutPage, AboutThemeRoot } from "../../packages/about-shared/ui";
+import { AboutPage, AboutThemeRoot } from "@workspace/about-shared/ui";
 
 type Filter = "all" | "attention" | "active" | "paused" | "completed";
 type AutomationRecord = MissionRecord;

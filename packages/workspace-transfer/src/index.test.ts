@@ -6,12 +6,12 @@ import {
   type VcsImportSnapshotResult,
   type VcsStateNodeRef,
 } from "@vibestudio/service-schemas/vcs";
-import { createSemanticVcsSchema } from "../../../workers/workspace-source/semanticVcsSchema.js";
+import { createSemanticVcsSchema } from "@workspace-workers/workspace-source/semanticVcsSchema";
 import {
   SemanticWorkspace,
   type SemanticDispatchResult,
-} from "../../../workers/workspace-source/semanticWorkspace.js";
-import { SemanticVcsStore } from "../../../workers/workspace-source/semanticVcsStore.js";
+} from "@workspace-workers/workspace-source/semanticWorkspace";
+import { SemanticVcsStore } from "@workspace-workers/workspace-source/semanticVcsStore";
 import {
   prepareSelectedTransfer,
   MAX_SELECTED_TRANSFER_BYTES,

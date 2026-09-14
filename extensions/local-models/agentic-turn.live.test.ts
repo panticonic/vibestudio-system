@@ -18,10 +18,9 @@
 import { describe, expect, it } from "vitest";
 import { createTestDO } from "@workspace/runtime/worker/test-utils";
 import { GadWorkspaceDO } from "@workspace-workers/workspace-source";
-import { PubSubChannel } from "../../workers/pubsub-channel/channel-do.js";
+import { PubSubChannel } from "@workspace-workers/pubsub-channel";
 import { activate as activateLocalModels } from "./index.js";
-import { AgentVesselBase } from "../../packages/agentic-do/src/agent-vessel.js";
-import type { ChannelClient } from "../../packages/agentic-do/src/channel-client.js";
+import { AgentVesselBase, type ChannelClient } from "@workspace/agentic-do";
 import type { ParticipantDescriptor } from "@workspace/harness";
 
 const RUN = process.env["RUN_LOCAL_MODELS_E2E"] === "1";

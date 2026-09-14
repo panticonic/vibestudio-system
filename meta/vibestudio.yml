@@ -119,6 +119,7 @@ template:
     - extensions/typecheck-service
     - packages/mobile-navigation
     - packages/terminal-host-protocol
+    - packages/terminal-shim
     - packages/workspace-transfer
     - skills/appdev
     - skills/local-models

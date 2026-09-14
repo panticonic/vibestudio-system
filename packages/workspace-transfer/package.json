@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "vitest": "^3.2.7",
-    "@vibestudio/durable": "workspace:*"
+    "@vibestudio/durable": "workspace:*",
+    "@workspace-workers/workspace-source": "workspace:*"
   }
 }

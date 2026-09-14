@@ -35,5 +35,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@workspace/react": "workspace:*"
+  },
+  "devDependencies": {
+    "@workspace-skills/workspace-dev": "workspace:*"
   }
 }

@@ -89,7 +89,7 @@ import {
 } from "@workspace/ui/icons";
 import { EmptyState } from "@workspace/ui/feedback";
 import { panel, rpc } from "@workspace/runtime";
-import { AboutPage, AboutThemeRoot, Section } from "../../packages/about-shared/ui";
+import { AboutPage, AboutThemeRoot, Section } from "@workspace/about-shared/ui";
 
 /* ------------------------------------------------------------------ types */
 

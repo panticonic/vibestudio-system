@@ -18,7 +18,7 @@ vi.mock("@workspace/runtime", () => ({
 // The real AboutThemeRoot renders a Radix `Theme`, which is what supplies the
 // tooltip/portal providers this screen relies on. The mock keeps that and drops
 // only the panel-runtime theme plumbing.
-vi.mock("../../packages/about-shared/ui", () => ({
+vi.mock("@workspace/about-shared/ui", () => ({
   AboutThemeRoot: ({ children }: { children: ReactNode }) => <Theme>{children}</Theme>,
   AboutPage: ({ children, actions }: { children: ReactNode; actions?: ReactNode }) => (
     <main>
