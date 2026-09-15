@@ -158,7 +158,7 @@ describe("mobile slate", () => {
       slateDeps,
     );
     expect(slateDeps.panels.createBrowserUrlPanel).toHaveBeenCalledWith(
-      null,
+      "panel:tree/root/0",
       "https://example.com/",
       { focus: true },
     );

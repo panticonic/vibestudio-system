@@ -191,7 +191,7 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
         tone: "warning",
       };
     }
-    await deps.panels.createBrowserUrlPanel(null, resolved, { focus: true });
+    await deps.panels.createBrowserUrlPanel(deps.activePanelId, resolved, { focus: true });
     return { close: true };
   },
 

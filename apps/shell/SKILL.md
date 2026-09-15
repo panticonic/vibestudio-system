@@ -97,9 +97,9 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   `>` is a deprecated alias of `@` for one release and shows a hint row saying
   so.
 - Palette history comes from `panel.getBrowserAddressOptions` — the exact call
-  the address bar makes — with search-engine rows filtered out and no favicon
-  fetch (glyph-only rows, matching the address bar). Do not add a second
-  history query.
+  the address bar makes. Provider rows feed shared web-search suggestions and
+  never appear as history destinations. No favicon fetch is needed for the
+  glyph-only palette rows. Web actions create children of the bound panel.
 - Slate gaps left open on purpose, because their backing surface does not
   exist yet rather than because they were forgotten: `panel.move` (the
   placement engine in `layout/placementEngine.ts` has no directional move

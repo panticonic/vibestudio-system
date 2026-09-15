@@ -632,8 +632,8 @@ export function QuickfireOwner() {
   // Same data path as the title bar's address autocomplete
   // (`panel.getBrowserAddressOptions` → the shell's browser-data client), so
   // the palette and the address bar never disagree about what "recent" means.
-  // Search engines are dropped: they are an address-bar affordance, not a
-  // destination. Favicons are deliberately not fetched — the address bar's
+  // Provider rows feed web search; they never become history destinations.
+  // Favicons are deliberately not fetched — the address bar's
   // rows are glyph-only too, and one image RPC per row would cost more than it
   // tells the user.
   const historyQuery =
@@ -651,11 +651,7 @@ export function QuickfireOwner() {
         .getBrowserAddressOptions(historyQuery)
         .then((options) => {
           if (live) {
-            setHistory(
-              options.suggestions.filter(
-                (item) => item.source !== "search-engine",
-              ),
-            );
+            setHistory(options.suggestions);
           }
         })
         .catch(() => {
@@ -727,9 +723,9 @@ export function QuickfireOwner() {
       .flatMap((group) => group.rows)
       .find((row) => row.id === selectedId);
     if (!selected) return null;
-    const completion = completionForRow(selected);
-    if (!completion) return null;
     const typed = stripModePrefix(state.query, state.mode).trim();
+    const completion = completionForRow(selected, typed);
+    if (!completion) return null;
     if (!typed || !completion.toLowerCase().startsWith(typed.toLowerCase()))
       return null;
     const suffix = completion.slice(typed.length);
@@ -970,9 +966,13 @@ export function QuickfireOwner() {
           open("quickfire");
           return;
         case "url":
-          void panel
-            .createBrowser(target.url, { focus: true })
-            .catch(reportCommandFailure);
+          void (
+            chromeState?.panelId
+              ? panel.createBrowserChild(chromeState.panelId, target.url, {
+                  focus: true,
+                })
+              : panel.createBrowser(target.url, { focus: true })
+          ).catch(reportCommandFailure);
           close({ restoreFocus: false });
           return;
         case "quickfire-ask":
@@ -1005,6 +1005,7 @@ export function QuickfireOwner() {
     },
     [
       activateCommand,
+      chromeState?.panelId,
       applySessionOutcome,
       close,
       navigateToId,
@@ -1110,7 +1111,9 @@ export function QuickfireOwner() {
         return;
       }
       if (target.kind === "browser-url") {
-        await panel.createBrowser(target.url, { focus: true });
+        await (parentSlot
+          ? panel.createBrowserChild(parentSlot, target.url, { focus: true })
+          : panel.createBrowser(target.url, { focus: true }));
       } else if (target.kind === "panel-source") {
         await (parentSlot
           ? panel.createChild(parentSlot, target.source, { focus: true })

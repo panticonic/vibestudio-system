@@ -570,6 +570,7 @@ export function createShellWorkspaceClient(
           getHistory: (input) => browserDataClient.getHistory(input),
           searchBookmarks: (value) => browserDataClient.searchBookmarks(value),
           getSearchEngines: () => browserDataClient.getSearchEngines(),
+          getSearchSuggestions: (query) => browserDataClient.getSearchSuggestions(query),
         },
       }),
     markBrowserNavigationIntent: (

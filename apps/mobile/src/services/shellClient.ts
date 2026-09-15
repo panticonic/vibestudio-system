@@ -909,6 +909,7 @@ class MobilePanels implements PanelHost {
         searchBookmarks: (searchQuery) =>
           this.browserData.searchBookmarks(searchQuery),
         getSearchEngines: () => this.browserData.getSearchEngines(),
+        getSearchSuggestions: (query) => this.browserData.getSearchSuggestions(query),
       },
     });
   }

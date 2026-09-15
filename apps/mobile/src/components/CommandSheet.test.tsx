@@ -207,7 +207,7 @@ describe("CommandSheet", () => {
       getByTestId("command-row-history:https://example.com/docs"),
     );
     expect(deps.panels.createBrowserUrlPanel).toHaveBeenCalledWith(
-      null,
+      "panel:tree/root/0",
       "https://example.com/docs",
       { focus: true },
     );

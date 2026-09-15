@@ -241,8 +241,8 @@ export function CommandSheet({
 
   // Browser history for the `@` scope and mixed mode, through the same client
   // call the address field in `AppBar` makes — one ranking path, one answer.
-  // Search engines are dropped (an address-bar affordance, not a destination)
-  // and favicons are not fetched, matching the desktop overlay's rows.
+  // Provider rows feed web search, and favicons are not fetched, matching the
+  // desktop overlay's rows.
   const historyQuery =
     mode === "goto" ? parseGotoScope(searchQuery).query : searchQuery;
   const wantsHistory = !argSession && (mode === "all" || mode === "goto");
@@ -257,11 +257,7 @@ export function CommandSheet({
         .getBrowserAddressOptions(historyQuery)
         .then((options) => {
           if (live) {
-            setHistory(
-              options.suggestions.filter(
-                (item) => item.source !== "search-engine",
-              ),
-            );
+            setHistory(options.suggestions);
           }
         })
         .catch(() => {
@@ -499,7 +495,7 @@ export function CommandSheet({
           return;
         case "url":
           void slateDeps.panels
-            .createBrowserUrlPanel(null, target.url, { focus: true })
+            .createBrowserUrlPanel(slateDeps.activePanelId, target.url, { focus: true })
             .catch((error: unknown) =>
               pushToast({
                 title: "Could not open that address",

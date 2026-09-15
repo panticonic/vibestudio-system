@@ -153,7 +153,10 @@ function desktopRuns(client: ShellWorkspaceClient): Record<string, SlateRun> {
       const resolved = url ? browserUrlFromEntry(url) : null;
       if (!resolved)
         return { message: "That doesn't look like a web address." };
-      await panel.createBrowser(resolved, { focus: true });
+      const parentId = await panel.getFocusedPanelId();
+      await (parentId
+        ? panel.createBrowserChild(parentId, resolved, { focus: true })
+        : panel.createBrowser(resolved, { focus: true }));
       return { close: true };
     },
     // Not a navigation: it re-enters the palette in the `@` scope, narrowed to
