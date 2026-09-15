@@ -553,7 +553,7 @@ describe("pushNotifications", () => {
     expect(mockNotifee.cancelNotification).toHaveBeenCalledWith("cancel-key-2");
   });
 
-  it("does not keep a notification for a review the running app cannot answer", async () => {
+  it("keeps notifications for unresolved client-app reviews", async () => {
     const shellClient = createShellClient();
     shellClient.shellApproval.listPending.mockResolvedValueOnce([
       {
@@ -651,7 +651,7 @@ describe("pushNotifications", () => {
 
     await reconcilePushNotifications(shellClient as never, mockNotifee);
 
-    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith(
+    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith(
       "startup-display",
     );
     expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith(

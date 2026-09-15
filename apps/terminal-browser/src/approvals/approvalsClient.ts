@@ -3,7 +3,6 @@ import type { ApprovalDecisionId } from "@vibestudio/shared/approvalContract";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
 import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
-import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
@@ -47,7 +46,7 @@ export function createApprovalsClient(rpc: RpcClient): ApprovalsClient {
   return {
     async list() {
       const pending = await shellApproval.listPending();
-      return Array.isArray(pending) ? filterRuntimeApprovals(pending) : [];
+      return Array.isArray(pending) ? pending : [];
     },
     async resolve(approvalId, decision) {
       await shellApproval.resolve(approvalId, decision);

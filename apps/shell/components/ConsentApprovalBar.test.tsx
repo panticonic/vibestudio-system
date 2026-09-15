@@ -685,17 +685,16 @@ describe("ConsentApprovalBar coordinator", () => {
     expect((overlay.options?.props?.queue as { total: number }).total).toBe(3);
   });
 
-  it("excludes host-app startup approvals from the runtime overlay", async () => {
+  it("presents pending System app reviews in the running shell", async () => {
     shellClient.listPending.mockResolvedValueOnce([
       hostAppStartupApproval("app-startup"),
       capabilityApproval({ approvalId: "runtime", title: "Runtime approval" }),
     ]);
     mountBar();
     await waitFor(() => {
-      expect(overlay.options?.props?.approval?.approvalId).toBe("runtime");
+      expect(fullSurface.props?.approval?.approvalId).toBe("app-startup");
     });
-    // Only one runtime approval remains → no queue navigator.
-    expect(overlay.options?.props?.queue).toBeNull();
+    expect((fullSurface.props?.queue as { total: number }).total).toBe(2);
   });
 
   it("minimizes to a pill on a minimize intent and reopens on click", async () => {

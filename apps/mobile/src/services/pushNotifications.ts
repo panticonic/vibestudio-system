@@ -17,7 +17,6 @@ import {
   APPROVAL_CATEGORY_DECIDE,
   type PushApprovalDataPayload,
 } from "@vibestudio/shared/approvalContract";
-import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
 import {
   isPushUserInboxDataPayload,
   type PushUserInboxDataPayload,
@@ -313,9 +312,7 @@ export async function reconcilePushNotifications(
 ): Promise<void> {
   if (!notifee) return;
   try {
-    const pending = filterRuntimeApprovals(
-      await shellClient.shellApproval.listPending(),
-    );
+    const pending = await shellClient.shellApproval.listPending();
     const pendingIds = new Set(pending.map((approval) => approval.approvalId));
     const displayed = (await notifee.getDisplayedNotifications?.()) ?? [];
     for (const entry of displayed) {

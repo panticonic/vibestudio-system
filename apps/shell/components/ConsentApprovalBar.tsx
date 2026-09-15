@@ -41,7 +41,6 @@ import type {
 import { getApprovalCopy } from "@vibestudio/shared/approvalCopy";
 import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
 import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
-import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
 import {
   createApprovalStateController,
   type ApprovalStateController,
@@ -245,7 +244,6 @@ export function ConsentApprovalBar({
         events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, (payload) =>
           listener(payload),
         ),
-      filter: filterRuntimeApprovals,
       onChange: (pending) => {
         setQueueError(null);
         authoritativePending.current = pending;

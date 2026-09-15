@@ -19,7 +19,6 @@ import {
   SHELL_APPROVAL_PENDING_CHANGED_EVENT,
   type ApprovalStateController,
 } from "@vibestudio/shell-core/approvalState";
-import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
 import { actionableRuntimeApprovals } from "@vibestudio/shared/approvalVisibility";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import {
@@ -313,7 +312,6 @@ export class MobileWorkspaceDirectory {
         owner.events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
       onPendingChanged: (listener) =>
         owner.events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, listener),
-      filter: filterRuntimeApprovals,
       onChange: (pending) => {
         if (this.disposed) return;
         owner.approvals = pending;
@@ -479,7 +477,6 @@ export class MobileWorkspaceDirectory {
             client.events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
           onPendingChanged: (listener) =>
             client.events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, listener),
-          filter: filterRuntimeApprovals,
           onChange: (pending) => {
             if (this.sessions.get(workspaceId) !== session || this.disposed)
               return;
