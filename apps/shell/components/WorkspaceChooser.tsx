@@ -80,6 +80,7 @@ export function WorkspaceChooser() {
   const create = async (
     workspace: string,
     rootTemplate?: import("@vibestudio/service-schemas/templates").TemplateExactPin,
+    purpose: "use" | "author" = "use",
   ) => {
     if (pending.current || restoring) return;
     pending.current = true;
@@ -95,6 +96,7 @@ export function WorkspaceChooser() {
         hubControl,
         {
           workspace,
+          purpose,
           ...(rootTemplate ? { rootTemplate } : {}),
         },
         {
@@ -147,7 +149,11 @@ export function WorkspaceChooser() {
           <Button
             disabled={busy}
             onClick={() =>
-              void create(recoveredInput.workspace, recoveredInput.rootTemplate)
+              void create(
+                recoveredInput.workspace,
+                recoveredInput.rootTemplate,
+                recoveredInput.purpose,
+              )
             }
           >
             Continue previous creation
