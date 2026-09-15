@@ -4,7 +4,6 @@ import { websiteConnectionSnapshotAtom } from "../state/shellClientAtom";
 import type { MobileShellSurface } from "../services/mobileShellSurfaces";
 import { asPanelEntityId } from "@vibestudio/shared/panel/ids";
 import { parseShellSurfaceLink } from "@vibestudio/shared/shellSurface";
-import type { ShellClient } from "../services/shellClient";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import {
   useWorkspaceVisible,
@@ -48,6 +47,7 @@ import { Toast } from "./Toast";
 import { VibestudioLogo } from "./VibestudioLogo";
 import { useAppLifecycle } from "../hooks/useAppLifecycle";
 import type { PanelWebViewHandle, PanelNavigationEvent } from "./PanelWebView";
+import type { PanelLocation } from "@vibestudio/shared/panelLocation";
 import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
 import type { PanelPageObservation } from "@vibestudio/shared/panel/observation";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
@@ -1768,14 +1768,10 @@ export function MainScreen({
   }, [shellClient]);
 
   const openWorkspacePanelLink = useCallback(
-    (
-      workspaceId: string,
-      source: string,
-      options: Parameters<ShellClient["panels"]["createRootPanel"]>[1],
-    ) => {
+    (location: PanelLocation) => {
       if (!workspaceDirectory) return;
       void workspaceDirectory
-        .openPanelSource(workspaceId, source, options)
+        .openPanelLocation(location)
         .catch((error: unknown) => {
           pushToast({
             title: "Could not open panel link",
@@ -1802,17 +1798,11 @@ export function MainScreen({
           if (action.raw) void openExternalUrl(action.raw);
           return;
         }
-        if (
-          location.workspace &&
-          location.workspace !== shellClient.workspaceId
-        ) {
-          openWorkspacePanelLink(location.workspace, location.source, {
-            ref: location.ref,
-            contextId: location.contextId,
-            stateArgs: location.stateArgs,
-            title: location.title,
-            slug: location.slug,
-            focus: true,
+        if (location.workspace !== undefined) {
+          openWorkspacePanelLink({
+            ...location,
+            disposition:
+              locationMode === "current" ? location.disposition : locationMode,
           });
           return;
         }
@@ -2091,17 +2081,11 @@ export function MainScreen({
           void openExternalUrl(value);
           return;
         }
-        if (
-          location.workspace &&
-          location.workspace !== shellClient.workspaceId
-        ) {
-          openWorkspacePanelLink(location.workspace, location.source, {
-            ref: location.ref,
-            contextId: location.contextId,
-            stateArgs: location.stateArgs,
-            title: location.title,
-            slug: location.slug,
-            focus: true,
+        if (location.workspace !== undefined) {
+          openWorkspacePanelLink({
+            ...location,
+            disposition:
+              targetMode === "current" ? location.disposition : targetMode,
           });
           return;
         }
@@ -2188,15 +2172,18 @@ export function MainScreen({
   const handlePanelNavigate = useCallback(
     (event: PanelNavigationEvent) => {
       if (!shellClient) return;
-      if (event.workspace && event.workspace !== shellClient.workspaceId) {
-        openWorkspacePanelLink(event.workspace, event.source, {
+      if (event.workspace !== undefined) {
+        openWorkspacePanelLink({
+          workspace: event.workspace,
+          source: event.source,
+          disposition: event.disposition,
+          placement: event.placement,
           ref: event.ref ?? event.options.ref,
           contextId: event.contextId ?? event.options.contextId,
           stateArgs: event.stateArgs,
           title: event.options.title,
           slug: event.options.slug,
-          name: event.options.name,
-          focus: true,
+          focus: event.options.focus,
         });
         return;
       }

@@ -170,7 +170,6 @@ export const PanelStack = memo(function PanelStack({
     notification,
     panel: panelService,
     view,
-    workspace,
   } = useShellWorkspaceClient();
 
   const navigationHost = useWorkspaceNavigationHost();
@@ -871,11 +870,11 @@ export const PanelStack = memo(function PanelStack({
               return;
             }
             void (async () => {
-              if (
-                location.workspace &&
-                location.workspace !== (await workspace.getActive())
-              ) {
-                await incomingPanelLocation.openLocation(location);
+              if (location.workspace !== undefined) {
+                await incomingPanelLocation.openLocation({
+                  ...location,
+                  disposition: mode === "current" ? location.disposition : mode,
+                });
                 return;
               }
               const common = {
@@ -1031,11 +1030,12 @@ export const PanelStack = memo(function PanelStack({
             return;
           }
           void (async () => {
-            if (
-              location.workspace &&
-              location.workspace !== (await workspace.getActive())
-            ) {
-              await incomingPanelLocation.openLocation(location);
+            if (location.workspace !== undefined) {
+              await incomingPanelLocation.openLocation({
+                ...location,
+                disposition:
+                  targetMode === "current" ? location.disposition : targetMode,
+              });
               return;
             }
             const common = {

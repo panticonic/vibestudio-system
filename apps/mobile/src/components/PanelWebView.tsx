@@ -45,6 +45,8 @@ import {
 import {
   tryParsePanelLocationLink,
   type PanelDisposition,
+  type PanelWorkspace,
+  type PanelLocation,
 } from "@vibestudio/shared/panelLocation";
 import { openExternalUrl } from "../services/nativeCapabilities";
 import { shouldOpenPdfExternally } from "../services/mediaNavigation";
@@ -63,7 +65,8 @@ export interface PanelNavigationEvent {
   contextId?: string;
   ref?: string;
   disposition?: PanelDisposition;
-  workspace?: string;
+  workspace?: PanelWorkspace;
+  placement?: PanelLocation["placement"];
   options: {
     title?: string;
     slug?: string;
@@ -1047,7 +1050,12 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
             workspace: canonical.workspace,
             contextId: canonical.contextId,
             ref: canonical.ref,
-            disposition: canonical.disposition ?? fallbackDisposition,
+            disposition:
+              canonical.disposition ??
+              (canonical.workspace !== undefined
+                ? "root"
+                : fallbackDisposition),
+            placement: canonical.placement,
             options: {
               title: canonical.title,
               slug: canonical.slug,
@@ -1073,6 +1081,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
           panelId,
           source: parsed.source,
           workspace: parsed.workspace,
+          placement: parsed.placement,
           contextId: parsed.contextId,
           ref: parsed.ref,
           disposition: parsed.disposition ?? fallbackDisposition,

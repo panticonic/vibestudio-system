@@ -84,43 +84,7 @@ function AppContent() {
     const openLocation = async (location: PanelLocation) => {
       if (!directory)
         throw new Error("Your workspace directory is not connected");
-      const workspaceId = location.workspace ?? directory.activeWorkspaceId;
-      if (!workspaceId) throw new Error("Choose a workspace for this panel");
-      const session = await directory.open(workspaceId);
-      await directory.activate(workspaceId);
-      const shellClient = session.client;
-      const focusedPanelId = shellClient.panels.registry.getFocusedPanelId();
-      const common = {
-        ref: location.ref,
-        contextId: location.contextId,
-        stateArgs: location.stateArgs,
-      };
-      const disposition = location.disposition ?? "root";
-      if (disposition === "current" && focusedPanelId) {
-        await shellClient.panels.navigatePanel(
-          focusedPanelId,
-          location.source,
-          common,
-        );
-      } else if (disposition === "child" && focusedPanelId) {
-        await shellClient.panels.createChildPanel(
-          focusedPanelId,
-          location.source,
-          {
-            ...common,
-            title: location.title,
-            slug: location.slug,
-            focus: location.focus ?? true,
-          },
-        );
-      } else {
-        await shellClient.panels.createRootPanel(location.source, {
-          ...common,
-          title: location.title,
-          slug: location.slug,
-          focus: location.focus ?? true,
-        });
-      }
+      await directory.openPanelLocation(location);
     };
     const handleUrl = (raw: string) => {
       const parsed = parsePanelLocationLink(raw);

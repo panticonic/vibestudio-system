@@ -4,6 +4,10 @@ import {
 } from "@vibestudio/service-schemas/clients/workspaceCreationClient";
 import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import { clearWorkspaceCookies } from "./workspaceBrowserProfile";
+import {
+  resolvePanelWorkspace,
+  type PanelLocation,
+} from "@vibestudio/shared/panelLocation";
 import { extensionsMethods } from "@vibestudio/service-schemas/extensions";
 import { workspaceName as displayWorkspaceName } from "./workspaceName";
 import {
@@ -639,6 +643,42 @@ export class MobileWorkspaceDirectory {
     // A destination owns its tree; source panel IDs never become target parents.
     const panel = await session.client.panels.createRootPanel(source, options);
     await session.client.panels.focus(panel.id);
+  }
+
+  /** Every panel-link carrier resolves destinations against this account's catalog. */
+  async openPanelLocation(location: PanelLocation): Promise<void> {
+    const target = resolvePanelWorkspace(
+      location.workspace,
+      this.entries,
+      this.activeWorkspaceId,
+    );
+    const session = await this.open(target.workspaceId);
+    await this.activate(target.workspaceId);
+    const panels = session.client.panels;
+    const focused = panels.registry.getFocusedPanelId();
+    const common = {
+      ref: location.ref,
+      contextId: location.contextId,
+      stateArgs: location.stateArgs,
+      placement: location.placement,
+    };
+    if (location.disposition === "current" && focused) {
+      await panels.navigatePanel(focused, location.source, common);
+    } else if (location.disposition === "child" && focused) {
+      await panels.createChildPanel(focused, location.source, {
+        ...common,
+        title: location.title,
+        slug: location.slug,
+        focus: location.focus ?? true,
+      });
+    } else {
+      await panels.createRootPanel(location.source, {
+        ...common,
+        title: location.title,
+        slug: location.slug,
+        focus: location.focus ?? true,
+      });
+    }
   }
 
   async clearBrowserCookies(workspaceId: string): Promise<void> {

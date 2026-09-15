@@ -14,6 +14,7 @@ import {
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import type { PanelLocation } from "@vibestudio/shared/panelLocation";
 import { WorkspaceDesktop } from "./WorkspaceDesktop";
 import {
   useWorkspaceNavigationHost,
@@ -65,6 +66,7 @@ const api = vi.hoisted(() => {
     route: vi.fn(async () => {}),
     list: vi.fn(async () => catalog),
     incomingSurface: vi.fn(async (): Promise<unknown> => null),
+    incomingLocations: new Set<(location: PanelLocation) => void>(),
     open: vi.fn(async (id: string) => {
       const create = vi.fn(async () => ({ id: "panel" }));
       const close = vi.fn();
@@ -73,7 +75,13 @@ const api = vi.hoisted(() => {
       return {
         close,
         client: {
-          panel: { createAboutPanel: create },
+          panel: {
+            createAboutPanel: create,
+            createPanel: create,
+            createChild: create,
+            navigate: create,
+            getFocusedPanelId: async () => "destination-focused",
+          },
           app: { openShellSurface: surface },
           shellApproval: { listPending: async () => [] },
           events: {
@@ -109,7 +117,10 @@ vi.mock("../shell/client", () => ({
   directEvents: { on: () => () => {} },
   incomingShellSurface: { getPending: api.incomingSurface },
   incomingPanelLocation: {
-    onLocation: () => () => {},
+    onLocation: (listener: (location: PanelLocation) => void) => {
+      api.incomingLocations.add(listener);
+      return () => api.incomingLocations.delete(listener);
+    },
     getPending: async () => null,
   },
 }));
@@ -158,6 +169,50 @@ function OpenWorkspace({ workspaceId }: { workspaceId: string }) {
   );
 }
 describe("desktop workspace ownership", () => {
+  it("opens a System-role link in its destination with state and placement intact", async () => {
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      const personal = api.calls.get("personal")!;
+      personal.create.mockClear();
+      await act(async () => {
+        for (const receive of api.incomingLocations)
+          receive({
+            source: "about/automations",
+            workspace: { role: "system" },
+            stateArgs: { tab: "active" },
+            placement: { disposition: "side" },
+            focus: false,
+          });
+      });
+      await waitFor(() =>
+        expect(api.calls.get("system")?.create).toHaveBeenCalledWith(
+          "about/automations",
+          expect.objectContaining({
+            isRoot: true,
+            stateArgs: { tab: "active" },
+            placement: { disposition: "side" },
+            focus: false,
+          }),
+        ),
+      );
+      expect(personal.create).not.toHaveBeenCalled();
+      expect(api.route).toHaveBeenCalledWith({ workspaceId: "system" });
+      await act(async () => {
+        for (const receive of api.incomingLocations)
+          receive({
+            source: "panels/chat",
+            workspace: { id: "missing" },
+          });
+      });
+      await screen.findByText(
+        "The workspace for this panel link is unavailable",
+      );
+      expect(api.calls.has("missing")).toBe(false);
+    } finally {
+      result.unmount();
+    }
+  });
   it("resolves a newly-created catalog entry into a retained owner before focusing it", async () => {
     const result = render(
       <Desktop>

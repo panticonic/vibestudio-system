@@ -48,7 +48,10 @@ import { ConnectionStatusBadge } from "./ConnectionStatusBadge";
 import { ThemeSettings } from "./ThemeSettings";
 import "./workspaceDesktop.css";
 
-import type { PanelLocation } from "@vibestudio/shared/panelLocation";
+import {
+  resolvePanelWorkspace,
+  type PanelLocation,
+} from "@vibestudio/shared/panelLocation";
 
 type ClientOwner = Awaited<ReturnType<typeof createWorkspaceShellClient>>;
 type OpenWorkspace = ClientOwner & {
@@ -329,13 +332,13 @@ export function WorkspaceDesktop({ children }: { children?: ReactNode }) {
         const entries = catalogRef.current.length
           ? catalogRef.current
           : await hubControl.listWorkspaces();
-        const target = location.workspace
-          ? entries.find((entry) => entry.name === location.workspace)
-          : (entries.find(
-              (entry) => entry.workspaceId === focusedRef.current,
-            ) ?? entries.find((entry) => entry.privateRole === "personal"));
-        if (!target)
-          throw new Error("The workspace for this panel link is unavailable");
+        const target = resolvePanelWorkspace(
+          location.workspace,
+          entries,
+          focusedRef.current ??
+            entries.find((entry) => entry.privateRole === "personal")
+              ?.workspaceId,
+        );
         const owner = await open(target);
         if (!live) return;
         await hubControl.routeWorkspace({ workspaceId: target.workspaceId });
@@ -442,7 +445,21 @@ export function WorkspaceDesktop({ children }: { children?: ReactNode }) {
 
   return (
     <ShellPresentationStoreContext.Provider value={presentationStore}>
-      <WorkspaceDesktopHostContext.Provider value={{ openWorkspace, inspectWorkspaceFolder: (globalThis as unknown as { __vibestudioApp?: { inspectWorkspaceFolder(): Promise<import("@vibestudio/service-schemas/templates").TemplateInspection | null> } }).__vibestudioApp?.inspectWorkspaceFolder }}>
+      <WorkspaceDesktopHostContext.Provider
+        value={{
+          openWorkspace,
+          inspectWorkspaceFolder: (
+            globalThis as unknown as {
+              __vibestudioApp?: {
+                inspectWorkspaceFolder(): Promise<
+                  | import("@vibestudio/service-schemas/templates").TemplateInspection
+                  | null
+                >;
+              };
+            }
+          ).__vibestudioApp?.inspectWorkspaceFolder,
+        }}
+      >
         <div className="workspace-desktop">
           <header
             className="workspace-desktop-titlebar"

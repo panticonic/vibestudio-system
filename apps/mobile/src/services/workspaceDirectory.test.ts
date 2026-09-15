@@ -37,6 +37,9 @@ jest.mock("./shellClient", () => ({
       dispose: jest.fn(),
       refreshAccountProfile: jest.fn(async () => ({ userId: "alice" })),
       panels: {
+        registry: { getFocusedPanelId: jest.fn(() => "destination-focused") },
+        navigatePanel: jest.fn(async () => ({ id: "destination-focused" })),
+        createChildPanel: jest.fn(async () => ({ id: "destination-child" })),
         focus: jest.fn(async () => undefined),
         createAboutPanel: jest.fn(async () => ({ id: "new-panel" })),
         createRootPanel: jest.fn(async () => ({ id: "destination-panel" })),
@@ -117,6 +120,48 @@ beforeEach(() => {
 });
 
 describe("mobile workspace directory", () => {
+  it("resolves a workspace role and retains destination state without touching the source tree", async () => {
+    const { directory } = fixture();
+    try {
+      await directory.init();
+      const personal = directory.sessions.get("personal")!;
+      await directory.openPanelLocation({
+        source: "about/automations",
+        workspace: { role: "system" },
+        stateArgs: { tab: "active" },
+        focus: false,
+      });
+      const system = directory.sessions.get("system")!;
+      expect(system.client.panels.createRootPanel).toHaveBeenCalledWith(
+        "about/automations",
+        expect.objectContaining({ stateArgs: { tab: "active" }, focus: false }),
+      );
+      expect(personal.client.panels.createRootPanel).not.toHaveBeenCalled();
+      expect(directory.activeWorkspaceId).toBe("system");
+      await directory.openPanelLocation({
+        source: "panels/chat",
+        workspace: "Project",
+        disposition: "child",
+        contextId: "target-context",
+      });
+      expect(
+        directory.sessions.get("project")!.client.panels.createChildPanel,
+      ).toHaveBeenCalledWith(
+        "destination-focused",
+        "panels/chat",
+        expect.objectContaining({ contextId: "target-context" }),
+      );
+      await expect(
+        directory.openPanelLocation({
+          source: "panels/chat",
+          workspace: { id: "missing" },
+        }),
+      ).rejects.toThrow("unavailable");
+      expect(directory.activeWorkspaceId).toBe("project");
+    } finally {
+      await directory.dispose();
+    }
+  });
   it("merges hub approvals without creating a fake workspace session", async () => {
     const { directory, account } = fixture();
     await directory.init();
