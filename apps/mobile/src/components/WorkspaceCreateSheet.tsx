@@ -383,7 +383,7 @@ export function WorkspaceCreateSheet({
                     <Text style={[type.bodyStrong, { color: colors.primary }]}>
                       {showContents
                         ? "Hide contents"
-                        : `View ${currentInspection.repositories.length} workspace units and ${currentInspection.files.length} files`}
+                        : `View ${currentInspection.repositories.length} workspace units`}
                     </Text>
                   </Pressable>
                   {showContents && (
@@ -391,10 +391,7 @@ export function WorkspaceCreateSheet({
                       selectable
                       style={[type.caption, { color: colors.textSecondary }]}
                     >
-                      {[
-                        ...currentInspection.repositories,
-                        ...currentInspection.files,
-                      ].join("\n")}
+                      {currentInspection.repositories.join("\n")}
                     </Text>
                   )}
                 </>

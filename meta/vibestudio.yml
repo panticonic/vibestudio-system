@@ -96,7 +96,6 @@ template:
   dependencies:
     - url: git+https://github.com/panticonic/vibestudio-base.git
   description: Your private client applications and device settings.
-  files: []
   name: System
   repositories:
     - about/about
@@ -107,7 +106,6 @@ template:
     - about/local-models
     - about/permissions
     - about/server-logs
-    - about/templates
     - about/workspace-history
     - apps/mobile
     - apps/remote-cli
