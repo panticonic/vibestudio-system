@@ -41,7 +41,7 @@ const inspection = {
   pin,
   presentation: { name: "Garden", description: "A place for growing ideas." },
   repositories: ["panels/garden"],
-  files: [],
+  dependencies: [],
 };
 afterEach(cleanup);
 beforeEach(() => {
@@ -116,7 +116,7 @@ describe("WorkspaceChooser", () => {
 
   it("opens creation directly without duplicating the sidebar workspace list", async () => {
     draw();
-    await screen.findByRole("textbox", { name: "Workspace source address" });
+    await screen.findByRole("textbox", { name: "Workspace name" });
     expect(clients.hubControl.listWorkspaces).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /Shared garden/ })).toBeNull();
     expect(clients.openWorkspace).not.toHaveBeenCalled();
@@ -134,6 +134,7 @@ describe("WorkspaceChooser", () => {
       expect(clients.hubControl.createWorkspace).toHaveBeenCalledWith({
         operationId: expect.any(String),
         workspace: "my-garden",
+        purpose: "use",
         rootTemplate: pin,
       }),
     );
@@ -158,6 +159,7 @@ describe("WorkspaceChooser", () => {
     expect(clients.hubControl.createWorkspace).toHaveBeenCalledWith({
       operationId: expect.any(String),
       workspace: "garden",
+      purpose: "use",
     });
   });
 });

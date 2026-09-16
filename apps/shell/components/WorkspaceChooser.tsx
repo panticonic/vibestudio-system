@@ -123,7 +123,7 @@ export function WorkspaceChooser() {
     }
   };
   return (
-    <Box p="0" style={{ maxHeight: "80vh", overflow: "auto" }}>
+    <Box p="0" style={{ minWidth: 0 }}>
       <Flex direction="column" gap="4">
         {recoveryNotice ? (
           <Callout.Root>

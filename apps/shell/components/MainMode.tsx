@@ -104,12 +104,27 @@ export default function MainMode() {
           open={workspaceChooserOpen}
           onOpenChange={(open) => {
             setWorkspaceChooserOpen(open);
-            if (!open) { setCreationTemplate(null); setCreationSource(null); }
+            if (!open) {
+              setCreationTemplate(null);
+              setCreationSource(null);
+            }
           }}
           maxWidth="920px"
-          title="Add workspace"
-          description="Start a separate space for your panels, files and conversations."
+          className="workspace-creation-dialog"
+          title="Create a workspace"
+          description="A home for your projects, panels and conversations."
         >
+          <button
+            className="workspace-creation-close"
+            aria-label="Close workspace setup"
+            onClick={() => {
+              setWorkspaceChooserOpen(false);
+              setCreationTemplate(null);
+              setCreationSource(null);
+            }}
+          >
+            ×
+          </button>
           <WorkspaceChooser />
         </AppDialog>
       </WorkspaceDesktop>
