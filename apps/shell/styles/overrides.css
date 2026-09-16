@@ -1455,3 +1455,22 @@ html[data-overlay-dragging] * {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+/* Explicit inset rings keep row focus rectangular around nested actions. */
+.app-panel-tree-row,
+.app-panel-tree-row button {
+  outline: none;
+}
+.app-panel-tree-row:focus-visible,
+.workspace-stack .app-panel-tree-row button:focus-visible {
+  outline: 1px solid var(--gray-9);
+  outline-offset: -1px;
+}
+.app-panel-tree-owner {
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--gray-9);
+  flex-shrink: 2;
+}

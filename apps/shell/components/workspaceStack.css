@@ -73,8 +73,7 @@
   padding: var(--workspace-stack-gutter);
 }
 .workspace-section-focused {
-  background: var(--accent-2);
-  border-color: var(--accent-5);
+  background: var(--gray-a2);
 }
 .workspace-section-system {
   margin-top: var(--workspace-stack-gutter);

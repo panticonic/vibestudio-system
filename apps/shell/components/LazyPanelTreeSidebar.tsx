@@ -1,5 +1,5 @@
 import { usePanelTrust } from "./usePanelTrust";
-import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 /**
  * LazyPanelTreeSidebar - Sortable panel tree sidebar with drag-and-drop.
  *
@@ -46,13 +46,11 @@ import {
   usePanelDndTree,
   usePanelDndDrag,
   useAccountProfiles,
-  useWorkspacePresence,
   INDENTATION_WIDTH,
   END_DROP_ZONE_ID,
   type FlattenedPanel,
   type PanelTreeViewNode,
   type ShellAccountProfile,
-  type WorkspacePresenceEntry,
 } from "../shell/hooks/index.js";
 import { isPanelClosePointerButton } from "@vibestudio/shared/panelCommands";
 
@@ -70,8 +68,6 @@ import { buildGuides } from "./panelTreeGuides.js";
 // sidebar has no title left to read. Rows sit at the tightest height a 14px
 // title still centres in.
 const ROW_HEIGHT = 22;
-/** Height of an owner band header row. */
-const OWNER_BAND_HEIGHT = 18;
 /** Left padding before the caret gutter of a depth-0 row. */
 const ROW_PADDING_LEFT = 6;
 /** Fixed-width gutter that holds the expand caret so titles align by depth. */
@@ -281,6 +277,8 @@ function BuildIndicator({ buildState }: { buildState?: string }) {
 interface SortableTreeItemProps {
   item: FlattenedPanel;
   guides: string;
+  ownerLabel?: string;
+  ownerDescription?: string;
   isSelected: boolean;
   /** Shown in some pane of the layout (the focused one renders as selected). */
   isVisible: boolean;
@@ -303,6 +301,8 @@ const SortableTreeItem = memo(
   function SortableTreeItem({
     item,
     guides,
+    ownerLabel,
+    ownerDescription,
     isSelected,
     isVisible,
     showIndicator,
@@ -321,6 +321,7 @@ const SortableTreeItem = memo(
   }: SortableTreeItemProps) {
     const { panel, depth, collapsed } = item;
     const [isHovered, setIsHovered] = useState(false);
+    const [hasFocus, setHasFocus] = useState(false);
     const trust = usePanelTrust(panel.id, panel.source);
     const pinnedPanelIds = useAtomValue(pinnedPanelIdsAtom);
     const isPinned = pinnedPanelIds.has(panel.id);
@@ -347,7 +348,7 @@ const SortableTreeItem = memo(
     };
 
     const hasChildren = panel.childCount > 0;
-    const showActions = (isHovered || isTouch) && !isDraggingAny;
+    const showActions = (isHovered || hasFocus || isTouch) && !isDraggingAny;
     // The count is only meaningful when children are hidden behind a collapsed node.
     const showCount = hasChildren && collapsed && !showActions;
 
@@ -380,6 +381,7 @@ const SortableTreeItem = memo(
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
+        if (e.target !== e.currentTarget) return;
         if (isSortable && (e.ctrlKey || e.metaKey) && e.key === "ArrowLeft") {
           e.preventDefault();
           onUnindent(panel.id);
@@ -504,11 +506,16 @@ const SortableTreeItem = memo(
           gap="1"
           role="treeitem"
           aria-expanded={hasChildren ? !collapsed : undefined}
+          className="app-panel-tree-row"
+          onFocus={() => setHasFocus(true)}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setHasFocus(false);
+          }}
           data-panel-tree-row="true"
           data-panel-id={panel.id}
           aria-label={`Select panel ${panel.title}`}
-          aria-description={trust.description}
-          title={trust.description}
+          aria-description={[ownerDescription, trust.description].filter(Boolean).join(". ")}
+          title={[ownerDescription, trust.description].filter(Boolean).join(". ")}
           data-panel-trust={trust.state}
           style={rowStyle}
           data-active={isSelected ? "true" : "false"}
@@ -586,6 +593,12 @@ const SortableTreeItem = memo(
           >
             {panel.title}
           </Text>
+
+          {ownerLabel && (
+            <Text size="1" className="app-panel-tree-owner" title={ownerDescription}>
+              {ownerLabel}
+            </Text>
+          )}
 
           {/* Pin indicator — quiet glyph, only when pinned */}
           {isPinned && (
@@ -668,6 +681,8 @@ const SortableTreeItem = memo(
     return (
       prev.item.id === next.item.id &&
       prev.guides === next.guides &&
+      prev.ownerLabel === next.ownerLabel &&
+      prev.ownerDescription === next.ownerDescription &&
       prev.item.depth === next.item.depth &&
       prev.item.collapsed === next.item.collapsed &&
       prev.item.parentId === next.item.parentId &&
@@ -739,20 +754,14 @@ function EndDropZone({ isOver, projectedDepth, isDragging }: EndDropZoneProps) {
 // ============================================================================
 
 // ============================================================================
-// Owner Bands (WP3 forest)
+// Owner attribution
 // ============================================================================
 
 /**
- * Display label for an owner band. Persistent account profiles provide names
+ * Display name for root-panel attribution. Persistent account profiles provide names
  * independently of transient online presence.
  */
-function ownerBandLabel(
-  owner: string,
-  selfUserId: string | null,
-  profile: ShellAccountProfile | undefined
-): string {
-  if (owner === "") return "Workspace";
-  if (selfUserId !== null && owner === selfUserId) return "Your panels";
+function ownerDisplayName(owner: string, profile: ShellAccountProfile | undefined): string {
   if (profile) {
     const label = profile.displayName || `@${profile.handle}`;
     return profile.revoked ? `${label} (revoked)` : label;
@@ -761,103 +770,8 @@ function ownerBandLabel(
   return `Member ${suffix}`;
 }
 
-/**
- * A small round presence dot: solid in the owner's colour when online, a hollow
- * ring when the user is known-but-offline, nothing when we have no presence row
- * for them. Attribution, not a security signal.
- */
-function PresenceDot({
-  presence,
-  tint,
-}: {
-  presence: WorkspacePresenceEntry | undefined;
-  tint?: string;
-}) {
-  if (!presence) return null;
-  const dotColor = tint ?? "var(--accent-9)";
-  return (
-    <Box
-      aria-hidden
-      style={{
-        flexShrink: 0,
-        width: 7,
-        height: 7,
-        borderRadius: "50%",
-        backgroundColor: presence.online ? dotColor : "transparent",
-        border: presence.online ? "none" : `1px solid var(--gray-8)`,
-      }}
-    />
-  );
-}
-
-/**
- * Labelled band separating one owner's trees from the next, dotted with that
- * owner's WP8 workspace presence. Attribution only: every owner's trees below
- * it stay fully inspectable and draggable.
- */
-function OwnerBandHeader({
-  owner,
-  selfUserId,
-  profile,
-  presence,
-}: {
-  owner: string;
-  selfUserId: string | null;
-  profile: ShellAccountProfile | undefined;
-  presence: WorkspacePresenceEntry | undefined;
-}) {
-  const isSelf = selfUserId !== null && owner === selfUserId;
-  const label = ownerBandLabel(owner, selfUserId, profile);
-  // User-selected tints belong on the decorative presence dot. Keeping text
-  // on neutral theme colors preserves contrast in both appearances and keeps
-  // the band from tinting the chrome; your own band is distinguished by
-  // contrast, not hue.
-  const labelColor = isSelf || owner === "" ? "var(--gray-12)" : "var(--gray-11)";
-  const endpoints = presence?.endpoints ?? 0;
-  return (
-    <Flex
-      align="center"
-      gap="2"
-      style={{ height: OWNER_BAND_HEIGHT, paddingInline: ROW_PADDING_LEFT }}
-      role="heading"
-      aria-level={2}
-      aria-label={
-        presence
-          ? `Panels owned by ${label} (${presence.online ? "online" : "offline"})`
-          : `Panels owned by ${label}`
-      }
-    >
-      <PresenceDot presence={presence} tint={profile?.color} />
-      <Text
-        size="1"
-        weight="medium"
-        truncate
-        style={{
-          color: labelColor,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          fontSize: "10px",
-        }}
-      >
-        {label}
-      </Text>
-      {endpoints > 1 && (
-        <Text
-          size="1"
-          aria-label={`${endpoints} active connections`}
-          style={{ color: "var(--gray-8)", fontSize: "9px", flexShrink: 0 }}
-        >
-          ×{endpoints}
-        </Text>
-      )}
-      <Box style={{ flex: 1, height: 1, backgroundColor: "var(--gray-a4)" }} />
-    </Flex>
-  );
-}
-
-/** A virtualized sidebar row: an owner band header or a sortable panel item. */
+/** A virtualized panel or pagination row. */
 type SidebarRow =
-  | { kind: "owner-band"; owner: string }
   | { kind: "panel"; item: FlattenedPanel }
   | { kind: "root-groups-more" }
   | { kind: "search-more" }
@@ -870,11 +784,7 @@ type SidebarRow =
       remaining: number;
     };
 
-/**
- * Interleave owner band headers into the flattened item list at forest group
- * boundaries. Shared workspaces show explicit owner bands; private Personal
- * and System workspaces present one tree while retaining pagination ownership.
- */
+/** Keep ownership-scoped pagination within one continuous panel tree. */
 function buildSidebarRows(
   flattenedItems: FlattenedPanel[],
   forest: Array<{
@@ -883,8 +793,7 @@ function buildSidebarRows(
     rootLoadedCount?: number;
     rootsHaveMore?: boolean;
     rootPanels: PanelTreeViewNode[];
-  }>,
-  privateRole?: "personal" | "system",
+  }>
 ): SidebarRow[] {
   const populated = forest.filter((group) => group.rootPanels.length > 0);
   const itemById = new Map(flattenedItems.map((item) => [item.id, item]));
@@ -930,7 +839,6 @@ function buildSidebarRows(
   };
 
   for (const group of populated) {
-    if (!privateRole) rows.push({ kind: "owner-band", owner: group.owner });
     appendGroup(
       group.rootPanels,
       group.rootCount,
@@ -973,7 +881,6 @@ export function LazyPanelTreeSidebar({
   onArchive,
 }: LazyPanelTreeSidebarProps) {
   const { notification, panel } = useShellWorkspaceClient();
-  const privateRole = useWorkspaceNavigationHost()?.privateRole;
 
   const isTouch = useTouchDevice();
 
@@ -1001,19 +908,25 @@ export function LazyPanelTreeSidebar({
     [ownerGroups]
   );
   const ownerProfiles = useAccountProfiles(ownerIds);
-  // WP8 §4 workspace presence answers only whether an owner is connected.
-  const presenceByUser = useWorkspacePresence();
+  const rootOwners = useMemo(
+    () =>
+      new Map(
+        ownerGroups.flatMap((group) =>
+          group.rootPanels.map((panel) => [panel.id, group.owner] as const)
+        )
+      ),
+    [ownerGroups]
+  );
   const { flattenedItems, collapsedIds, toggleCollapse, expandIds, indentPanel, unindentPanel } =
     usePanelDndTree();
 
   const { activeId, overId, projectedDepth, indicatorItemId, showIndicatorBelow } =
     usePanelDndDrag();
 
-  // Owner bands (WP3): one labelled section per owner group, own group first
-  // (ordering happens in PanelTreeContext), others visible & inspectable below.
+  // Preserve forest ordering and pagination without ownership headings.
   const treeRows = useMemo(
-    () => buildSidebarRows(flattenedItems, ownerGroups, privateRole),
-    [flattenedItems, ownerGroups, privateRole]
+    () => buildSidebarRows(flattenedItems, ownerGroups),
+    [flattenedItems, ownerGroups]
   );
   const trimmedQuery = query.trim();
   useEffect(() => {
@@ -1233,13 +1146,7 @@ export function LazyPanelTreeSidebar({
     getScrollElement: () => scrollElement,
     scrollMargin: scrollMargin ?? 0,
     estimateSize: (index) =>
-      index === rows.length
-        ? dragging
-          ? END_DROP_ZONE_DRAG_HEIGHT
-          : 0
-        : rows[index]?.kind === "owner-band"
-          ? OWNER_BAND_HEIGHT
-          : ROW_HEIGHT,
+      index === rows.length ? (dragging ? END_DROP_ZONE_DRAG_HEIGHT : 0) : ROW_HEIGHT,
     overscan: 10,
   });
   // The estimate above changes with the drag, and the virtualizer caches it.
@@ -1419,28 +1326,6 @@ export function LazyPanelTreeSidebar({
             }
 
             const row = assertPresent(rows[virtualRow.index]);
-            if (row.kind === "owner-band") {
-              return (
-                <Box
-                  key={`__owner_band__${row.owner}`}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
-                  }}
-                >
-                  <OwnerBandHeader
-                    owner={row.owner}
-                    selfUserId={selfUserId}
-                    profile={ownerProfiles.get(row.owner)}
-                    presence={presenceByUser.get(row.owner)}
-                  />
-                </Box>
-              );
-            }
-
             if (row.kind === "load-more") {
               return (
                 <Box
@@ -1504,6 +1389,15 @@ export function LazyPanelTreeSidebar({
             }
 
             const item = row.item;
+            const owner = rootOwners.get(item.id);
+            const attribution =
+              owner === undefined
+                ? undefined
+                : owner === ""
+                  ? "No individual owner"
+                  : owner === selfUserId
+                    ? "Owned by you"
+                    : `Owned by ${ownerDisplayName(owner, ownerProfiles.get(owner))}`;
             return (
               <Box
                 key={item.id}
@@ -1517,6 +1411,12 @@ export function LazyPanelTreeSidebar({
               >
                 <SortableTreeItem
                   item={item}
+                  ownerDescription={attribution}
+                  ownerLabel={
+                    owner && owner !== selfUserId
+                      ? ownerDisplayName(owner, ownerProfiles.get(owner))
+                      : undefined
+                  }
                   guides={guidesById.get(item.id) ?? ""}
                   isSelected={item.id === selectedId}
                   isVisible={item.id !== selectedId && (visibleIds?.has(item.id) ?? false)}
