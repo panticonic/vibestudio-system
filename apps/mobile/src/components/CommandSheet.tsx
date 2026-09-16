@@ -495,7 +495,9 @@ export function CommandSheet({
           return;
         case "url":
           void slateDeps.panels
-            .createBrowserUrlPanel(slateDeps.activePanelId, target.url, { focus: true })
+            .createBrowserUrlPanel(slateDeps.activePanelId, target.url, {
+              focus: true,
+            })
             .catch((error: unknown) =>
               pushToast({
                 title: "Could not open that address",
@@ -664,6 +666,14 @@ export function CommandSheet({
                 />
               </View>
 
+              <View style={styles.heading}>
+                <Text style={[type.heading, { color: colors.text }]}>
+                  What would you like to do?
+                </Text>
+                <Text style={[type.caption, { color: colors.textSecondary }]}>
+                  Find a panel, run a command, or ask your agent.
+                </Text>
+              </View>
               {argSession ? (
                 <View style={styles.chipRow}>
                   <View
@@ -735,7 +745,7 @@ export function CommandSheet({
                   onPress={close}
                   accessibilityRole="button"
                   accessibilityLabel="Close commands"
-                  hitSlop={8}
+                  style={styles.closeButton}
                 >
                   <X size={17} color={colors.textTertiary} />
                 </Pressable>
@@ -820,7 +830,7 @@ export function CommandSheet({
                         },
                       ]}
                     >
-                      {section.title.toUpperCase()}
+                      {section.title}
                     </Text>
                   )}
                   renderItem={({ item }) => (
@@ -879,8 +889,7 @@ export function CommandSheet({
                               type.caption,
                               { color: colors.textTertiary },
                             ]}
-                            numberOfLines={1}
-                            ellipsizeMode="middle"
+                            numberOfLines={2}
                           >
                             {item.meta}
                           </Text>
@@ -948,15 +957,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
   },
+  heading: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+    gap: spacing.xs,
+  },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
     marginHorizontal: spacing.lg,
     paddingHorizontal: spacing.md,
-    height: 44,
-    borderRadius: radius.pill,
+    minHeight: 52,
+    borderRadius: radius.lg,
     borderWidth: hairline,
+  },
+  closeButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
   searchInput: {
     flex: 1,
@@ -976,7 +997,9 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   modeChip: {
-    borderRadius: radius.pill,
+    minHeight: 44,
+    justifyContent: "center",
+    borderRadius: radius.md,
     borderWidth: hairline,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
@@ -1000,12 +1023,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     minHeight: ROW_HEIGHT,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     gap: spacing.md,
   },
   rowIcon: {
-    width: 22,
+    width: 32,
     textAlign: "center",
     fontSize: 15,
   },

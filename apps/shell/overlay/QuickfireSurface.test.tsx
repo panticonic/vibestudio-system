@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { createEvent, fireEvent, render, screen } from "@testing-library/react";
+import {
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { QuickfireSurfaceProps } from "./quickfireSurfaceModel";
 import { QuickfireSurface } from "./QuickfireSurface";
@@ -57,7 +63,7 @@ describe("QuickfireSurface conversation", () => {
   it("presents a notification-bound conversation as a reply surface", () => {
     renderSurface({ kind: "conversation", streaming: false });
 
-    const input = screen.getByRole("combobox", {
+    const input = screen.getByRole("textbox", {
       name: "Reply to this conversation",
     });
     expect(input.getAttribute("placeholder")).toBe("Reply…");
@@ -65,7 +71,7 @@ describe("QuickfireSurface conversation", () => {
 
   it("grows the composer with wrapped input while keeping it bounded by CSS", () => {
     const emitIntent = renderSurface({ streaming: false });
-    const input = screen.getByRole("combobox") as HTMLTextAreaElement;
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
     Object.defineProperty(input, "scrollHeight", {
       configurable: true,
       value: 66,
@@ -85,7 +91,7 @@ describe("QuickfireSurface conversation", () => {
 
   it("keeps Shift+Enter available for multiline conversation input", () => {
     const emitIntent = renderSurface({ streaming: false });
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
 
     const accepted = fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
 
@@ -97,7 +103,7 @@ describe("QuickfireSurface conversation", () => {
 
   it("routes ordinary conversation prose as input without requiring a slash", () => {
     const emitIntent = renderSurface({ streaming: false });
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
 
     fireEvent.change(input, {
       target: { value: "was that a model provider failure?" },
@@ -117,7 +123,7 @@ describe("QuickfireSurface conversation", () => {
   it("does not cycle out of a live conversation with the palette shortcut", () => {
     const emitIntent = renderSurface({ streaming: false });
 
-    fireEvent.keyDown(screen.getByRole("combobox"), {
+    fireEvent.keyDown(screen.getByRole("textbox"), {
       key: "k",
       ctrlKey: true,
     });
@@ -173,12 +179,12 @@ describe("QuickfireSurface conversation", () => {
     expect(screen.getByText("running")).toBeTruthy();
     expect(document.querySelector(".qf-spinner")).not.toBeNull();
     const transcript = screen.getByTestId("quickfire-transcript");
-    expect(transcript.hasAttribute("data-row")).toBe(true);
+    expect(transcript.hasAttribute("data-row")).toBe(false);
     expect(
       screen
         .getByText("panel_describe")
         .closest('.qf-box[data-surface="outline"]')
-        ?.hasAttribute("data-fit"),
+        ?.hasAttribute("data-full"),
     ).toBe(true);
   });
 
@@ -243,7 +249,7 @@ describe("QuickfireSurface conversation", () => {
     expect(narration.getAttribute("data-tone")).toBe("neutral");
   });
 
-  it("keeps collapsed reasoning content-sized", () => {
+  it("gives reasoning a readable full-width timeline row", () => {
     renderSurface({
       transcript: [
         {
@@ -255,11 +261,11 @@ describe("QuickfireSurface conversation", () => {
     });
 
     const thought = screen.getByTestId("quickfire-card-thought-1");
-    expect(thought.getAttribute("data-fit")).toBe("");
+    expect(thought.getAttribute("data-full")).toBe("");
     expect(
       screen.getByTestId("quickfire-transcript").hasAttribute("data-row"),
-    ).toBe(true);
-    expect(thought.hasAttribute("data-full")).toBe(false);
+    ).toBe(false);
+    expect(thought.hasAttribute("data-fit")).toBe(false);
   });
 
   it("keeps a failed turn's reason reachable instead of only colouring it", () => {
@@ -305,17 +311,23 @@ describe("QuickfireSurface conversation", () => {
       ],
     });
 
-    fireEvent.click(screen.getByLabelText("panel_eval — failed"));
+    expect(
+      screen
+        .getByLabelText("panel_eval — failed")
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
     const work = screen.getByTestId(
       "quickfire-detail-panel_eval — failed",
     ).parentElement;
-    expect(work?.getAttribute("data-fit")).toBe("");
+    expect(work?.getAttribute("data-full")).toBe("");
     const argument = document.querySelector(
       '.qf-code[data-language="javascript"]',
     );
     expect(argument).not.toBeNull();
     expect(argument?.querySelector('pre [class^="hljs-"]')).not.toBeNull();
-    expect(screen.getByText("Panel was unavailable")).toBeTruthy();
+    expect(screen.getAllByText("Panel was unavailable").length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("announces a card it cannot run, and offers the surface that can", () => {
@@ -462,13 +474,13 @@ describe("QuickfireSurface screenshots and actions", () => {
       ],
     });
 
-    fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowUp" });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "ArrowUp" });
     expect(emitIntent).toHaveBeenCalledWith({ type: "recall", delta: -1 });
   });
 
   it("leaves vertical caret navigation to a non-empty message composer", () => {
     const emitIntent = renderSurface();
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
     fireEvent.change(input, {
       target: { value: "A wrapped first line that continues\nsecond line" },
     });
@@ -513,4 +525,264 @@ describe("QuickfireSurface screenshots and actions", () => {
       text: "Describe this panel.",
     });
   });
+});
+
+describe("Quickfire redesigned controls", () => {
+  it("sends a follow-up by button while retaining Stop and clears the local draft", () => {
+    const emit = renderSurface({ streaming: true });
+    const input = screen.getByRole("textbox");
+    const send = screen.getByRole("button", { name: "Send message" });
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "Focus on the first issue" } });
+    expect(
+      screen.getByRole("button", { name: "Stop the turn in flight" }),
+    ).toBeTruthy();
+    fireEvent.click(send);
+    expect(emit).toHaveBeenCalledWith({
+      type: "send",
+      text: "Focus on the first issue",
+    });
+    expect((input as HTMLTextAreaElement).value).toBe("");
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+  });
+  it("does not send an IME composition on Enter", () => {
+    const emit = renderSurface();
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "日本語" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(emit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "send" }),
+    );
+  });
+  it("returns to commands without clearing the conversation", () => {
+    const emit = renderSurface();
+    fireEvent.click(screen.getByRole("button", { name: "‹ Commands" }));
+    expect(emit).toHaveBeenCalledWith({ type: "mode", mode: "all" });
+    expect(emit).not.toHaveBeenCalledWith({ type: "clear" });
+  });
+  it("links the palette input to its selected result for assistive technology", () => {
+    render(
+      <QuickfireSurface
+        props={{
+          ...baseProps,
+          compose: null,
+          mode: "all",
+          groups: [
+            {
+              key: "commands",
+              label: "Commands",
+              rows: [
+                {
+                  id: "one",
+                  title: "Open panel",
+                  meta: "Choose a panel to open",
+                },
+              ],
+            },
+          ],
+          selectedId: "one",
+        }}
+        emitIntent={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("combobox").getAttribute("aria-activedescendant"),
+    ).toBe(screen.getByRole("option").id);
+  });
+});
+
+it("searches models by provider and emits a model selection without sending a prompt", () => {
+  const emit = renderSurface({
+    modelSelection: {
+      current: "one:fast",
+      loading: false,
+      saving: false,
+      error: null,
+      choices: [
+        {
+          ref: "one:fast",
+          name: "Fast",
+          provider: "First provider",
+          available: true,
+          detail: "Ready",
+        },
+        {
+          ref: "two:deep",
+          name: "Deep",
+          provider: "Second provider",
+          available: true,
+          detail: "Ready",
+        },
+      ],
+    },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Choose model and provider" }),
+  );
+  expect(emit).toHaveBeenCalledWith({ type: "load-models" });
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search models and providers" }),
+    { target: { value: "second" } },
+  );
+  expect(
+    screen.queryByRole("button", { name: "Use Fast from First provider" }),
+  ).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Use Deep from Second provider" }),
+  );
+  expect(emit).toHaveBeenCalledWith({
+    type: "select-model",
+    model: "two:deep",
+  });
+  expect(emit).not.toHaveBeenCalledWith(
+    expect.objectContaining({ type: "send" }),
+  );
+});
+
+it("searches hidden tool payloads and keeps details open across streaming updates", () => {
+  const props = {
+    ...baseProps,
+    compose: {
+      ...baseProps.compose!,
+      transcript: [
+        {
+          kind: "tool" as const,
+          id: "tool:read",
+          call: {
+            id: "read",
+            name: "read_file",
+            state: "running" as const,
+            arguments: [{ name: "path", value: "src/panel.ts" }],
+            output: "Unique diagnostic",
+          },
+        },
+      ],
+    },
+  };
+  const { rerender } = render(
+    <QuickfireSurface props={props} emitIntent={vi.fn()} />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Search conversation history" }),
+  );
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search conversation history" }),
+    { target: { value: "unique diagnostic" } },
+  );
+  expect(screen.getByText("read_file")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Expand all history details" }),
+  );
+  expect(
+    screen.getByLabelText("read_file — running").getAttribute("aria-expanded"),
+  ).toBe("true");
+  rerender(
+    <QuickfireSurface
+      props={{
+        ...props,
+        compose: {
+          ...props.compose,
+          transcript: [
+            {
+              ...props.compose.transcript[0]!,
+              call: {
+                ...props.compose.transcript[0]!.call,
+                output: "Unique diagnostic now complete",
+                state: "done",
+              },
+            },
+          ],
+        },
+      }}
+      emitIntent={vi.fn()}
+    />,
+  );
+  expect(
+    screen.getByLabelText("read_file — done").getAttribute("aria-expanded"),
+  ).toBe("true");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Collapse all history details" }),
+  );
+  expect(
+    screen.getByLabelText("read_file — done").getAttribute("aria-expanded"),
+  ).toBe("false");
+});
+
+it("retains metadata on consecutive messages from the same agent", () => {
+  renderSurface({
+    transcript: [
+      {
+        kind: "message",
+        id: "one",
+        author: "agent",
+        authorLabel: "Quickfire",
+        text: "First reply",
+        modelLabel: "Model A",
+      },
+      {
+        kind: "message",
+        id: "two",
+        author: "agent",
+        authorLabel: "Quickfire",
+        text: "Second reply",
+        modelLabel: "Model B",
+      },
+    ],
+  });
+  expect(screen.getByText("Model A")).toBeTruthy();
+  expect(screen.getByText("Model B")).toBeTruthy();
+});
+
+it("does not claim a failed clipboard write succeeded", async () => {
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: vi.fn(async () => {
+        throw new Error("denied");
+      }),
+    },
+  });
+  renderSurface({
+    transcript: [
+      {
+        kind: "message",
+        id: "copy",
+        author: "agent",
+        authorLabel: "Quickfire",
+        text: "Copy this reply",
+      },
+    ],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+  await waitFor(() =>
+    expect(screen.getByText("Copy failed · try again")).toBeTruthy(),
+  );
+  expect(screen.queryByText("Copied")).toBeNull();
+});
+
+it("renders aligned table columns and keeps code scroll keys with the reader", () => {
+  const emit = renderSurface({
+    transcript: [
+      {
+        kind: "message",
+        id: "data",
+        author: "agent",
+        authorLabel: "Quickfire",
+        text: '| Item | Count |\n| :--- | ---: |\n| Widgets | 42 |\n\n```json\n{ "count": 42 }\n```',
+      },
+    ],
+  });
+  expect(screen.getByRole("table")).toBeTruthy();
+  expect(
+    screen.getByRole("columnheader", { name: "Count" }).style.textAlign,
+  ).toBe("right");
+  const code = screen.getByLabelText("json");
+  fireEvent.keyDown(code, { key: "ArrowDown" });
+  expect(emit).not.toHaveBeenCalledWith({ type: "move", delta: 1 });
+  fireEvent.click(screen.getByRole("button", { name: "Wrap code lines" }));
+  expect(
+    screen
+      .getByRole("button", { name: "Wrap code lines" })
+      .getAttribute("aria-pressed"),
+  ).toBe("false");
 });

@@ -45,11 +45,13 @@ import type {
   QuickfireCodeProps,
   QuickfireDisclosureProps,
   QuickfireFigureProps,
+  QuickfireInputProps,
   QuickfireIconProps,
   QuickfireImageProps,
   QuickfirePressableProps,
   QuickfireSkin,
   QuickfireTextProps,
+  QuickfireTableProps,
 } from "@workspace/quickfire-core/ui";
 
 const GLYPHS = {
@@ -69,6 +71,19 @@ const GLYPHS = {
   bell: Bell,
   gavel: Gavel,
 } as const;
+
+function Input({ value, onChange, label, placeholder }: QuickfireInputProps) {
+  return (
+    <input
+      className="qf-search"
+      type="search"
+      aria-label={label}
+      placeholder={placeholder}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
 
 function Box({
   children,
@@ -227,20 +242,36 @@ function Disclosure({
   summary,
   children,
   defaultOpen,
+  open: controlledOpen,
+  onOpenChange,
   tone,
   label,
   testId,
 }: QuickfireDisclosureProps) {
+  const [localOpen, setLocalOpen] = useState(defaultOpen === true);
+  const open = controlledOpen ?? localOpen;
   return (
     <details
       className="qf-disclosure"
       data-tone={tone}
       data-testid={testId}
-      {...(defaultOpen ? { open: true } : {})}
+      open={open}
     >
-      <summary aria-label={label} onMouseDown={holdFocus}>
+      <summary
+        aria-label={label}
+        aria-expanded={open}
+        onMouseDown={holdFocus}
+        onClick={(event) => {
+          event.preventDefault();
+          if (onOpenChange) onOpenChange(!open);
+          else setLocalOpen(!open);
+        }}
+      >
         <span className="qf-disclosure-mark" aria-hidden="true" />
         {summary}
+        <span className="qf-disclosure-hint" aria-hidden="true">
+          {open ? "Hide" : "Details"}
+        </span>
       </summary>
       <div className="qf-disclosure-body">{children}</div>
     </details>
@@ -279,6 +310,10 @@ function highlighted(
 
 function Code({ text, language, caption }: QuickfireCodeProps) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const [wrapped, setWrapped] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const lines = text.split("\n").length;
   const markup = useMemo(() => highlighted(text, language), [text, language]);
   if (language === "mermaid") {
     return (
@@ -297,31 +332,116 @@ function Code({ text, language, caption }: QuickfireCodeProps) {
     );
   }
   const copy = () => {
-    void navigator.clipboard
-      ?.writeText(text)
+    setCopyError(false);
+    void Promise.resolve()
+      .then(() => navigator.clipboard.writeText(text))
       .then(() => setCopied(true))
-      .catch(() => setCopied(false));
+      .catch(() => {
+        setCopied(false);
+        setCopyError(true);
+      });
   };
   return (
-    <div className="qf-code" data-language={language ?? undefined}>
+    <div
+      className="qf-code"
+      data-language={language ?? undefined}
+      data-wrap={wrapped}
+      data-expanded={expanded}
+    >
       <div className="qf-code-bar">
-        <span className="qf-code-caption">{caption ?? language ?? ""}</span>
-        <button
-          type="button"
-          className="qf-code-copy"
-          aria-label={copied ? "Copied" : "Copy this block"}
-          onMouseDown={holdFocus}
-          onClick={copy}
-        >
-          {copied ? <Check size={11} /> : <Copy size={11} />}
-        </button>
+        <span className="qf-code-caption">
+          {caption ?? language ?? "Text"} · {lines}{" "}
+          {lines === 1 ? "line" : "lines"}
+        </span>
+        <div className="qf-code-actions">
+          <button
+            type="button"
+            className="qf-code-copy"
+            aria-label="Wrap code lines"
+            aria-pressed={wrapped}
+            onClick={() => setWrapped(!wrapped)}
+          >
+            Wrap
+          </button>
+          <button
+            type="button"
+            className="qf-code-copy"
+            aria-label={expanded ? "Collapse code block" : "Expand code block"}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+          <button
+            type="button"
+            className="qf-code-copy"
+            aria-label={copied ? "Copied" : "Copy this block"}
+            onMouseDown={holdFocus}
+            onClick={copy}
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}{" "}
+            {copied ? "Copied" : copyError ? "Try copy again" : "Copy"}
+          </button>
+        </div>
       </div>
       {markup === null ? (
-        <pre>{text}</pre>
+        <pre tabIndex={0} aria-label={caption ?? language ?? "Code"}>
+          {text}
+        </pre>
       ) : (
         // hljs escapes its input; the markup it returns is token spans only.
-        <pre dangerouslySetInnerHTML={{ __html: markup }} />
+        <pre
+          tabIndex={0}
+          aria-label={caption ?? language ?? "Code"}
+          dangerouslySetInnerHTML={{ __html: markup }}
+        />
       )}
+    </div>
+  );
+}
+
+function Table({ head, rows, align }: QuickfireTableProps) {
+  return (
+    <div className="qf-table-container">
+      <div className="qf-table-hint">
+        Table · scroll sideways for more columns
+      </div>
+      <div
+        className="qf-table-scroll"
+        role="region"
+        aria-label="Data table"
+        tabIndex={0}
+        data-testid="quickfire-table"
+      >
+        <table style={{ minWidth: head.length * 144 }}>
+          <thead>
+            <tr>
+              {head.map((cell, index) => (
+                <th
+                  key={index}
+                  scope="col"
+                  style={{ textAlign: align[index] ?? "left" }}
+                >
+                  {cell}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={index}>
+                {row.map((cell, column) => (
+                  <td
+                    key={column}
+                    style={{ textAlign: align[column] ?? "left" }}
+                  >
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -356,6 +476,8 @@ export function createDomSkin(options: {
   openLink: (href: string) => void;
 }): QuickfireSkin {
   return {
+    Input,
+    Table,
     Box,
     Text,
     Pressable,
@@ -370,8 +492,6 @@ export function createDomSkin(options: {
     Figure,
     Caret,
     openUrl: options.openLink,
-    copy: (text) => {
-      void navigator.clipboard?.writeText(text).catch(() => undefined);
-    },
+    copy: (text) => navigator.clipboard.writeText(text),
   };
 }

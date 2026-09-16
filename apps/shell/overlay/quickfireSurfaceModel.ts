@@ -65,6 +65,8 @@ export interface QuickfireSurfaceProps {
 }
 
 export type QuickfireIntent =
+  | { type: "load-models" }
+  | { type: "select-model"; model: string }
   /** The surface echoing its locally-owned input. */
   | { type: "input"; value: string }
   /** Send and immediately promote to a full chat panel (Cmd+Enter, §1.3). */
@@ -122,7 +124,9 @@ export type QuickfireIntent =
   | { type: "dismiss" }
   | { type: "send"; text: string };
 
-export function isQuickfireSurfaceProps(value: unknown): value is QuickfireSurfaceProps {
+export function isQuickfireSurfaceProps(
+  value: unknown,
+): value is QuickfireSurfaceProps {
   const props = value as Partial<QuickfireSurfaceProps> | null;
   return (
     !!props &&

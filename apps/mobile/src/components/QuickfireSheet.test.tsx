@@ -1,3 +1,4 @@
+import { makeTestCatalogEntry } from "@workspace/model-catalog/testing";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { QuickfireSheet } from "./QuickfireSheet";
@@ -38,7 +39,16 @@ function channelClient() {
     ready: () => Promise.resolve(),
     close: jest.fn(async () => undefined),
     send: jest.fn(async () => undefined),
-    callMethod: jest.fn(() => ({ result: Promise.resolve() })),
+    getParticipants: jest.fn(async () => [
+      { participantId: "channel-agent", metadata: { handle: "quickfire" } },
+    ]),
+    callMethod: jest.fn(
+      (
+        _id?: string,
+        _method?: string,
+        _args?: unknown,
+      ): { result: Promise<unknown> } => ({ result: Promise.resolve() }),
+    ),
   };
 }
 
@@ -48,6 +58,7 @@ function transportFor(
 ) {
   const client = channelClient();
   const transport = {
+    loadModelCatalog: jest.fn(async () => ({ providers: [], models: [] })),
     sessionFor: jest.fn(async () => session),
     clear: jest.fn(async () => ({ cleared: true, archived: 1 })),
     promote: jest.fn(async () => ({ ...session, state: "promoted" as const })),
@@ -238,4 +249,95 @@ describe("QuickfireSheet", () => {
     expect(client.close).toHaveBeenCalled();
     expect(transport.clear).not.toHaveBeenCalled();
   });
+});
+
+it("returns to commands without archiving the conversation", async () => {
+  const { transport } = transportFor();
+  const { store, getByLabelText } = renderSheet(transport);
+  act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
+  await waitFor(() => getByLabelText("Back to commands"));
+  fireEvent.press(getByLabelText("Back to commands"));
+  expect(store.get(quickfireSheetAtom)).toBeNull();
+  expect(store.get(commandSheetAtom)).toEqual({ mode: "all" });
+  expect(transport.clear).not.toHaveBeenCalled();
+});
+
+it("keeps Send available beside Stop for follow-ups during an active turn", async () => {
+  const { transport, client } = transportFor();
+  const { store, getByTestId, getByLabelText } = renderSheet(transport);
+  act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
+  const input = await waitFor(() => getByTestId("quickfire-compose"));
+  fireEvent.changeText(input, "First request");
+  await act(async () => fireEvent.press(getByLabelText("Send")));
+  await waitFor(() => getByLabelText("Stop"));
+  fireEvent.changeText(input, "A follow-up");
+  await act(async () => fireEvent.press(getByLabelText("Send")));
+  expect(client.send).toHaveBeenLastCalledWith("A follow-up", {
+    mentions: ["quickfire"],
+  });
+});
+
+it("chooses a model from another provider through the native picker", async () => {
+  const model = makeTestCatalogEntry({
+    ref: "other:deep",
+    id: "deep",
+    name: "Deep model",
+    provider: "other",
+    baseUrl: "https://example.test",
+  });
+  const { transport, client } = transportFor(fresh, {
+    loadModelCatalog: jest.fn(async () => ({ providers: [], models: [model] })),
+  });
+  client.callMethod.mockImplementation((_id, method, args) => ({
+    result: Promise.resolve({
+      model:
+        method === "setModel"
+          ? (args as { model: string }).model
+          : "original:fast",
+    }),
+  }));
+  const { store, getByLabelText, findByLabelText } = renderSheet(transport);
+  act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
+  await waitFor(() =>
+    expect(getByLabelText("Choose model and provider")).not.toBeDisabled(),
+  );
+  fireEvent.press(getByLabelText("Choose model and provider"));
+  const option = await findByLabelText("Use Deep model from other");
+  fireEvent.changeText(getByLabelText("Search models and providers"), "other");
+  await act(async () => fireEvent.press(option));
+  expect(client.callMethod).toHaveBeenLastCalledWith(
+    "channel-agent",
+    "setModel",
+    { model: "other:deep" },
+  );
+  expect(transport.clear).not.toHaveBeenCalled();
+});
+
+it("offers a jump to latest without following new activity when the reader scrolled up", async () => {
+  const { transport } = transportFor();
+  const {
+    store,
+    getByTestId,
+    getByLabelText,
+    queryByLabelText,
+    UNSAFE_getAllByType,
+  } = renderSheet(transport);
+  act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
+  const compose = await waitFor(() => getByTestId("quickfire-compose"));
+  const { ScrollView } = jest.requireActual("react-native");
+  const transcript = UNSAFE_getAllByType(ScrollView)[0]!;
+  fireEvent.scroll(transcript, {
+    nativeEvent: {
+      contentOffset: { y: 20 },
+      contentSize: { height: 1600 },
+      layoutMeasurement: { height: 400 },
+    },
+  });
+  fireEvent.changeText(compose, "Continue with the next step");
+  await act(async () => fireEvent(compose, "submitEditing"));
+  await waitFor(() =>
+    expect(getByLabelText("Jump to latest activity")).toBeTruthy(),
+  );
+  fireEvent.press(getByLabelText("Jump to latest activity"));
+  expect(queryByLabelText("Jump to latest activity")).toBeNull();
 });

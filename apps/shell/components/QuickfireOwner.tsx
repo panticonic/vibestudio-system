@@ -101,7 +101,7 @@ import { acquireFocusedPanelIdAfterRestore } from "./quickfirePanelFocus";
 export const QUICKFIRE_OVERLAY_HOST_ID = "app-quickfire-host";
 
 /** Card width from §4; the native view adds the surface's shadow margin. */
-const CARD_WIDTH = 640;
+const CARD_WIDTH = 720;
 const SURFACE_MARGIN = 16;
 /** Inset the native overlay applies inside the anchor rect it is given. */
 const ANCHOR_MARGIN = 12;
@@ -748,7 +748,7 @@ export function QuickfireOwner() {
       // card belongs is how a corner-anchored primitive renders a centered,
       // top-aligned card without a second placement mode in main.
       // Clamp to the panel viewport so a narrow window never clips the card
-      // (§4: width 640, clamped to anchor rect − 48px).
+      // (720px reading width, clamped to anchor rect − 48px).
       const viewWidth = Math.min(
         CARD_WIDTH + SURFACE_MARGIN * 2,
         rect.width - ANCHOR_MARGIN * 2,
@@ -1218,6 +1218,12 @@ export function QuickfireOwner() {
           }));
           return;
         }
+        case "load-models":
+          void quickfireSession.loadModels();
+          return;
+        case "select-model":
+          void quickfireSession.selectModel(intent.model);
+          return;
         case "mode":
           setState((current) => setMode(current, intent.mode));
           return;
@@ -1477,6 +1483,9 @@ export function QuickfireOwner() {
               expandable: conversation.view.expandable,
               loadingOlder: conversation.view.loadingOlder,
               credentialRequest: conversation.view.credentialRequest,
+              ...(!state.conversation
+                ? { modelSelection: conversation.view.modelSelection }
+                : {}),
               resume: conversation.view.resume,
               // The envelope this surface was opened on, so the notification the
               // person tapped is the one they land on (messaging plan §4.8).

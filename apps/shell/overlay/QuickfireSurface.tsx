@@ -32,6 +32,7 @@ import {
 import { createDomSkin } from "./domSkin";
 import { splitTextByMatchRanges } from "@vibestudio/shared/panelChrome";
 import type { OverlaySurfaceComponentProps } from "./types";
+import { Search, Sparkles, ArrowUp, X } from "@workspace/ui/icons";
 import "./quickfire.css";
 
 function fitInputToContent(input: HTMLTextAreaElement) {
@@ -87,6 +88,7 @@ function QuickfireCard(
   } = props;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState(inputValue);
   const adoptedEpochRef = useRef<number | null>(null);
 
   // Adopt a chrome-pushed value only when the epoch moves. Assigning on every
@@ -98,6 +100,7 @@ function QuickfireCard(
     const input = inputRef.current;
     if (!input) return;
     input.value = inputValue;
+    setDraft(inputValue);
     input.setSelectionRange(inputValue.length, inputValue.length);
     fitInputToContent(input);
   }, [inputEpoch, inputValue]);
@@ -110,14 +113,32 @@ function QuickfireCard(
 
   useEffect(() => {
     if (!selectedId) return;
-    const row = listRef.current?.querySelector(
-      `[data-row-id="${CSS.escape(selectedId)}"]`,
+    const row = listRef.current?.ownerDocument.getElementById(
+      `quickfire-option-${selectedId}`,
     );
     if (row && "scrollIntoView" in row)
       row.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
 
+  const send = (promote = false) => {
+    const input = inputRef.current;
+    if (
+      !input ||
+      !compose ||
+      compose.disabledReason ||
+      compose.promoted ||
+      !input.value.trim()
+    )
+      return;
+    emit({ type: promote ? "send-and-promote" : "send", text: input.value });
+    input.value = "";
+    setDraft("");
+    fitInputToContent(input);
+    input.focus();
+  };
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) return;
     const input = event.currentTarget;
     const atEnd = input.selectionStart === input.value.length;
     switch (event.key) {
@@ -155,16 +176,7 @@ function QuickfireCard(
         const promoting = event.metaKey || event.ctrlKey;
         event.preventDefault();
         if (compose) {
-          if (compose.disabledReason || compose.promoted) return;
-          const text = input.value;
-          if (!text.trim()) return;
-          emit(
-            promoting
-              ? { type: "send-and-promote", text }
-              : { type: "send", text },
-          );
-          input.value = "";
-          fitInputToContent(input);
+          send(promoting);
           return;
         }
         if (selectedId) emit({ type: "activate", rowId: selectedId });
@@ -205,10 +217,12 @@ function QuickfireCard(
           emit({ type: "escape" });
           return;
         case "ArrowDown":
+          if (compose) return;
           event.preventDefault();
           emit({ type: "move", delta: 1 });
           return;
         case "ArrowUp":
+          if (compose) return;
           event.preventDefault();
           emit({ type: "move", delta: -1 });
           return;
@@ -217,7 +231,7 @@ function QuickfireCard(
     };
     document.addEventListener("keydown", onDocumentKeyDown);
     return () => document.removeEventListener("keydown", onDocumentKeyDown);
-  }, [emit]);
+  }, [emit, compose]);
 
   // Newest-first means the newest entry is the top of the body, directly under
   // the input. Keep it in view when it changes — but only for a reader who is
@@ -253,12 +267,46 @@ function QuickfireCard(
         // off whatever you are trying to look at is the difference between a
         // window and a lid.
         <div className="quickfire-header" data-overlay-drag-handle="">
+          <div className="quickfire-navigation">
+            {!replyingToConversation ? (
+              <button
+                type="button"
+                onClick={() => emit({ type: "mode", mode: "all" })}
+              >
+                ‹ Commands
+              </button>
+            ) : (
+              <span />
+            )}
+            <button
+              type="button"
+              aria-label="Close Quickfire"
+              onClick={() => emit({ type: "dismiss" })}
+            >
+              Done
+            </button>
+          </div>
           <ConversationHeader
             compose={compose}
             onIntent={(intent) => emit(conversationIntent(intent))}
           />
         </div>
-      ) : null}
+      ) : (
+        <div className="quickfire-heading" data-overlay-drag-handle="">
+          <div>
+            <h1>What would you like to do?</h1>
+            <p>Find a panel, run a command, or ask your agent.</p>
+          </div>
+          <button
+            type="button"
+            className="quickfire-dismiss"
+            aria-label="Close commands"
+            onClick={() => emit({ type: "dismiss" })}
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
 
       <div className="quickfire-entry">
         {argSession ? (
@@ -278,7 +326,7 @@ function QuickfireCard(
           </div>
         ) : (
           <span className="quickfire-entry-icon" aria-hidden="true">
-            {conversing ? "✦" : "⌕"}
+            {conversing ? <Sparkles size={18} /> : <Search size={18} />}
           </span>
         )}
         <span className="quickfire-input-wrap">
@@ -294,25 +342,45 @@ function QuickfireCard(
             rows={1}
             autoComplete="off"
             spellCheck={false}
-            role="combobox"
-            aria-expanded={groups.length > 0}
-            aria-controls="quickfire-results"
+            role={compose ? undefined : "combobox"}
+            aria-expanded={compose ? undefined : groups.length > 0}
+            aria-controls={
+              !compose && groups.length ? "quickfire-results" : undefined
+            }
+            aria-activedescendant={
+              !compose && selectedId
+                ? `quickfire-option-${selectedId}`
+                : undefined
+            }
+            disabled={Boolean(compose?.disabledReason || compose?.promoted)}
             aria-label={
               argSession
                 ? argSession.activeLabel
                 : replyingToConversation
                   ? "Reply to this conversation"
-                : "Run a command, go to a panel, or ask"
+                  : "Run a command, go to a panel, or ask"
             }
             placeholder={replyingToConversation ? "Reply…" : placeholder}
             defaultValue={inputValue}
             onChange={(event) => {
               fitInputToContent(event.currentTarget);
+              setDraft(event.currentTarget.value);
               emit({ type: "input", value: event.currentTarget.value });
             }}
             onKeyDown={onKeyDown}
           />
         </span>
+        {compose && !compose.promoted ? (
+          <button
+            type="button"
+            className="quickfire-send"
+            aria-label="Send message"
+            disabled={!draft.trim() || Boolean(compose.disabledReason)}
+            onClick={() => send()}
+          >
+            Send <ArrowUp size={16} aria-hidden="true" />
+          </button>
+        ) : null}
         {compose?.streaming ? (
           <button
             type="button"
@@ -484,6 +552,10 @@ function QuickfireCard(
  */
 function conversationIntent(intent: ConversationIntent): QuickfireIntent {
   switch (intent.kind) {
+    case "load-models":
+      return { type: "load-models" };
+    case "select-model":
+      return { type: "select-model", model: intent.model };
     case "clear":
       return { type: "clear" };
     case "promote":
@@ -518,6 +590,7 @@ function Row({
     <button
       type="button"
       className="quickfire-row"
+      id={`quickfire-option-${row.id}`}
       data-row-id={row.id}
       data-danger={row.danger ? "" : undefined}
       data-flash={flashing ? "" : undefined}

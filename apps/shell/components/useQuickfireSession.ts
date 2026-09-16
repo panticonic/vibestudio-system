@@ -18,12 +18,14 @@ import {
   type QuickfireTransport,
 } from "@workspace/quickfire-core/session";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
-import { hasOpenTurn, projectTranscript, TRANSCRIPT_LIMIT } from "./quickfireTranscript";
+import {
+  hasOpenTurn,
+  projectTranscript,
+  TRANSCRIPT_LIMIT,
+} from "./quickfireTranscript";
 
 export { hasOpenTurn, projectTranscript, TRANSCRIPT_LIMIT };
 export type { QuickfireSessionSource, QuickfireSessionView };
-
-
 
 /**
  * Resolve and drive the conversation bound to `source` — a panel slot (the
@@ -35,15 +37,19 @@ export type { QuickfireSessionSource, QuickfireSessionView };
  * and promotion end a slot conversation.
  */
 export function useQuickfireSession(
-  source: QuickfireSessionSource | null
+  source: QuickfireSessionSource | null,
 ): QuickfireSessionController {
   const { connectToChannel, quickfire } = useShellWorkspaceClient();
-  const bound = useMemo<QuickfireTransport>(() => ({
-    sessionFor: (slotId, options) => quickfire.sessionFor(slotId, options),
-    clear: (slotId) => quickfire.clear(slotId),
-    promote: (slotId) => quickfire.promote(slotId),
-    connectToChannel,
-  }), [quickfire, connectToChannel]);
+  const bound = useMemo<QuickfireTransport>(
+    () => ({
+      loadModelCatalog: () => quickfire.loadModelCatalog(),
+      sessionFor: (slotId, options) => quickfire.sessionFor(slotId, options),
+      clear: (slotId) => quickfire.clear(slotId),
+      promote: (slotId) => quickfire.promote(slotId),
+      connectToChannel,
+    }),
+    [quickfire, connectToChannel],
+  );
   // The overlay's only input sits at the TOP of the card — it is the palette's
   // input, reused. So the newest message belongs directly beneath it and older
   // ones recede downward; a bottom-anchored chat would put the reply furthest

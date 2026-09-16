@@ -140,6 +140,8 @@ export function QuickfireSheet({
 
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<ScrollView | null>(null);
+  const followingRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const translateY = useRef(new Animated.Value(SLIDE_DISTANCE)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
@@ -168,6 +170,8 @@ export function QuickfireSheet({
     // A handed-off send opens with an empty compose box: the text is already on
     // its way, not waiting for a second tap.
     setDraft(request.send ? "" : (request.draft ?? ""));
+    followingRef.current = true;
+    setShowJumpToLatest(false);
     translateY.setValue(SLIDE_DISTANCE);
     backdropOpacity.setValue(0);
     Animated.parallel([
@@ -198,6 +202,7 @@ export function QuickfireSheet({
 
   useEffect(() => {
     if (view.transcript.length === 0) return;
+    if (!followingRef.current) return;
     const timer = setTimeout(
       () => scrollRef.current?.scrollToEnd({ animated: true }),
       32,
@@ -325,6 +330,7 @@ export function QuickfireSheet({
       expandable: view.expandable,
       loadingOlder: view.loadingOlder,
       credentialRequest: view.credentialRequest,
+      ...(!isConversation ? { modelSelection: view.modelSelection } : {}),
       resume: view.resume,
       focusMessageId: request?.conversation?.focusMessageId ?? null,
       connecting: view.connecting,
@@ -353,6 +359,12 @@ export function QuickfireSheet({
   const onIntent = useCallback(
     (intent: ConversationIntent) => {
       switch (intent.kind) {
+        case "load-models":
+          void session.loadModels();
+          return;
+        case "select-model":
+          void session.selectModel(intent.model);
+          return;
         case "clear":
           void session
             .clear()
@@ -447,6 +459,34 @@ export function QuickfireSheet({
                   />
                 </View>
 
+                <View style={styles.navigation}>
+                  {!isConversation ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Back to commands"
+                      onPress={returnToCommands}
+                      style={styles.navigationButton}
+                    >
+                      <Text style={[type.caption, { color: colors.primary }]}>
+                        ‹ Commands
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <View />
+                  )}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Close Quickfire"
+                    onPress={close}
+                    style={styles.navigationButton}
+                  >
+                    <Text
+                      style={[type.caption, { color: colors.textSecondary }]}
+                    >
+                      Done
+                    </Text>
+                  </Pressable>
+                </View>
                 <View
                   style={[
                     styles.header,
@@ -461,6 +501,15 @@ export function QuickfireSheet({
                   style={styles.transcript}
                   contentContainerStyle={styles.transcriptContent}
                   keyboardShouldPersistTaps="handled"
+                  scrollEventThrottle={32}
+                  onScroll={({ nativeEvent }) => {
+                    followingRef.current =
+                      nativeEvent.contentSize.height -
+                        nativeEvent.contentOffset.y -
+                        nativeEvent.layoutMeasurement.height <
+                      80;
+                    setShowJumpToLatest(!followingRef.current);
+                  }}
                 >
                   <ConversationBody
                     compose={compose}
@@ -480,6 +529,22 @@ export function QuickfireSheet({
                   />
                 </ScrollView>
 
+                {showJumpToLatest ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Jump to latest activity"
+                    style={styles.latestActivity}
+                    onPress={() => {
+                      followingRef.current = true;
+                      setShowJumpToLatest(false);
+                      scrollRef.current?.scrollToEnd({ animated: true });
+                    }}
+                  >
+                    <Text style={[type.caption, { color: colors.primary }]}>
+                      ↓ Jump to latest
+                    </Text>
+                  </Pressable>
+                ) : null}
                 {view.promoted ? null : (
                   <View
                     style={[
@@ -518,19 +583,18 @@ export function QuickfireSheet({
                         color={colors.danger}
                         size={17}
                       />
-                    ) : (
-                      <IconButton
-                        icon={SendHorizontal}
-                        label="Send"
-                        onPress={handleSend}
-                        disabled={
-                          draft.trim().length === 0 ||
-                          composeDisabledReason !== null
-                        }
-                        color={colors.primary}
-                        size={17}
-                      />
-                    )}
+                    ) : null}
+                    <IconButton
+                      icon={SendHorizontal}
+                      label="Send"
+                      onPress={handleSend}
+                      disabled={
+                        draft.trim().length === 0 ||
+                        composeDisabledReason !== null
+                      }
+                      color={colors.primary}
+                      size={17}
+                    />
                   </View>
                 )}
 
@@ -584,6 +648,22 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: radius.pill,
+  },
+  latestActivity: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  navigation: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+  },
+  navigationButton: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
   },
   header: {
     paddingHorizontal: spacing.lg,

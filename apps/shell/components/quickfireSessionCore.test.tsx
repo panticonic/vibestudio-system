@@ -8,6 +8,7 @@
  * ending the conversation, and hand promotion's channel id back to the caller.
  */
 
+import { makeTestCatalogEntry } from "@workspace/model-catalog/testing";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -115,7 +116,16 @@ function fakeChannelClient(events: unknown[] = []) {
     close: vi.fn(() => Promise.resolve()),
     send: vi.fn(() => Promise.resolve()),
     recordReadReceipt: vi.fn(() => Promise.resolve()),
-    callMethod: vi.fn(() => ({ result: Promise.resolve() })),
+    getParticipants: vi.fn(async () => [
+      { participantId: "channel-agent", metadata: { handle: "quickfire" } },
+    ]),
+    callMethod: vi.fn(
+      (
+        _participant?: string,
+        _method?: string,
+        _args?: unknown,
+      ): { result: Promise<unknown> } => ({ result: Promise.resolve() }),
+    ),
   };
 }
 
@@ -151,7 +161,16 @@ function channelClientEmittingOnSend(eventsOnSend: unknown[]) {
       eventsOnSend.forEach(emit);
     }),
     recordReadReceipt: vi.fn(() => Promise.resolve()),
-    callMethod: vi.fn(() => ({ result: Promise.resolve() })),
+    getParticipants: vi.fn(async () => [
+      { participantId: "channel-agent", metadata: { handle: "quickfire" } },
+    ]),
+    callMethod: vi.fn(
+      (
+        _participant?: string,
+        _method?: string,
+        _args?: unknown,
+      ): { result: Promise<unknown> } => ({ result: Promise.resolve() }),
+    ),
   };
 }
 
@@ -163,6 +182,7 @@ function transportFor(
   const client = fakeChannelClient(events);
   const connectToChannel = vi.fn(() => client as never);
   const transport: QuickfireTransport = {
+    loadModelCatalog: vi.fn(async () => ({ providers: [], models: [] })),
     sessionFor: vi.fn(async () => session),
     clear: vi.fn(async () => ({ cleared: true, archived: 1 })),
     promote: vi.fn(async () => ({ ...session, state: "promoted" as const })),
@@ -713,4 +733,105 @@ describe("useQuickfireSessionCore reduction", () => {
     );
     expect(result.current.view.streaming).toBe(false);
   });
+});
+
+function modelTransport() {
+  const catalog = {
+    providers: [
+      {
+        id: "other",
+        label: "Other provider",
+        baseUrls: [],
+        connectable: true,
+        recommendedModelRef: null,
+      },
+    ],
+    models: [
+      makeTestCatalogEntry({
+        ref: "other:fast",
+        id: "fast",
+        name: "Fast model",
+        provider: "other",
+        baseUrl: "https://example.test",
+      }),
+    ],
+  };
+  const fixture = transportFor(fresh, {
+    loadModelCatalog: vi.fn(async () => catalog),
+  });
+  let model = "original:balanced";
+  fixture.client.callMethod.mockImplementation((_id, method, args) => {
+    if (method === "setModel") model = (args as { model: string }).model;
+    return { result: Promise.resolve({ model }) };
+  });
+  return fixture;
+}
+
+it("changes provider through the live agent and reads the persisted selection on reopen", async () => {
+  const { transport, client } = modelTransport();
+  const first = renderHook(() => useQuickfireSessionCore("slot", transport));
+  await waitFor(() => expect(first.result.current.view.connecting).toBe(false));
+  await act(async () => first.result.current.loadModels());
+  expect(first.result.current.view.modelSelection.current).toBe(
+    "original:balanced",
+  );
+  await act(async () => first.result.current.selectModel("other:fast"));
+  expect(client.callMethod).toHaveBeenLastCalledWith(
+    "channel-agent",
+    "setModel",
+    { model: "other:fast" },
+  );
+  expect(first.result.current.view.modelSelection.current).toBe("other:fast");
+  expect(transport.clear).not.toHaveBeenCalled();
+  expect(transport.promote).not.toHaveBeenCalled();
+  first.unmount();
+  const second = renderHook(() => useQuickfireSessionCore("slot", transport));
+  await waitFor(() =>
+    expect(second.result.current.view.connecting).toBe(false),
+  );
+  await act(async () => second.result.current.loadModels());
+  expect(second.result.current.view.modelSelection.current).toBe("other:fast");
+});
+
+it("keeps the confirmed model and chat usable when a model change fails", async () => {
+  const { transport, client } = modelTransport();
+  const { result } = renderHook(() =>
+    useQuickfireSessionCore("slot", transport),
+  );
+  await waitFor(() => expect(result.current.view.connecting).toBe(false));
+  await act(async () => result.current.loadModels());
+  client.callMethod.mockImplementation(() => ({
+    result: Promise.reject(new Error("Provider unavailable")),
+  }));
+  await act(async () => result.current.selectModel("other:fast"));
+  expect(result.current.view.modelSelection.current).toBe("original:balanced");
+  expect(result.current.view.modelSelection.error).toBe("Provider unavailable");
+  expect(result.current.view.modelSelection.saving).toBe(false);
+  expect(result.current.view.error).toBeNull();
+});
+
+it("ignores catalog results from a conversation that was closed", async () => {
+  let finish!: (value: { providers: []; models: [] }) => void;
+  const { transport } = modelTransport();
+  transport.loadModelCatalog = () =>
+    new Promise((resolve) => {
+      finish = resolve;
+    });
+  const { result, rerender } = renderHook(
+    ({ slot }: { slot: string | null }) =>
+      useQuickfireSessionCore(slot, transport),
+    { initialProps: { slot: "slot" as string | null } },
+  );
+  await waitFor(() => expect(result.current.view.connecting).toBe(false));
+  let request!: Promise<void>;
+  act(() => {
+    request = result.current.loadModels();
+  });
+  rerender({ slot: null });
+  await act(async () => {
+    finish({ providers: [], models: [] });
+    await request;
+  });
+  expect(result.current.view.modelSelection.current).toBeNull();
+  expect(result.current.view.modelSelection.loading).toBe(false);
 });

@@ -1,3 +1,7 @@
+import {
+  MODEL_SETTINGS_SERVICE_PROTOCOL,
+  type ModelSettingsSnapshot,
+} from "@workspace/model-catalog/catalog";
 import { websiteHostingMethods } from "@vibestudio/service-schemas/websiteHosting";
 import { createWorkspaceIcons } from "./workspaceIcons";
 import type { NativePanelPresentation } from "./nativePanelPresentation";
@@ -570,7 +574,8 @@ export function createShellWorkspaceClient(
           getHistory: (input) => browserDataClient.getHistory(input),
           searchBookmarks: (value) => browserDataClient.searchBookmarks(value),
           getSearchEngines: () => browserDataClient.getSearchEngines(),
-          getSearchSuggestions: (query) => browserDataClient.getSearchSuggestions(query),
+          getSearchSuggestions: (query) =>
+            browserDataClient.getSearchSuggestions(query),
         },
       }),
     markBrowserNavigationIntent: (
@@ -1326,7 +1331,14 @@ export function createShellWorkspaceClient(
     QUICKFIRE_SERVICE_PROTOCOL,
   );
 
+  const quickfireModels = createDurableObjectServiceClient(
+    rpc,
+    MODEL_SETTINGS_SERVICE_PROTOCOL,
+  );
   const quickfire = {
+    loadModelCatalog: async () =>
+      (await quickfireModels.call<ModelSettingsSnapshot>("getSettings"))
+        .catalog,
     /**
      * Resolve (creating on first use) the conversation bound to a panel slot.
      * Calling this IS the user gesture that binds the slot — the owner must only

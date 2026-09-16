@@ -1,4 +1,8 @@
 import {
+  MODEL_SETTINGS_SERVICE_PROTOCOL,
+  type ModelSettingsSnapshot,
+} from "@workspace/model-catalog/catalog";
+import {
   WebsiteDocumentHost,
   type NativeWebsiteRequest,
 } from "./websiteDocumentHost";
@@ -909,7 +913,8 @@ class MobilePanels implements PanelHost {
         searchBookmarks: (searchQuery) =>
           this.browserData.searchBookmarks(searchQuery),
         getSearchEngines: () => this.browserData.getSearchEngines(),
-        getSearchSuggestions: (query) => this.browserData.getSearchSuggestions(query),
+        getSearchSuggestions: (query) =>
+          this.browserData.getSearchSuggestions(query),
       },
     });
   }
@@ -1218,6 +1223,7 @@ export class ShellClient {
     clear(slotId: string): ReturnType<QuickfireRpcClient["clear"]>;
     promote(slotId: string): ReturnType<QuickfireRpcClient["promote"]>;
     list(): ReturnType<QuickfireRpcClient["list"]>;
+    loadModelCatalog(): Promise<ModelSettingsSnapshot["catalog"]>;
   };
   readonly hostLaunch: HostLaunchClient;
   readonly browserPrivacy: ReturnType<typeof createShellBrowserPrivacyClient>;
@@ -1549,7 +1555,14 @@ export class ShellClient {
     this.credentialService = createCredentialsClient(this.transport);
     this.push = createPushClient(this.transport);
     const quickfireClient = createQuickfireClient(this.transport);
+    const quickfireModels = createDurableObjectServiceClient(
+      this.transport,
+      MODEL_SETTINGS_SERVICE_PROTOCOL,
+    );
     this.quickfire = {
+      loadModelCatalog: async () =>
+        (await quickfireModels.call<ModelSettingsSnapshot>("getSettings"))
+          .catalog,
       sessionFor: (slotId, options) =>
         quickfireClient.sessionFor({
           slotId,

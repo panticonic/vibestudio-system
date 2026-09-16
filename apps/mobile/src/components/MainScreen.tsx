@@ -1758,6 +1758,7 @@ export function MainScreen({
   const quickfireTransport = useMemo<QuickfireTransport | null>(() => {
     if (!shellClient) return null;
     return {
+      loadModelCatalog: () => shellClient.quickfire.loadModelCatalog(),
       sessionFor: (slotId, options) =>
         shellClient.quickfire.sessionFor(slotId, options),
       clear: (slotId) => shellClient.quickfire.clear(slotId),

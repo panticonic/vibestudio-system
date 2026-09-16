@@ -5,7 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "Vibestudio Shell",
-    "icon": "\ud83d\udda5\ufe0f",
+    "icon": "🖥️",
     "app": {
       "target": "electron",
       "renderer": "index.tsx",
@@ -527,7 +527,8 @@
     "qrcode-terminal": "^0.12.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@workspace/workspace-transfer": "workspace:*"
+    "@workspace/workspace-transfer": "workspace:*",
+    "@workspace/model-catalog": "workspace:*"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",

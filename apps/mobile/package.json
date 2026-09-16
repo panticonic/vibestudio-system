@@ -6,7 +6,7 @@
   "//dependencies": "Keep react-native-webview pinned with apps/mobile; 13.17.0 makes JSX props resolve to never under our TS/React setup. react is 19.0.0, not the 19.2.4 the rest of the workspace uses: this bundle runs against react-native-renderer inside the installed APK, and the renderer shipped with react-native 0.79 refuses to start unless react matches it exactly. Bump both together when react-native moves. The Iroh native library is owned by the host mobile shell; this Base app consumes only @vibestudio/mobile-iroh's shared TypeScript lifecycle and protocol surface.",
   "vibestudio": {
     "displayName": "Vibestudio Mobile",
-    "icon": "\ud83d\udcf1",
+    "icon": "📱",
     "//dependencyResolution": "The patch adds writeStoredAsset, which lets the panel-asset facade hand a cached body straight to the socket instead of pumping it through JS. The APK is built from the host checkout, where pnpm applies the same patch, so the native half is always present; without this declaration the bundle installs the stock package and the facade calls a method that is not there, aborting the response mid-body. Keep the version here equal to the react-native-tcp-socket dependency below and to the host's patchedDependencies entry.",
     "dependencyResolution": {
       "patches": {
@@ -523,7 +523,8 @@
     "react-native-tcp-socket": "6.4.1",
     "react-native-url-polyfill": "^3.0.0",
     "react-native-webview": "13.16.1",
-    "@workspace/mobile-navigation": "workspace:*"
+    "@workspace/mobile-navigation": "workspace:*",
+    "@workspace/model-catalog": "workspace:*"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",

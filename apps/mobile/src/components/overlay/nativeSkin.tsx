@@ -31,6 +31,8 @@ import {
   Pressable as RNPressable,
   StyleSheet,
   Text as RNText,
+  TextInput,
+  ScrollView,
   View,
   type TextStyle,
   type ViewStyle,
@@ -40,11 +42,13 @@ import type {
   QuickfireCodeProps,
   QuickfireDisclosureProps,
   QuickfireFigureProps,
+  QuickfireInputProps,
   QuickfireIconProps,
   QuickfirePressableProps,
   QuickfireSkin,
   QuickfireSpace,
   QuickfireTextProps,
+  QuickfireTableProps,
 } from "@workspace/quickfire-core/ui";
 import type { QuickfireTone } from "@workspace/quickfire-core";
 import type { ThemeColors } from "../../state/themeAtoms";
@@ -54,7 +58,6 @@ import {
   Brain,
   Check,
   Clock3,
-  Copy,
   Gavel,
   Info,
   LayoutTemplate,
@@ -286,18 +289,19 @@ export function createNativeSkin(
     switch (surface) {
       case "answer":
         return {
-          backgroundColor: tone.wash,
+          backgroundColor: colors.surfaceRaised,
           borderWidth: hairline,
-          borderLeftWidth: 3,
-          borderColor: tone.edge,
-          borderRadius: radius.md,
+          borderColor: colors.borderSubtle,
+          borderRadius: radius.lg,
         };
       case "card":
         return {
           backgroundColor: tone.wash,
           borderRadius: radius.md,
-          paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
+          paddingHorizontal: spacing.lg,
+          borderWidth: hairline,
+          borderColor: tone.edge,
         };
       case "sunken":
         return {
@@ -308,7 +312,8 @@ export function createNativeSkin(
         return {
           borderWidth: hairline,
           borderColor: tone.edge,
-          borderRadius: radius.md,
+          borderRadius: radius.lg,
+          backgroundColor: colors.surfaceRaised,
           overflow: "hidden",
         };
       case "rail":
@@ -466,11 +471,14 @@ export function createNativeSkin(
     summary,
     children,
     defaultOpen,
+    open: controlledOpen,
+    onOpenChange,
     tone,
     label,
     testId,
   }: QuickfireDisclosureProps) {
-    const [open, setOpen] = useState(defaultOpen === true);
+    const [localOpen, setLocalOpen] = useState(defaultOpen === true);
+    const open = controlledOpen ?? localOpen;
     const setFitExpanded = useContext(FitExpansionContext);
     useEffect(() => {
       setFitExpanded?.(open);
@@ -483,14 +491,20 @@ export function createNativeSkin(
           accessibilityRole="button"
           accessibilityLabel={`${open ? "Hide" : "Show"} ${label}`}
           accessibilityState={{ expanded: open }}
-          onPress={() => setOpen((value) => !value)}
+          onPress={() => {
+            if (onOpenChange) onOpenChange(!open);
+            else setLocalOpen(!open);
+          }}
           hitSlop={4}
           style={styles.disclosureSummary}
         >
           <RNText style={[type.micro, { color: resolved.fg }]}>
             {open ? "▾" : "▸"}
           </RNText>
-          {summary}
+          <View style={{ flex: 1, minWidth: 0 }}>{summary}</View>
+          <RNText style={[type.caption, { color: colors.textSecondary }]}>
+            {open ? "Hide" : "Details"}
+          </RNText>
         </RNPressable>
         {open ? <View style={styles.disclosureBody}>{children}</View> : null}
       </View>
@@ -499,46 +513,156 @@ export function createNativeSkin(
 
   function Code({ text, language, caption }: QuickfireCodeProps) {
     const [copied, setCopied] = useState(false);
-    // Mermaid renders through the DOM, which this platform does not have. The
-    // source is shown and labelled rather than silently dropped; the chat panel
-    // is where a diagram becomes a picture.
-    const label = (caption ?? language ?? "").toUpperCase();
+    const [copyError, setCopyError] = useState(false);
+    const [wrapped, setWrapped] = useState(true);
+    const [expanded, setExpanded] = useState(false);
+    const lines = text.split("\n").length;
+    const label =
+      language === "mermaid"
+        ? "Diagram source"
+        : (caption ?? language ?? "Text");
     return (
       <View style={[styles.code, { borderColor: colors.borderSubtle }]}>
         <View
-          style={[styles.codeBar, { borderBottomColor: colors.borderSubtle }]}
-        >
-          <RNText
-            style={[type.micro, { color: colors.textTertiary }]}
-            numberOfLines={1}
-          >
-            {language === "mermaid" ? "DIAGRAM SOURCE" : label}
-          </RNText>
-          <RNPressable
-            accessibilityRole="button"
-            accessibilityLabel={copied ? "Copied" : "Copy this block"}
-            hitSlop={8}
-            onPress={() => {
-              copyToClipboard(text);
-              setCopied(true);
-            }}
-          >
-            {copied ? (
-              <Check size={13} color={colors.success} />
-            ) : (
-              <Copy size={13} color={colors.textTertiary} />
-            )}
-          </RNPressable>
-        </View>
-        <RNText
-          selectable
           style={[
-            styles.codeText,
-            { color: colors.text, backgroundColor: colors.codeBackground },
+            styles.codeBar,
+            {
+              borderBottomColor: colors.borderSubtle,
+              backgroundColor: colors.surfaceSunken,
+            },
           ]}
         >
-          {text}
+          <RNText style={[type.caption, { color: colors.textSecondary }]}>
+            {label} · {lines} {lines === 1 ? "line" : "lines"}
+          </RNText>
+          <View
+            style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs }}
+          >
+            <RNPressable
+              style={styles.codeAction}
+              accessibilityRole="button"
+              accessibilityLabel="Wrap code lines"
+              accessibilityState={{ selected: wrapped }}
+              onPress={() => setWrapped(!wrapped)}
+            >
+              <RNText
+                style={[
+                  type.caption,
+                  { color: wrapped ? colors.primary : colors.textSecondary },
+                ]}
+              >
+                Wrap
+              </RNText>
+            </RNPressable>
+            <RNPressable
+              style={styles.codeAction}
+              accessibilityRole="button"
+              accessibilityLabel={
+                expanded ? "Collapse code block" : "Expand code block"
+              }
+              onPress={() => setExpanded(!expanded)}
+            >
+              <RNText style={[type.caption, { color: colors.textSecondary }]}>
+                {expanded ? "Collapse" : "Expand"}
+              </RNText>
+            </RNPressable>
+            <RNPressable
+              style={styles.codeAction}
+              accessibilityRole="button"
+              accessibilityLabel={copied ? "Copied" : "Copy this block"}
+              onPress={() => {
+                try {
+                  copyToClipboard(text);
+                  setCopied(true);
+                  setCopyError(false);
+                } catch {
+                  setCopied(false);
+                  setCopyError(true);
+                }
+              }}
+            >
+              <RNText style={[type.caption, { color: colors.primary }]}>
+                {copied ? "Copied" : copyError ? "Try copy again" : "Copy"}
+              </RNText>
+            </RNPressable>
+          </View>
+        </View>
+        <ScrollView
+          nestedScrollEnabled
+          style={expanded ? undefined : { maxHeight: 280 }}
+        >
+          <ScrollView
+            horizontal={!wrapped}
+            nestedScrollEnabled
+            contentContainerStyle={wrapped ? { width: "100%" } : undefined}
+          >
+            <RNText
+              selectable
+              style={[
+                styles.codeText,
+                { color: colors.text, backgroundColor: colors.codeBackground },
+                wrapped ? { flex: 1 } : undefined,
+              ]}
+            >
+              {text}
+            </RNText>
+          </ScrollView>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  function Table({ head, rows, align }: QuickfireTableProps) {
+    return (
+      <View
+        testID="quickfire-table"
+        style={[styles.code, { borderColor: colors.borderSubtle }]}
+      >
+        <RNText
+          style={[
+            type.caption,
+            { color: colors.textSecondary, padding: spacing.sm },
+          ]}
+        >
+          Table · swipe sideways for more columns
         </RNText>
+        <ScrollView
+          horizontal
+          nestedScrollEnabled
+          accessibilityLabel="Data table"
+        >
+          <View>
+            {[head, ...rows].map((row, index) => (
+              <View
+                key={index}
+                style={{
+                  flexDirection: "row",
+                  backgroundColor:
+                    index === 0 ? colors.surfaceSunken : colors.surfaceRaised,
+                }}
+              >
+                {row.map((cell, column) => (
+                  <View
+                    key={column}
+                    style={{
+                      width: 160,
+                      padding: spacing.md,
+                      borderTopWidth: hairline,
+                      borderColor: colors.borderSubtle,
+                    }}
+                  >
+                    <RNText
+                      accessibilityRole={index === 0 ? "header" : undefined}
+                      style={{ textAlign: align[column] ?? "left" }}
+                    >
+                      {cell}
+                    </RNText>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -573,6 +697,27 @@ export function createNativeSkin(
   }
 
   return {
+    Table,
+    Input: ({ value, onChange, label, placeholder }: QuickfireInputProps) => (
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        accessibilityLabel={label}
+        placeholder={placeholder}
+        placeholderTextColor={colors.textTertiary}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={{
+          minHeight: 44,
+          borderWidth: hairline,
+          borderColor: colors.border,
+          borderRadius: radius.md,
+          paddingHorizontal: spacing.md,
+          color: colors.text,
+          fontSize: 16,
+        }}
+      />
+    ),
     Box,
     Text,
     Pressable,
@@ -603,6 +748,8 @@ export function useNativeSkin(
 
 const styles = StyleSheet.create({
   press: {
+    minHeight: 44,
+    flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
@@ -622,21 +769,30 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   disclosureSummary: {
+    minHeight: 52,
+    paddingHorizontal: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
     paddingVertical: spacing.xs,
   },
   disclosureBody: {
-    paddingBottom: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.sm,
   },
   code: {
     borderWidth: hairline,
     borderRadius: radius.md,
     overflow: "hidden",
   },
+  codeAction: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+  },
   codeBar: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.sm,
