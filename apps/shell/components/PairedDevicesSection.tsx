@@ -15,7 +15,11 @@ import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
 
 import QRCode from "qrcode-terminal/vendor/QRCode/index.js";
 import QRErrorCorrectLevel from "qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel.js";
-import { type DeviceRecord, type PairingInvite, type ShellAccountProfile } from "../shell/client";
+import {
+  type DeviceRecord,
+  type PairingInvite,
+  type ShellAccountProfile,
+} from "../shell/client";
 
 export function PairedDevicesSection({
   currentDeviceId,
@@ -36,6 +40,7 @@ export function PairedDevicesSection({
   const [error, setError] = useState<string | null>(null);
   const [invite, setInvite] = useState<PairingInvite | null>(null);
   const [inviteBusy, setInviteBusy] = useState(false);
+  const [phoneSetupBusy, setPhoneSetupBusy] = useState(false);
   const [copyLabel, setCopyLabel] = useState("Copy link");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -145,6 +150,31 @@ export function PairedDevicesSection({
     setCopyLabel("Copied");
   };
 
+  const startPhoneSetup = async () => {
+    setPhoneSetupBusy(true);
+    setError(null);
+    try {
+      await panel.createPanel("panels/chat", {
+        name: "Set up phone",
+        focus: true,
+        stateArgs: {
+          initialPrompt:
+            "Help me install Vibestudio on my phone and connect it to this workspace. Follow skills/phone-setup/SKILL.md, discover devices through my connected desktop, and guide me through any physical steps needed.",
+          systemPrompt:
+            "For phone setup, load skills/phone-setup/SKILL.md and follow it as the source of truth. Never assume adb or Xcode runs on the remote server.",
+          systemPromptMode: "append",
+        },
+      });
+      onStartPhoneSetup?.();
+    } catch (err) {
+      setError(
+        `Could not start phone setup: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setPhoneSetupBusy(false);
+    }
+  };
+
   const remainingMs = invite ? Math.max(0, invite.expiresAt - now) : 0;
   const remainingSeconds = Math.ceil(remainingMs / 1000);
   const remaining = `${Math.floor(remainingSeconds / 60)}:${String(
@@ -165,23 +195,10 @@ export function PairedDevicesSection({
         <Flex gap="2">
           <Button
             size="1"
-            onClick={() => {
-              void panel
-                .createPanel("panels/chat", {
-                  name: "Set up phone",
-                  focus: true,
-                  stateArgs: {
-                    initialPrompt:
-                      "Set up a phone connected to this desktop and pair it with the same current server and workspace. Read skills/phone-setup/SKILL.md first, then use phoneProvisioning and hubControl tools. Diagnose before side effects.",
-                    systemPrompt:
-                      "For phone setup, load skills/phone-setup/SKILL.md and follow it as the source of truth. Never assume adb or Xcode runs on the remote server.",
-                    systemPromptMode: "append",
-                  },
-                })
-                .then(() => onStartPhoneSetup?.());
-            }}
+            disabled={phoneSetupBusy}
+            onClick={() => void startPhoneSetup()}
           >
-            Set up a phone
+            {phoneSetupBusy ? "Starting setup…" : "Set up a phone"}
           </Button>
           <Button
             size="1"
@@ -196,6 +213,10 @@ export function PairedDevicesSection({
           </Button>
         </Flex>
       </Flex>
+      <Text size="1" color="gray">
+        Set up a phone with an agent’s help to install and connect Vibestudio.
+        Already installed? Choose Connect a device to scan a pairing QR code.
+      </Text>
       <Dialog.Root open={connectOpen} onOpenChange={setConnectOpen}>
         <Dialog.Content maxWidth="560px">
           <Dialog.Title>Connect another device</Dialog.Title>

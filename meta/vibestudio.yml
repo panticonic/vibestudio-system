@@ -122,7 +122,6 @@ template:
     - skills/appdev
     - skills/local-models
     - skills/performance
-    - skills/phone-setup
     - skills/remote-access
     - skills/server-logs
     - workers/development

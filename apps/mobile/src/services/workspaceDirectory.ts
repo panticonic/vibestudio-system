@@ -389,6 +389,46 @@ export class MobileWorkspaceDirectory {
     }
   }
 
+  /** Report the visible workspace, not merely a paired credential or System connection. */
+  phoneSetupReadiness(): {
+    status: "opening" | "ready" | "failed";
+    message: string;
+  } {
+    const session = this.activeWorkspaceId
+      ? this.sessions.get(this.activeWorkspaceId)
+      : undefined;
+    if (!session)
+      return {
+        status: "opening",
+        message: "Opening your workspace on the phone…",
+      };
+    const readiness = session.store.get(workspaceReadinessAtom);
+    if (session.state === "failed" || readiness === "failed") {
+      return {
+        status: "failed",
+        message:
+          session.error ??
+          "The phone could not prepare the workspace. Check the message on your phone.",
+      };
+    }
+    if (
+      session.state === "ready" &&
+      session.store.get(connectionStatusAtom) === "connected" &&
+      readiness === "reconciled"
+    ) {
+      return {
+        status: "ready",
+        message:
+          "Your workspace is ready on the phone. You can unplug the USB cable.",
+      };
+    }
+    return {
+      status: "opening",
+      message:
+        "Preparing your workspace. Keep the phone open and respond to any approval shown there.",
+    };
+  }
+
   open(workspaceId: string): Promise<MobileWorkspaceSession> {
     if (this.disposed)
       return Promise.reject(new Error("The mobile account is closed"));
@@ -417,6 +457,7 @@ export class MobileWorkspaceDirectory {
             appSourceClient: this.sessions.get(this.systemWorkspaceId)?.client,
           }
         : {}),
+      getWorkspaceReadiness: () => this.phoneSetupReadiness(),
       onStatusChange: (status) => {
         store.set(connectionStatusAtom, status);
         this.changed();

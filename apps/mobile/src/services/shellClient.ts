@@ -172,6 +172,10 @@ export interface ShellClientConfig {
   onTreeInvalidated?: (event: PanelTreeInvalidation) => void;
   onPanelsChanged?: () => void;
   onStatusChange?: (status: ConnectionStatus) => void;
+  getWorkspaceReadiness?: () => {
+    status: "opening" | "ready" | "failed";
+    message: string;
+  };
   onReadinessChange?: (
     readiness: "shell-ready" | "reconciled" | "failed",
   ) => void;
@@ -1440,6 +1444,11 @@ export class ShellClient {
           config.credentials.deviceId,
         );
     this.browserImportProvider?.expose();
+    if (!config.appSourceClient && config.getWorkspaceReadiness) {
+      this.transport.expose("mobileWorkspace.readiness", () =>
+        config.getWorkspaceReadiness!(),
+      );
+    }
     if (!config.appSourceClient) {
       this.transport.expose(
         "mobileBrowserPrivacyPresentation.open",

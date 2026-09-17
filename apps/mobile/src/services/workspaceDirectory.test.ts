@@ -1,3 +1,7 @@
+import {
+  connectionStatusAtom,
+  workspaceReadinessAtom,
+} from "../state/connectionAtoms";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { MobileWorkspaceDirectory } from "./workspaceDirectory";
 import { activePanelIdAtom } from "../state/navigationAtoms";
@@ -120,6 +124,25 @@ beforeEach(() => {
 });
 
 describe("mobile workspace directory", () => {
+  it("does not report phone setup complete until the visible workspace reconciles", async () => {
+    const { directory } = fixture();
+    try {
+      expect(directory.phoneSetupReadiness().status).toBe("opening");
+      await directory.init();
+      const visible = directory.sessions.get(directory.activeWorkspaceId!)!;
+      visible.store.set(connectionStatusAtom, "connected");
+      visible.store.set(workspaceReadinessAtom, "shell-ready");
+      expect(directory.phoneSetupReadiness().status).toBe("opening");
+      visible.store.set(workspaceReadinessAtom, "reconciled");
+      expect(directory.phoneSetupReadiness().status).toBe("ready");
+      visible.store.set(connectionStatusAtom, "disconnected");
+      expect(directory.phoneSetupReadiness().status).toBe("opening");
+      visible.store.set(workspaceReadinessAtom, "failed");
+      expect(directory.phoneSetupReadiness().status).toBe("failed");
+    } finally {
+      await directory.dispose();
+    }
+  });
   it("resolves a workspace role and retains destination state without touching the source tree", async () => {
     const { directory } = fixture();
     try {

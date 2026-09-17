@@ -6,12 +6,11 @@ import {
 import {
   PhoneDeviceDiscoverySchema,
   PhoneProviderSchema,
-  PhoneProvisioningResultSchema,
+  PhoneWorkspaceReadinessSchema,
   phoneProvisioningMethods,
   type PhoneDeviceDiscovery,
   type PhoneProvider,
   type PhoneProvisionArgs,
-  type PhoneProvisioningResult,
 } from "@vibestudio/service-schemas/phoneProvisioning";
 import type { PhoneNativeDesktop } from "@vibestudio/service-schemas/phoneNativeEndpoint";
 
@@ -104,22 +103,33 @@ export class PhoneProvisioningDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  async provision(input: PhoneProvisionArgs): Promise<PhoneProvisioningResult> {
+  async prepare(input: Pick<PhoneProvisionArgs, "providerId" | "platform">) {
     const target = await this.select(input.providerId);
-    const result = await this.rpc.call(
-      "main",
-      "phoneNativeEndpoint.provision",
-      [
-        {
-          clientId: target.clientId,
-          input: { ...input, providerId: undefined },
-        },
-      ],
+    return this.rpc.call("main", "phoneNativeEndpoint.prepare", [
+      {
+        clientId: target.clientId,
+        input: { platform: input.platform },
+      },
+    ]);
+  }
+
+  @schemaRpc()
+  async readiness(input: { deviceId: string }) {
+    this.requireUser();
+    return PhoneWorkspaceReadinessSchema.parse(
+      await this.rpc.call("main", "phoneNativeEndpoint.readiness", [input]),
     );
-    return PhoneProvisioningResultSchema.parse({
-      ...(result as object),
-      providerId: target.clientId,
-    });
+  }
+
+  @schemaRpc()
+  async provision(input: PhoneProvisionArgs): Promise<Response> {
+    const target = await this.select(input.providerId);
+    return this.rpc.stream("main", "phoneNativeEndpoint.provision", [
+      {
+        clientId: target.clientId,
+        input: { ...input, providerId: target.clientId },
+      },
+    ]);
   }
 
   private async desktops(): Promise<PhoneNativeDesktop[]> {
