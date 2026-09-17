@@ -499,7 +499,11 @@ function executionDescription(automation: AutomationRecord): string {
     return `${execution.image.className}.${execution.method}`;
   }
   const action =
-    execution.action.kind === "eval" ? "Exact eval" : "Agent prompt";
+    execution.action.kind === "watch"
+      ? "Conditional agent"
+      : execution.action.kind === "eval"
+        ? "Exact eval"
+        : "Agent prompt";
   return execution.conversation.mode === "fresh"
     ? `${action} · new conversation each run`
     : `${action} · continues one conversation`;
@@ -626,8 +630,10 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
           </Grid>
           <Box>
             <Text as="div" size="1" color="gray" mb="1">
-              {execution.action.kind === "eval"
-                ? "Exact eval code"
+              {execution.action.kind !== "prompt"
+                ? execution.action.kind === "watch"
+                  ? "Watch check code"
+                  : "Exact eval code"
                 : "Exact prompt"}
             </Text>
             <Box
@@ -642,7 +648,7 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
               }}
             >
               <Text as="div" size="2">
-                {execution.action.kind === "eval"
+                {execution.action.kind !== "prompt"
                   ? execution.action.code
                   : execution.action.text}
               </Text>
