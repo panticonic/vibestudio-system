@@ -16,8 +16,8 @@ export function useSyncShellOverlay(active: boolean): void {
     // queued states; only the latest committed dialog state should follow it.
     tail.current = tail.current
       .then(() => {
-        if (desired.current === state)
-          return state.view.setShellOverlay(state.active);
+        if (desired.current !== state) return undefined;
+        return state.view.setShellOverlay(state.active);
       })
       .catch((error: unknown) => {
         if (!isRpcConnectionLost(error)) {

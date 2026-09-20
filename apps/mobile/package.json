@@ -41,6 +41,10 @@
           "availability": "required"
         },
         {
+          "protocol": "vibestudio.models.v1",
+          "availability": "required"
+        },
+        {
           "protocol": "vibestudio.quickfire.v1",
           "availability": "required"
         },
@@ -322,6 +326,15 @@
         },
         {
           "capability": "workspace-service:gad.workspace",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "workspace-service:models",
           "resource": {
             "kind": "prefix",
             "prefix": ""

@@ -29,6 +29,10 @@
           "availability": "required"
         },
         {
+          "protocol": "vibestudio.models.v1",
+          "availability": "required"
+        },
+        {
           "protocol": "vibestudio.quickfire.v1",
           "availability": "required"
         },
