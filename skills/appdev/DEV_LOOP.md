@@ -12,14 +12,16 @@ update. Builds are separate source projections.
 1. Call `vcs.status` and retain the exact `workingHead`. Author source through
    the managed edit/write adapter or `vcs.edit` with that basis and a stable
    command ID. Use `vcs.move`/`vcs.copy` for identity changes.
-2. Run focused typechecks, tests, and the ordinary build service against the
-   current context.
+2. Run focused tests and `build.getBuildReport` for the app at the exact
+   context ref. The report combines bundling, TypeScript, and static authority
+   diagnostics. Repair missing requests for statically known calls in the app
+   manifest; a request is not a grant.
 3. When `main` advanced, compare its exact event and merge useful coordinates
    in small local steps. Test between steps.
 4. Commit the complete local application chain. Split unrelated work into a
    different context instead of staging a subset.
 5. Push the clean committed event through the protected publication boundary.
-   The boundary reruns the exact-candidate build/typecheck gate before
+   The boundary reruns the exact-candidate build/typecheck/authority gate before
    approval. Consume any structured refusal diagnostics, repair, recommit, and
    retry; no failed check advances a protected ref.
 6. Let the post-publication build projection derive the app artifact. Approve

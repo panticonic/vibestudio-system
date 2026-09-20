@@ -200,7 +200,7 @@ Guidelines:
   head, build or test that state, commit the complete local application chain,
   and publish only after semantic ancestry/integration validation and approval.
   Builds and tests are explicit local feedback checks; protected publication
-  repeats the exact-candidate build/typecheck gate, while post-publication
+  repeats the exact-candidate build/typecheck/authority gate, while post-publication
   builds are derived projections. Managed move/copy operations preserve file identity
   and provenance; raw filesystem mutation is not an alternate source-authority
   path.
