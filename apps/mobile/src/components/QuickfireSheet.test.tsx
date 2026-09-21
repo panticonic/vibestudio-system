@@ -156,8 +156,13 @@ describe("QuickfireSheet", () => {
     const { transport } = transportFor();
     const { store, getByLabelText } = renderSheet(transport);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
+    // The button exists while the session is still binding, but is disabled
+    // until that conversation is ready to clear.
     await waitFor(() =>
-      getByLabelText("Clear this conversation and return to commands"),
+      expect(
+        getByLabelText("Clear this conversation and return to commands").props
+          .accessibilityState,
+      ).toEqual({ disabled: false }),
     );
 
     await act(async () => {
