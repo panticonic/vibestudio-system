@@ -94,38 +94,243 @@ template:
     - url: git+https://github.com/panticonic/vibestudio-base.git
   description: Your private client applications and device settings.
   name: System
+  overrides:
+    - repoPath: about/help
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: about/new
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: about/templates
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: about/testbench
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: about/workspace
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: extensions/claude-code
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: extensions/file-tools
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: extensions/git-bridge
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: extensions/image-service
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: extensions/pdf-ingest
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: extensions/shell
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: extensions/templates
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: extensions/test-runner
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/about-shared
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/agent-loop
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/agentic-chat
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/agentic-core
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/agentic-do
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/agentic-protocol
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/cdp-client
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/channel-fork
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/channel-policies
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/eval
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/harness
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/integrations
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/model-catalog
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/omnibox-core
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/pi-ai
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/pi-core
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/pubsub
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/quickfire-core
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/react
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/runtime
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/template-management
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/test-runtime
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/testkit
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/tool-ui
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/ui
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: packages/vcs-engine
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: panels/chat
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: panels/terminal
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: projects/default
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/agentic-development
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/agents
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/api-integrations
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/architecture
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/capabilities
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/extensiondev
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/gad-context
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/messaging
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/phone-setup
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/provenance-orientation
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/sandbox
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/templates
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/terminal
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/vibestudio-vcs
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/web-research
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: skills/workspace-dev
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: templates/default
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/agent-worker
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/missions
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/model-settings
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/pubsub-channel
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/quickfire-service
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/silent-agent-worker
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/testkit-driver
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/workspace-presentation
+      source: git+https://github.com/panticonic/vibestudio-base.git
+    - repoPath: workers/workspace-source
+      source: git+https://github.com/panticonic/vibestudio-base.git
   repositories:
     - about/about
     - about/adblock
     - about/automations
     - about/credentials
+    - about/help
     - about/keyboard-shortcuts
     - about/local-models
+    - about/new
     - about/permissions
     - about/server-logs
+    - about/templates
+    - about/testbench
+    - about/workspace
     - about/workspace-history
     - apps/mobile
     - apps/remote-cli
     - apps/shell
     - apps/terminal-browser
+    - extensions/claude-code
+    - extensions/file-tools
+    - extensions/git-bridge
+    - extensions/image-service
     - extensions/local-models
     - extensions/mobile-debug
+    - extensions/pdf-ingest
     - extensions/react-native
+    - extensions/shell
+    - extensions/templates
+    - extensions/test-runner
     - extensions/typecheck-service
     - meta
+    - packages/about-shared
+    - packages/agent-loop
+    - packages/agentic-chat
+    - packages/agentic-core
+    - packages/agentic-do
+    - packages/agentic-protocol
+    - packages/cdp-client
+    - packages/channel-fork
+    - packages/channel-policies
+    - packages/eval
+    - packages/harness
+    - packages/integrations
     - packages/mobile-navigation
+    - packages/model-catalog
+    - packages/omnibox-core
+    - packages/pi-ai
+    - packages/pi-core
+    - packages/pubsub
+    - packages/quickfire-core
+    - packages/react
+    - packages/runtime
+    - packages/template-management
     - packages/terminal-host-protocol
     - packages/terminal-shim
+    - packages/test-runtime
+    - packages/testkit
+    - packages/tool-ui
+    - packages/ui
+    - packages/vcs-engine
     - packages/workspace-transfer
+    - panels/chat
+    - panels/terminal
+    - projects/default
+    - skills/agentic-development
+    - skills/agents
+    - skills/api-integrations
     - skills/appdev
+    - skills/architecture
+    - skills/capabilities
+    - skills/extensiondev
+    - skills/gad-context
     - skills/local-models
+    - skills/messaging
     - skills/performance
+    - skills/phone-setup
+    - skills/provenance-orientation
     - skills/remote-access
+    - skills/sandbox
     - skills/server-logs
+    - skills/templates
+    - skills/terminal
+    - skills/vibestudio-vcs
+    - skills/web-research
+    - skills/workspace-dev
+    - templates/default
+    - workers/agent-worker
     - workers/development
     - workers/images
+    - workers/missions
+    - workers/model-settings
     - workers/phone-provisioning
+    - workers/pubsub-channel
+    - workers/quickfire-service
+    - workers/silent-agent-worker
     - workers/system-agent
+    - workers/testkit-driver
+    - workers/workspace-presentation
+    - workers/workspace-source
 trust:
   chromeApps:
     - apps/shell
