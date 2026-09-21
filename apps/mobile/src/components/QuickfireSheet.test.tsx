@@ -165,10 +165,12 @@ describe("QuickfireSheet", () => {
         getByLabelText("Clear this conversation and return to commands"),
       );
     });
-    expect(transport.clear).toHaveBeenCalledWith("slot");
+    await waitFor(() => expect(transport.clear).toHaveBeenCalledWith("slot"));
     expect(transport.sessionFor).toHaveBeenCalledTimes(1);
-    expect(store.get(quickfireSheetAtom)).toBeNull();
-    expect(store.get(commandSheetAtom)).toEqual({ mode: "all" });
+    await waitFor(() => {
+      expect(store.get(quickfireSheetAtom)).toBeNull();
+      expect(store.get(commandSheetAtom)).toEqual({ mode: "all" });
+    });
   });
 
   it("shows the resume chip for a conversation that already existed", async () => {
