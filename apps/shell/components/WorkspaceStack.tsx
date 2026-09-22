@@ -2,6 +2,7 @@ import { workspaceLabel } from "../shell/workspaceLabel";
 import type { ReactNode } from "react";
 import {
   CaretRightIcon,
+  DotsHorizontalIcon,
   GearIcon,
   HomeIcon,
   PlusIcon,
@@ -32,6 +33,7 @@ export function WorkspaceStack({
   onOpenWorkspace,
   onCreatePanel,
   onReviewApprovals,
+  onOpenWorkspaceSettings,
   onAddWorkspace,
   scrollRef,
 }: {
@@ -41,6 +43,7 @@ export function WorkspaceStack({
   onOpenWorkspace(workspaceId: string): void;
   onCreatePanel(workspaceId: string): void;
   onReviewApprovals(workspaceId: string): void;
+  onOpenWorkspaceSettings(workspaceId: string): void;
   onAddWorkspace(): void;
 }) {
   const rank = (entry: WorkspaceSection) =>
@@ -109,6 +112,15 @@ export function WorkspaceStack({
                       {workspace.privateRole ? "Only you" : "Workspace"}
                     </span>
                   </span>
+                </button>
+                <button
+                  type="button"
+                  className="workspace-section-settings"
+                  aria-label={`Workspace settings for ${workspaceLabel(workspace)}`}
+                  title={`Workspace settings for ${workspaceLabel(workspace)}`}
+                  onClick={() => onOpenWorkspaceSettings(workspace.workspaceId)}
+                >
+                  <DotsHorizontalIcon />
                 </button>
                 <button
                   type="button"

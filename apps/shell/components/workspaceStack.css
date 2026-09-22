@@ -47,6 +47,7 @@
 }
 .workspace-stack-add,
 .workspace-section-new,
+.workspace-section-settings,
 .workspace-section-toggle {
   display: grid;
   place-items: center;
@@ -62,6 +63,7 @@
 }
 .workspace-stack-add:hover,
 .workspace-section-new:not(:disabled):hover,
+.workspace-section-settings:hover,
 .workspace-section-toggle:hover {
   background: var(--gray-4);
 }
@@ -147,6 +149,10 @@
 .workspace-section-new {
   color: var(--gray-10) !important;
 }
+.workspace-section-settings {
+  width: 24px;
+  color: var(--gray-10) !important;
+}
 .workspace-section-tree {
   min-width: 0;
 }
@@ -193,6 +199,7 @@
 @media (pointer: coarse) {
   .workspace-stack-add,
   .workspace-section-new,
+  .workspace-section-settings,
   .workspace-section-toggle {
     min-width: 44px;
     min-height: 44px;

@@ -51,6 +51,9 @@ export const settingsDialogAtom = atom<{
   workspaceId?: string;
 } | null>(null);
 
+/** Local invalidation after this window changes the hub workspace catalog. */
+export const workspaceCatalogRevisionAtom = atom(0);
+
 // =============================================================================
 // Shell Overlay State
 // =============================================================================

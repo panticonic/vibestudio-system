@@ -38,6 +38,7 @@ import {
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 import {
   settingsDialogAtom,
+  workspaceCatalogRevisionAtom,
   workspaceChooserDialogOpenAtom,
 } from "../state/appModeAtoms";
 import { themeConfigAtom, themeModeAtom } from "../state/themeAtoms";
@@ -107,6 +108,7 @@ export function WorkspaceDesktop({
     new Map<string, (element: HTMLDivElement | null) => void>(),
   );
   const setSettings = useSetAtom(settingsDialogAtom);
+  const workspaceCatalogRevision = useAtomValue(workspaceCatalogRevisionAtom);
   const setChooser = useSetAtom(workspaceChooserDialogOpenAtom);
   // Appearance and theme identity are one app-wide choice, but each retained
   // workspace renders in its own Jotai store, and the control that sets them
@@ -316,7 +318,7 @@ export function WorkspaceDesktop({
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
+  }, [refresh, workspaceCatalogRevision]);
   useEffect(
     () => () => {
       epoch.current += 1;
@@ -504,6 +506,9 @@ export function WorkspaceDesktop({
                   void createPanel(id);
                 }}
                 onReviewApprovals={reviewApprovals}
+                onOpenWorkspaceSettings={(workspaceId) =>
+                  setSettings({ section: "workspaces", workspaceId })
+                }
                 onAddWorkspace={() => setChooser(true)}
               />
               <Flex

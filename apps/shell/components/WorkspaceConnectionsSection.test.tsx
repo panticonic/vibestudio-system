@@ -8,7 +8,13 @@ import {
 } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), set: vi.fn() }));
+const api = vi.hoisted(() => ({
+  list: vi.fn(),
+  get: vi.fn(),
+  set: vi.fn(),
+  setName: vi.fn(),
+  deleteWorkspace: vi.fn(),
+}));
 vi.mock("../shell/client", () => ({
   account: { getProfile: async () => ({ userId: "alice" }) },
   hubControl: {
@@ -20,6 +26,8 @@ vi.mock("../shell/client", () => ({
     }),
     getWorkspaceRpcPolicy: api.get,
     setWorkspaceRpcPolicy: api.set,
+    setWorkspaceDisplayName: api.setName,
+    deleteWorkspace: api.deleteWorkspace,
   },
 }));
 import { WorkspaceConnectionsSection } from "./WorkspaceConnectionsSection";
@@ -71,9 +79,54 @@ beforeEach(() => {
     ...snapshot,
     policy: { incoming: [], outgoing: [] },
   });
+  api.setName.mockImplementation(async ({ displayName }) => ({
+    workspaceId: "project-id",
+    name: "Garden project",
+    displayName: displayName ?? undefined,
+    running: true,
+    pendingApprovalCount: 0,
+    lastOpened: 0,
+  }));
+  api.deleteWorkspace.mockResolvedValue({
+    deleted: true,
+    workspaceId: "project-id",
+  });
 });
 afterEach(cleanup);
 describe("WorkspaceConnectionsSection", () => {
+  it("changes the display name without changing the routing name", async () => {
+    show();
+    const input = await screen.findByRole("textbox", {
+      name: "Workspace display name",
+    });
+    await waitFor(() =>
+      expect((input as HTMLInputElement).disabled).toBe(false),
+    );
+    fireEvent.change(input, { target: { value: "Project Atlas" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    await waitFor(() =>
+      expect(api.setName).toHaveBeenCalledWith({
+        workspaceId: "project-id",
+        displayName: "Project Atlas",
+      }),
+    );
+  });
+
+  it("requires a second explicit action before deleting an administered workspace", async () => {
+    show();
+    const begin = await screen.findByRole("button", {
+      name: "Delete workspace…",
+    });
+    fireEvent.click(begin);
+    expect(api.deleteWorkspace).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await waitFor(() =>
+      expect(api.deleteWorkspace).toHaveBeenCalledWith({
+        workspace: "Garden project",
+      }),
+    );
+  });
+
   it("reviews the exact source, destination, operation and account before removing a rule", async () => {
     show();
     fireEvent.click(

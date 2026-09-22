@@ -2,6 +2,7 @@ import { WorkspaceMembersSection } from "./WorkspaceMembersSection";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { workspaceLabel } from "../shell/workspaceLabel";
 import { useCallback, useEffect, useState } from "react";
+import { useSetAtom } from "jotai";
 import {
   ArrowRightIcon,
   CheckCircledIcon,
@@ -27,6 +28,10 @@ import type {
   WorkspaceRpcScope,
 } from "@vibestudio/identity/workspaceRpcPolicy";
 import { type hubControl } from "../shell/client";
+import {
+  settingsDialogAtom,
+  workspaceCatalogRevisionAtom,
+} from "../state/appModeAtoms";
 import "./workspaceConnections.css";
 
 type PolicySnapshot = Awaited<
@@ -41,6 +46,8 @@ export function WorkspaceConnectionsSection({
   initialWorkspaceId?: string;
 }) {
   const { account, hubControl } = useShellWorkspaceClient();
+  const setSettings = useSetAtom(settingsDialogAtom);
+  const bumpCatalog = useSetAtom(workspaceCatalogRevisionAtom);
 
   const [management, setManagement] = useState(new Map<string, boolean>());
   const onAccess = useCallback((id: string, allowed: boolean) => {
@@ -80,11 +87,11 @@ export function WorkspaceConnectionsSection({
         </span>
         <Box>
           <Text as="div" size="4" weight="bold">
-            Make room for useful connections
+            Workspace settings
           </Text>
           <Text as="p" size="2" color="gray" mt="1">
-            Choose which operations may ask for access between workspaces. Your
-            files and tools still have their own approvals.
+            Change how a workspace appears, manage its people and connections,
+            or remove it when it is no longer needed.
           </Text>
         </Box>
       </Flex>
@@ -127,6 +134,24 @@ export function WorkspaceConnectionsSection({
       ) : null}
       {selected ? (
         <>
+          <WorkspaceIdentityEditor
+            workspace={selected}
+            canManage={
+              selected.privateRole ? true : management.get(selected.workspaceId)
+            }
+            onUpdated={(updated) => {
+              setWorkspaces((current) =>
+                current.map((entry) =>
+                  entry.workspaceId === updated.workspaceId ? updated : entry,
+                ),
+              );
+              bumpCatalog((revision) => revision + 1);
+            }}
+            onDeleted={() => {
+              bumpCatalog((revision) => revision + 1);
+              setSettings(null);
+            }}
+          />
           {selected.privateRole || management.get(selected.workspaceId) ? (
             <WorkspacePolicyEditor
               key={selected.workspaceId}
@@ -155,6 +180,148 @@ export function WorkspaceConnectionsSection({
             Choose one above to see its incoming and outgoing permissions.
           </Text>
         </div>
+      ) : null}
+    </Flex>
+  );
+}
+
+function WorkspaceIdentityEditor({
+  workspace,
+  canManage,
+  onUpdated,
+  onDeleted,
+}: {
+  workspace: HubWorkspaceEntry;
+  canManage: boolean | undefined;
+  onUpdated(workspace: HubWorkspaceEntry): void;
+  onDeleted(): void;
+}) {
+  const { hubControl } = useShellWorkspaceClient();
+  const [displayName, setDisplayName] = useState(workspace.displayName ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const normalized = displayName.trim();
+  const current = workspace.displayName ?? "";
+  const save = async () => {
+    if (!canManage || busy || normalized === current) return;
+    setBusy(true);
+    setError(null);
+    try {
+      onUpdated(
+        await hubControl.setWorkspaceDisplayName({
+          workspaceId: workspace.workspaceId,
+          displayName: normalized || null,
+        }),
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!canManage || workspace.privateRole || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await hubControl.deleteWorkspace({ workspace: workspace.name });
+      onDeleted();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setBusy(false);
+    }
+  };
+  return (
+    <Flex direction="column" gap="3">
+      <Text size="3" weight="bold">
+        Name
+      </Text>
+      <Text size="2" color="gray">
+        A display name changes what people see. The workspace&apos;s routing
+        name stays <code>{workspace.name}</code>.
+      </Text>
+      <Flex gap="2" align="end" wrap="wrap">
+        <TextField.Root
+          aria-label="Workspace display name"
+          placeholder={
+            workspace.privateRole === "personal"
+              ? "Personal"
+              : workspace.privateRole === "system"
+                ? "System"
+                : workspace.name
+          }
+          value={displayName}
+          maxLength={80}
+          disabled={!canManage || busy}
+          onChange={(event) => setDisplayName(event.currentTarget.value)}
+          style={{ flex: "1 1 240px" }}
+        />
+        <Button
+          disabled={!canManage || busy || normalized === current}
+          onClick={() => void save()}
+        >
+          Save name
+        </Button>
+      </Flex>
+      {canManage === false ? (
+        <Text size="1" color="gray">
+          Only a workspace admin can change these settings.
+        </Text>
+      ) : null}
+      {error ? (
+        <Callout.Root color="red" role="alert">
+          <Callout.Text>{error}</Callout.Text>
+        </Callout.Root>
+      ) : null}
+      {!workspace.privateRole && canManage ? (
+        <Flex
+          direction="column"
+          gap="2"
+          pt="4"
+          style={{ borderTop: "1px solid var(--gray-a5)" }}
+        >
+          <Text size="3" weight="bold" color="red">
+            Delete workspace
+          </Text>
+          <Text size="2" color="gray">
+            Permanently removes this workspace and all of its data.
+          </Text>
+          {confirmingDelete ? (
+            <Callout.Root color="red" role="alert">
+              <Callout.Text>
+                Delete {workspaceLabel(workspace)} permanently? This cannot be
+                undone.
+              </Callout.Text>
+              <Flex gap="2" mt="2">
+                <Button
+                  color="red"
+                  disabled={busy}
+                  onClick={() => void remove()}
+                >
+                  Delete permanently
+                </Button>
+                <Button
+                  variant="soft"
+                  color="gray"
+                  disabled={busy}
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Cancel
+                </Button>
+              </Flex>
+            </Callout.Root>
+          ) : (
+            <Button
+              color="red"
+              variant="soft"
+              onClick={() => setConfirmingDelete(true)}
+              style={{ alignSelf: "flex-start" }}
+            >
+              <TrashIcon /> Delete workspace…
+            </Button>
+          )}
+        </Flex>
       ) : null}
     </Flex>
   );

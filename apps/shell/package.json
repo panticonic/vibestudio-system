@@ -475,6 +475,15 @@
           "evidence": "intentional-broad"
         },
         {
+          "capability": "workspaces.rename",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
           "capability": "workspaces.rpcPolicy.read",
           "resource": {
             "kind": "prefix",

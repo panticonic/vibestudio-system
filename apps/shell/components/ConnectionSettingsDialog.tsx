@@ -222,8 +222,8 @@ export function ConnectionSettingsDialog({
           <Tabs.Trigger value="connection" aria-label="Connection">
             Connection
           </Tabs.Trigger>
-          <Tabs.Trigger value="workspaces" aria-label="Workspace connections">
-            Connections
+          <Tabs.Trigger value="workspaces" aria-label="Workspaces">
+            Workspaces
           </Tabs.Trigger>
           <Tabs.Trigger value="devices" aria-label="Devices">
             Devices
