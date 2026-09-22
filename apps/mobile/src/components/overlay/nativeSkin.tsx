@@ -57,6 +57,10 @@ import {
   Bell,
   Brain,
   Check,
+  Copy,
+  Search,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Clock3,
   Gavel,
   Info,
@@ -72,6 +76,10 @@ import {
 import { copyToClipboard } from "../../services/nativeCapabilities";
 
 const GLYPHS: Record<QuickfireIconProps["name"], IconComponent> = {
+  search: Search,
+  copy: Copy,
+  expand: ChevronsUpDown,
+  collapse: ChevronsDownUp,
   you: User,
   agent: Sparkles,
   person: User,
@@ -502,9 +510,6 @@ export function createNativeSkin(
             {open ? "▾" : "▸"}
           </RNText>
           <View style={{ flex: 1, minWidth: 0 }}>{summary}</View>
-          <RNText style={[type.caption, { color: colors.textSecondary }]}>
-            {open ? "Hide" : "Details"}
-          </RNText>
         </RNPressable>
         {open ? <View style={styles.disclosureBody}>{children}</View> : null}
       </View>

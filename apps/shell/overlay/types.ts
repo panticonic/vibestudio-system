@@ -24,7 +24,8 @@ export interface OverlaySurfaceComponentProps {
   props: unknown;
   emitIntent: (payload: unknown) => void;
 }
-export type OverlaySurfaceComponent = ComponentType<OverlaySurfaceComponentProps>;
+export type OverlaySurfaceComponent =
+  ComponentType<OverlaySurfaceComponentProps>;
 
 /**
  * Theme identity forwarded to the surface so it matches the chrome's
@@ -53,6 +54,8 @@ export interface OverlayRenderMessage {
    * reports its actual height, so auto-fit never loops.
    */
   maxHeight: number;
+  /** User-sized native view, including the transparent shadow margin. */
+  layout?: { width: number; height: number; expanded: boolean };
 }
 
 /**
@@ -68,9 +71,17 @@ export interface ContentOverlayBridge {
   reportSize(size: { width: number; height: number }): void;
   /** Emit an opaque intent payload back to the owning chrome. */
   emitIntent(payload: unknown): void;
-  /** Report a drag gesture (screen coordinates) so main can move the native
-   *  view and snap it to the nearest corner on release. */
-  reportDrag(phase: "start" | "move" | "end", screenX: number, screenY: number): void;
+  /** Report a drag gesture in stable screen coordinates to the native view. */
+  reportDrag(
+    phase: "start" | "move" | "end",
+    screenX: number,
+    screenY: number,
+  ): void;
+  reportGeometry(
+    action: "toggle-expand" | "resize-start" | "resize-move" | "resize-end",
+    screenX?: number,
+    screenY?: number,
+  ): void;
 }
 
 declare global {

@@ -16,6 +16,7 @@
  * argument, restoring a query), which it signals by bumping `inputEpoch`.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { OverlayWindowControls } from "./OverlayWindowControls";
 import {
   QUICKFIRE_MODE_CHIPS,
   isQuickfireSurfaceProps,
@@ -267,28 +268,36 @@ function QuickfireCard(
         // off whatever you are trying to look at is the difference between a
         // window and a lid.
         <div className="quickfire-header" data-overlay-drag-handle="">
-          <div className="quickfire-navigation">
-            {!replyingToConversation ? (
-              <button
-                type="button"
-                onClick={() => emit({ type: "mode", mode: "all" })}
-              >
-                ‹ Commands
-              </button>
-            ) : (
-              <span />
-            )}
-            <button
-              type="button"
-              aria-label="Close Quickfire"
-              onClick={() => emit({ type: "dismiss" })}
-            >
-              Done
-            </button>
-          </div>
           <ConversationHeader
             compose={compose}
             onIntent={(intent) => emit(conversationIntent(intent))}
+            leading={
+              !replyingToConversation ? (
+                <button
+                  type="button"
+                  className="quickfire-header-control"
+                  aria-label="‹ Commands"
+                  title="Back to commands"
+                  onClick={() => emit({ type: "mode", mode: "all" })}
+                >
+                  ‹
+                </button>
+              ) : null
+            }
+            trailing={
+              <span className="quickfire-window-controls">
+                <OverlayWindowControls />
+                <button
+                  type="button"
+                  className="quickfire-header-control"
+                  aria-label="Close Quickfire"
+                  title="Close Quickfire"
+                  onClick={() => emit({ type: "dismiss" })}
+                >
+                  <X size={15} />
+                </button>
+              </span>
+            }
           />
         </div>
       ) : (
@@ -297,6 +306,7 @@ function QuickfireCard(
             <h1>What would you like to do?</h1>
             <p>Find a panel, run a command, or ask your agent.</p>
           </div>
+          <OverlayWindowControls />
           <button
             type="button"
             className="quickfire-dismiss"

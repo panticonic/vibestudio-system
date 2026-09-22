@@ -10,6 +10,7 @@ import {
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { QuickfireSurfaceProps } from "./quickfireSurfaceModel";
 import { QuickfireSurface } from "./QuickfireSurface";
+import { OverlayWindowContext } from "./OverlayWindowControls";
 
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -60,6 +61,25 @@ function renderSurface(
 }
 
 describe("QuickfireSurface conversation", () => {
+  it("offers expansion and restoration through the overlay window controls", () => {
+    const toggle = vi.fn();
+    const surface = <QuickfireSurface props={baseProps} emitIntent={vi.fn()} />;
+    const { rerender } = render(
+      <OverlayWindowContext.Provider value={{ expanded: false, toggle }}>
+        {surface}
+      </OverlayWindowContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Expand overlay" }));
+    expect(toggle).toHaveBeenCalledOnce();
+    rerender(
+      <OverlayWindowContext.Provider value={{ expanded: true, toggle }}>
+        {surface}
+      </OverlayWindowContext.Provider>,
+    );
+    expect(
+      screen.getByRole("button", { name: "Restore overlay size" }),
+    ).toBeTruthy();
+  });
   it("presents a notification-bound conversation as a reply surface", () => {
     renderSurface({ kind: "conversation", streaming: false });
 
@@ -184,7 +204,7 @@ describe("QuickfireSurface conversation", () => {
       screen
         .getByText("panel_describe")
         .closest('.qf-box[data-surface="outline"]')
-        ?.hasAttribute("data-full"),
+        ?.hasAttribute("data-fit"),
     ).toBe(true);
   });
 
@@ -249,7 +269,7 @@ describe("QuickfireSurface conversation", () => {
     expect(narration.getAttribute("data-tone")).toBe("neutral");
   });
 
-  it("gives reasoning a readable full-width timeline row", () => {
+  it("keeps collapsed reasoning compact alongside other activity", () => {
     renderSurface({
       transcript: [
         {
@@ -261,11 +281,11 @@ describe("QuickfireSurface conversation", () => {
     });
 
     const thought = screen.getByTestId("quickfire-card-thought-1");
-    expect(thought.getAttribute("data-full")).toBe("");
+    expect(thought.hasAttribute("data-full")).toBe(false);
     expect(
       screen.getByTestId("quickfire-transcript").hasAttribute("data-row"),
     ).toBe(false);
-    expect(thought.hasAttribute("data-fit")).toBe(false);
+    expect(thought.hasAttribute("data-fit")).toBe(true);
   });
 
   it("keeps a failed turn's reason reachable instead of only colouring it", () => {
@@ -315,11 +335,12 @@ describe("QuickfireSurface conversation", () => {
       screen
         .getByLabelText("panel_eval — failed")
         .getAttribute("aria-expanded"),
-    ).toBe("true");
+    ).toBe("false");
+    fireEvent.click(screen.getByLabelText("panel_eval — failed"));
     const work = screen.getByTestId(
       "quickfire-detail-panel_eval — failed",
     ).parentElement;
-    expect(work?.getAttribute("data-full")).toBe("");
+    expect(work?.getAttribute("data-fit")).toBe("");
     const argument = document.querySelector(
       '.qf-code[data-language="javascript"]',
     );
@@ -379,7 +400,7 @@ describe("QuickfireSurface conversation", () => {
       expandable: true,
     });
 
-    expect(screen.getByText("Earlier history is available")).toBeTruthy();
+    expect(screen.getByText("Load earlier history")).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", {
         name: "Show earlier entries in this conversation",
@@ -755,7 +776,9 @@ it("does not claim a failed clipboard write succeeded", async () => {
   });
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await waitFor(() =>
-    expect(screen.getByText("Copy failed · try again")).toBeTruthy(),
+    expect(
+      screen.getByRole("button", { name: "Copy failed, try again" }),
+    ).toBeTruthy(),
   );
   expect(screen.queryByText("Copied")).toBeNull();
 });

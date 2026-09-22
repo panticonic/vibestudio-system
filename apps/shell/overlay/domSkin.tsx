@@ -30,6 +30,9 @@ import {
   Check,
   Clock3,
   Copy,
+  Search,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Gavel,
   Info,
   LayoutTemplate,
@@ -55,6 +58,10 @@ import type {
 } from "@workspace/quickfire-core/ui";
 
 const GLYPHS = {
+  search: Search,
+  copy: Copy,
+  expand: ChevronsUpDown,
+  collapse: ChevronsDownUp,
   you: User,
   agent: Sparkles,
   person: User,
@@ -269,9 +276,6 @@ function Disclosure({
       >
         <span className="qf-disclosure-mark" aria-hidden="true" />
         {summary}
-        <span className="qf-disclosure-hint" aria-hidden="true">
-          {open ? "Hide" : "Details"}
-        </span>
       </summary>
       <div className="qf-disclosure-body">{children}</div>
     </details>

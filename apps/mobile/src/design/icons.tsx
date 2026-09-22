@@ -45,6 +45,12 @@ try {
     Clock3: requiredIcon(require("lucide-react-native/icons/clock-3")),
     Command: requiredIcon(require("lucide-react-native/icons/command")),
     Copy: requiredIcon(require("lucide-react-native/icons/copy")),
+    ChevronsDownUp: requiredIcon(
+      require("lucide-react-native/icons/chevrons-down-up"),
+    ),
+    ChevronsUpDown: requiredIcon(
+      require("lucide-react-native/icons/chevrons-up-down"),
+    ),
     CopyPlus: requiredIcon(require("lucide-react-native/icons/copy-plus")),
     Globe2: requiredIcon(require("lucide-react-native/icons/earth")),
     MoreHorizontal: requiredIcon(require("lucide-react-native/icons/ellipsis")),
@@ -143,6 +149,8 @@ export const Workflow = icon("Workflow", "◇");
 export const Archive = icon("Archive", "▣");
 export const Command = icon("Command", "⌘");
 export const Copy = icon("Copy", "⧉");
+export const ChevronsDownUp = icon("ChevronsDownUp", "↥");
+export const ChevronsUpDown = icon("ChevronsUpDown", "↧");
 export const CopyPlus = icon("CopyPlus", "⧉+");
 export const ExternalLink = icon("ExternalLink", "↗");
 export const Lock = icon("Lock", "⚿");
