@@ -1,4 +1,10 @@
 .workspace-desktop-titlebar { flex: none; min-width: 0; }
+.workspace-connection-notice { display: flex; flex: none; align-items: center; gap: 12px; min-width: 0; padding: 8px 12px; border-block: 1px solid var(--amber-a6); background: var(--amber-a3); color: var(--gray-12); }
+.workspace-connection-notice[data-terminal="true"] { border-color: var(--red-a6); background: var(--red-a3); }
+.workspace-connection-notice-copy { display: flex; flex: 1 1 auto; align-items: baseline; gap: 8px; min-width: 0; }
+.workspace-connection-notice-message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-connection-notice-actions { flex: none; }
+.workspace-connection-notice-error { color: var(--red-11); }
 .workspace-desktop-body { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; }
 .workspace-desktop { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; background: var(--app-chrome-bg); height: 100dvh; overflow: hidden; }
 /* The navigation is frame, not content: it takes the same chrome fill as the
@@ -13,7 +19,7 @@
 .workspace-desktop-runtime { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; }
 .workspace-desktop-runtime[hidden] { display: none; }
 .workspace-desktop-starting { margin: auto; }
-@media(max-width: 720px) { .workspace-desktop-navigation { width: 220px; min-width: 180px; max-width: 40vw; } .workspace-desktop-controls { flex-wrap: wrap; } }
+@media(max-width: 720px) { .workspace-desktop-navigation { width: 220px; min-width: 180px; max-width: 40vw; } .workspace-desktop-controls { flex-wrap: wrap; } .workspace-connection-notice { align-items: flex-start; flex-wrap: wrap; } .workspace-connection-notice-copy { align-items: flex-start; flex-direction: column; gap: 2px; } .workspace-connection-notice-message { white-space: normal; } }
 
 .workspace-desktop-navigation[hidden] { display: none; }
 

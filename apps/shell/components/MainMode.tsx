@@ -21,7 +21,7 @@ import {
 } from "./ApprovalPresentationContext";
 import { WorkspaceDesktop } from "./WorkspaceDesktop";
 import { WorkspaceChooser } from "./WorkspaceChooser";
-import { WorkspaceConnectionOverlay } from "./WorkspaceConnectionOverlay";
+import { WorkspaceConnectionNotice } from "./WorkspaceConnectionNotice";
 
 /**
  * Main mode: the normal desktop startup surface with the panel app and its
@@ -79,7 +79,13 @@ export default function MainMode() {
 
   return (
     <ApprovalPresentationContext.Provider value={approvalPresentation}>
-      <WorkspaceDesktop>
+      <WorkspaceDesktop
+        connectionNotice={
+          <WorkspaceConnectionNotice
+            onOpenSettings={() => setSettingsTarget({ section: "connection" })}
+          />
+        }
+      >
         {/* Workspace creation */}
         <AppDialog
           open={workspaceChooserOpen}
@@ -110,9 +116,6 @@ export default function MainMode() {
         </AppDialog>
       </WorkspaceDesktop>
 
-      <WorkspaceConnectionOverlay
-        onOpenSettings={() => setSettingsTarget({ section: "connection" })}
-      />
       <ConnectionSettingsDialog
         section={settingsTarget?.section ?? null}
         workspaceId={settingsTarget?.workspaceId}

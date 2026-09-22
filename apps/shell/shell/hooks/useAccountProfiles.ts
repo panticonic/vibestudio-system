@@ -15,6 +15,23 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function currentAccountProfileFailure(
+  previous: CurrentAccountProfileState,
+  error: unknown,
+): CurrentAccountProfileState {
+  // Availability is presented once by the host-owned connection strip. Keep
+  // the last verified identity projection instead of duplicating the outage as
+  // an identity warning in every workspace tree.
+  if (isRpcConnectionLost(error)) {
+    return { ...previous, settled: true, error: null };
+  }
+  return {
+    profile: previous.profile,
+    settled: true,
+    error: errorMessage(error),
+  };
+}
+
 /** Resolve the shell's verified account before selecting an owner-primary tree. */
 export function useCurrentAccountProfile(): CurrentAccountProfileState {
   const { ACCOUNT_PROFILE_CHANGED_EVENT, account } = useShellWorkspaceClient();
@@ -34,11 +51,7 @@ export function useCurrentAccountProfile(): CurrentAccountProfileState {
         if (!cancelled) setState({ profile, settled: true, error: null });
       } catch (error) {
         if (!cancelled) {
-          setState((previous) => ({
-            profile: previous.profile,
-            settled: true,
-            error: errorMessage(error),
-          }));
+          setState((previous) => currentAccountProfileFailure(previous, error));
         }
       }
     };

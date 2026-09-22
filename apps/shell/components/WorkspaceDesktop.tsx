@@ -60,7 +60,13 @@ type OpenWorkspace = ClientOwner & {
 };
 
 /** System owns this window. Each retained child owns its store, clients, tree and drafts. */
-export function WorkspaceDesktop({ children }: { children?: ReactNode }) {
+export function WorkspaceDesktop({
+  children,
+  connectionNotice,
+}: {
+  children?: ReactNode;
+  connectionNotice?: ReactNode;
+}) {
   const presentationStore = useStore();
   const approvalPresentation = useApprovalPresentation();
   const [catalog, setCatalog] = useState<HubWorkspaceEntry[]>([]);
@@ -471,6 +477,7 @@ export function WorkspaceDesktop({ children }: { children?: ReactNode }) {
             className="workspace-desktop-titlebar"
             ref={setTitleBarHost}
           />
+          {connectionNotice}
           <div className="workspace-desktop-body">
             <aside
               className="workspace-desktop-navigation"
