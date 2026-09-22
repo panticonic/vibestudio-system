@@ -23,12 +23,10 @@ import {
 
 export function PairedDevicesSection({
   currentDeviceId,
-  workspaceName,
   onStartPhoneSetup,
   showHeading = true,
 }: {
   currentDeviceId?: string;
-  workspaceName?: string;
   onStartPhoneSetup?: () => void;
   showHeading?: boolean;
 }) {
@@ -131,9 +129,7 @@ export function PairedDevicesSection({
     try {
       setError(null);
       setKnownDeviceIds(new Set(devices.map((device) => device.deviceId)));
-      const result = await hubControl.pairDevice(
-        workspaceName ? { workspace: workspaceName } : undefined,
-      );
+      const result = await hubControl.pairDevice();
       setInvite(result.pairing);
       setNow(Date.now());
       setConnectOpen(true);

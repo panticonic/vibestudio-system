@@ -309,13 +309,11 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
   const pairingExpired = !!pairingInvite && pairingInvite.expiresAt <= now;
 
   const handleCreatePairingInvite = async () => {
-    if (!shellClient || !currentWorkspace) return;
+    if (!shellClient) return;
     setPairingBusy(true);
     setPairingError(null);
     try {
-      const result = await shellClient.hubControl.pairDevice({
-        workspace: currentWorkspace.name,
-      });
+      const result = await shellClient.hubControl.pairDevice();
       if (!mountedRef.current) return;
       setPairingInvite(result.pairing);
       setNow(Date.now());

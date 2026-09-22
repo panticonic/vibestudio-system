@@ -250,46 +250,52 @@ export function WorkspaceDesktop({ children }: { children?: ReactNode }) {
           }
         }
         setOpened([...owners.current.values()]);
-        await Promise.all([
-          open(pair.personal),
-          open(pair.system),
-          ...entries
-            .filter((entry) => entry.pendingApprovalCount > 0)
-            .map(open),
-        ]);
-        if (focusWorkspaceId) {
-          const target = entries.find(
-            (entry) => entry.workspaceId === focusWorkspaceId,
-          );
-          if (target) await open(target);
-        }
-        // Initial loading must not replace a workspace explicitly selected while
-        // its private owners were opening.
-        if (
-          generation !== epoch.current ||
-          focusAtStart !== focusGeneration.current
-        )
-          return;
-        if (!owners.current.has(focusedRef.current ?? ""))
-          await hubControl.routeWorkspace({
-            workspaceId:
-              focusWorkspaceId && visible.has(focusWorkspaceId)
-                ? focusWorkspaceId
-                : pair.personal.workspaceId,
-          });
-        if (
-          generation !== epoch.current ||
-          focusAtStart !== focusGeneration.current
-        )
-          return;
-        setFocusedId((current) =>
+        const targetId =
           focusWorkspaceId && visible.has(focusWorkspaceId)
             ? focusWorkspaceId
-            : current && visible.has(current)
-              ? current
-              : pair.personal.workspaceId,
-        );
+            : focusedRef.current && visible.has(focusedRef.current)
+              ? focusedRef.current
+              : pair.personal.workspaceId;
+        const target = entries.find((entry) => entry.workspaceId === targetId);
+        if (!target)
+          throw new Error(
+            "The initial workspace is not available to this account",
+          );
+        await open(target);
+        // Initial loading must not replace a workspace explicitly selected while
+        // its private owner was opening.
+        if (
+          generation !== epoch.current ||
+          focusAtStart !== focusGeneration.current
+        )
+          return;
+        await hubControl.routeWorkspace({ workspaceId: targetId });
+        if (
+          generation !== epoch.current ||
+          focusAtStart !== focusGeneration.current
+        )
+          return;
+        setFocusedId(targetId);
         setError(null);
+        const background = new Map(
+          [
+            pair.system,
+            ...entries.filter((entry) => entry.pendingApprovalCount > 0),
+          ]
+            .filter((entry) => entry.workspaceId !== targetId)
+            .map((entry) => [entry.workspaceId, entry]),
+        );
+        void Promise.allSettled([...background.values()].map(open)).then(
+          (results) => {
+            for (const result of results) {
+              if (result.status === "rejected")
+                console.warn(
+                  "[workspace-desktop] Background workspace warmup failed",
+                  result.reason,
+                );
+            }
+          },
+        );
       } catch (error) {
         if (generation !== epoch.current) return;
         setError(error instanceof Error ? error.message : String(error));

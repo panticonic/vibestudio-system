@@ -47,8 +47,9 @@ description: Develop and diagnose the React Native client in the user’s System
 - Consumed or stale links must fail visibly and leave the recovery UI usable.
 - Re-pairing clears the active OTA bundle and returns to the shipped bootstrap;
   do not try to pair from a stale workspace bundle.
-- A connected app may create another-device invitations through
-  `hubControl.pairDevice` for its exact current workspace. The Settings →
+- A connected app may create account-level another-device invitations through
+  `hubControl.pairDevice`. The receiving device authenticates first and then
+  opens that account's Personal workspace by default. The Settings →
   Devices surface presents the complete server-minted HTTPS link, expiry,
   copy/share actions, and regeneration; it never reconstructs pairing fields or
   handles the current device's refresh credential.
@@ -97,7 +98,6 @@ description: Develop and diagnose the React Native client in the user’s System
 - Use `extensions/mobile-debug/SKILL.md` for device or simulator verification.
 - Use the repository mobile smoke workflow only when the change crosses native
   bootstrap, pairing, transport, or OTA boundaries.
-
 
 ## Browser storage boundaries
 

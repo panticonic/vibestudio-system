@@ -391,33 +391,34 @@ describe("desktop workspace ownership", () => {
     }
   });
 
-  it("preserves explicit System focus when slower initial Personal loading finishes", async () => {
+  it("publishes Personal focus without waiting for System warmup", async () => {
     const createOwner = api.open.getMockImplementation()!;
-    let finishPersonal!: () => void;
-    const personalOpening = new Promise<void>((resolve) => {
-      finishPersonal = resolve;
+    let finishSystem!: () => void;
+    const systemOpening = new Promise<void>((resolve) => {
+      finishSystem = resolve;
     });
     api.open.mockImplementation(async (id) => {
       const owner = await createOwner(id);
-      if (id === "personal") await personalOpening;
+      if (id === "system") await systemOpening;
       return owner;
     });
     api.route.mockClear();
     const result = render(<Desktop />);
     try {
-      const system = await screen.findByLabelText("system draft");
-      fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+      const personal = await screen.findByLabelText("personal draft");
       await waitFor(() =>
-        expect(system.getAttribute("data-visible")).toBe("true"),
+        expect(personal.getAttribute("data-visible")).toBe("true"),
       );
+      expect(api.route).toHaveBeenCalledWith({ workspaceId: "personal" });
+      expect(screen.queryByLabelText("system draft")).toBeNull();
       await act(async () => {
-        finishPersonal();
+        finishSystem();
       });
-      await screen.findByLabelText("personal draft");
-      expect(system.getAttribute("data-visible")).toBe("true");
-      expect(api.route.mock.calls).toEqual([[{ workspaceId: "system" }]]);
+      const system = await screen.findByLabelText("system draft");
+      expect(system.getAttribute("data-visible")).toBe("false");
+      expect(personal.getAttribute("data-visible")).toBe("true");
     } finally {
-      finishPersonal();
+      finishSystem();
       result.unmount();
       api.open.mockImplementation(createOwner);
     }

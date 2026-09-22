@@ -257,14 +257,13 @@ export function ConnectionSettingsDialog({
               This device&apos;s connection
             </Text>
             <Text as="div" size="2" color="gray" mb="3">
-              Choose the Vibestudio server and workspace this copy connects to.
+              Choose the Vibestudio server this copy connects to. Workspace
+              selection is part of the signed-in account.
             </Text>
             {current?.isActive ? (
               <Callout.Root size="1" color="green" mb="3">
                 <Callout.Text>
-                  Currently connected to{" "}
-                  {current.workspaceName ??
-                    `your server (device ${current.deviceId})`}
+                  Currently connected to your server (device {current.deviceId})
                 </Callout.Text>
               </Callout.Root>
             ) : current?.configured &&
@@ -448,7 +447,6 @@ export function ConnectionSettingsDialog({
             {current ? (
               <PairedDevicesSection
                 currentDeviceId={current.deviceId}
-                workspaceName={current.workspaceName}
                 onStartPhoneSetup={() => onSectionChange(null)}
                 showHeading={false}
               />

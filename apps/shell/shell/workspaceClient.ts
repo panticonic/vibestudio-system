@@ -196,7 +196,6 @@ export interface RemoteCredCurrent {
   configured: RemoteCredCurrentContract["configured"];
   isActive: RemoteCredCurrentContract["isActive"];
   deviceId?: RemoteCredCurrentContract["deviceId"];
-  workspaceName?: RemoteCredCurrentContract["workspaceName"];
 }
 export type DeviceRecord = HubDevice;
 export type PairingInvite = HubPairingInvite;
