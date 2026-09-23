@@ -28,20 +28,21 @@ import {
   Bell,
   Brain,
   Check,
-  Clock3,
-  Copy,
-  Search,
   ChevronsDownUp,
   ChevronsUpDown,
+  Clock3,
+  Copy,
   Gavel,
   Info,
   LayoutTemplate,
   Paperclip,
+  Search,
   Sparkles,
   TriangleAlert,
   User,
   Wrench,
   X,
+  type LucideIcon,
 } from "@workspace/ui/icons";
 import type {
   QuickfireBoxProps,
@@ -77,7 +78,7 @@ const GLYPHS = {
   paperclip: Paperclip,
   bell: Bell,
   gavel: Gavel,
-} as const;
+} as const satisfies Record<QuickfireIconProps["name"], LucideIcon>;
 
 function Input({ value, onChange, label, placeholder }: QuickfireInputProps) {
   return (

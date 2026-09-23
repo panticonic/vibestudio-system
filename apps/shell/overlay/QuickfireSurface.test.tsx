@@ -286,6 +286,9 @@ describe("QuickfireSurface conversation", () => {
       screen.getByTestId("quickfire-transcript").hasAttribute("data-row"),
     ).toBe(false);
     expect(thought.hasAttribute("data-fit")).toBe(true);
+    expect(thought.textContent).toContain(
+      "Inspecting the panel before proposing a repair",
+    );
   });
 
   it("keeps a failed turn's reason reachable instead of only colouring it", () => {
@@ -331,16 +334,15 @@ describe("QuickfireSurface conversation", () => {
       ],
     });
 
-    expect(
-      screen
-        .getByLabelText("panel_eval — failed")
-        .getAttribute("aria-expanded"),
-    ).toBe("false");
-    fireEvent.click(screen.getByLabelText("panel_eval — failed"));
+    const toggle = screen.getByLabelText("panel_eval — failed");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     const work = screen.getByTestId(
       "quickfire-detail-panel_eval — failed",
     ).parentElement;
     expect(work?.getAttribute("data-fit")).toBe("");
+    expect(work?.querySelector("details[open]")).not.toBeNull();
     const argument = document.querySelector(
       '.qf-code[data-language="javascript"]',
     );
@@ -780,7 +782,7 @@ it("does not claim a failed clipboard write succeeded", async () => {
       screen.getByRole("button", { name: "Copy failed, try again" }),
     ).toBeTruthy(),
   );
-  expect(screen.queryByText("Copied")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
 });
 
 it("renders aligned table columns and keeps code scroll keys with the reader", () => {
