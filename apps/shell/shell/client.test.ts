@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   envelopeFromMessage,
   type RpcClient,
@@ -29,6 +29,15 @@ vi.mock("./workspaceClient", () => ({
     };
   },
 }));
+const openNativeWorkspace = vi.fn(async (_workspaceId: string) => {});
+beforeEach(() => {
+  openNativeWorkspace.mockReset().mockResolvedValue(undefined);
+  vi.stubGlobal("__vibestudioNativePanels", {
+    openWorkspace: openNativeWorkspace,
+    connectNativePanelAdapter: vi.fn(),
+    applyNativePanelSurfaces: vi.fn(),
+  });
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
@@ -58,7 +67,18 @@ it("binds System RPC identity before its first request and isolates destination 
   const module = await import("./client");
   expect(await module.systemWorkspaceId).toBe("system");
   expect(send).not.toHaveBeenCalled();
-  const project = await module.createWorkspaceShellClient("project");
+  let admit!: () => void;
+  openNativeWorkspace.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        admit = resolve;
+      }),
+  );
+  const opening = module.createWorkspaceShellClient("project");
+  expect(openNativeWorkspace).toHaveBeenCalledWith("project");
+  expect(state.clients).toHaveLength(1);
+  admit();
+  const project = await opening;
   expect(project.client.app).toBeDefined();
   expect(project.client.app).not.toBe(module.app);
   const systemEvent = vi.fn();

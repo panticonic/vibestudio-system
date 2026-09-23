@@ -785,7 +785,6 @@ export function createShellWorkspaceClient(
       viewClient.forwardMouseClick(viewId, point),
     setThemeCss: (css: string) => viewClient.setThemeCss(css),
     ...ownership.nativePresentation.forWorkspace(ownership.workspaceId),
-    setShellOverlay: (active: boolean) => viewClient.setShellOverlay(active),
     showNativeShellOverlay: (options: NativeShellOverlayOptions) =>
       viewClient.showNativeShellOverlay(options),
     updateNativeShellOverlay: (

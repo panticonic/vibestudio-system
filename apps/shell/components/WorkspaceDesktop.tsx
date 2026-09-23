@@ -86,8 +86,7 @@ export function WorkspaceDesktop({
     nativePanelPresentation.getSnapshot,
   );
   useEffect(() => {
-    // The compositor owns error/recovery state for every desired-state sync,
-    // including automatic reconnect recovery after this promise has settled.
+    // The local compositor owns error state for every desired-state sync.
     void nativePanelPresentation
       .setFocusedWorkspace(focusedId)
       .catch(() => undefined);

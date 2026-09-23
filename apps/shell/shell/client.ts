@@ -19,7 +19,10 @@ import {
   createNativeConnectionState,
   type NativeWorkspaceConnectionBridge,
 } from "./nativeConnectionState";
-import { createNativePanelPresentation } from "./nativePanelPresentation";
+import {
+  createNativePanelPresentation,
+  desktopNativePanelBridge,
+} from "./nativePanelPresentation";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import {
   createShellApprovalClient,
@@ -79,7 +82,9 @@ export const hubApprovalSource = {
 export const systemWorkspaceId = Promise.resolve(
   g.__vibestudioTransport.identity.workspaceId,
 );
-export const nativePanelPresentation = createNativePanelPresentation(rpc);
+export const nativePanelPresentation = createNativePanelPresentation(
+  desktopNativePanelBridge(),
+);
 export const startupWorkspaceClient = createShellWorkspaceClient(rpc, {
   workspaceId: systemWorkspaceId,
   nativePresentation: nativePanelPresentation,
@@ -245,6 +250,7 @@ function createOwnerRpc(destination: RpcDestination) {
 }
 /** A captured target client. Desktop UI admission is enforced at the native IPC boundary. */
 export async function createWorkspaceShellClient(workspaceId: string) {
+  await desktopNativePanelBridge().openWorkspace(workspaceId);
   const owner = createOwnerRpc({ kind: "workspace", workspaceId });
   const scopedRpc = owner.rpc;
   const scoped = createShellWorkspaceClient(scopedRpc, {
