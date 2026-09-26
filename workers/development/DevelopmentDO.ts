@@ -60,7 +60,7 @@ export class DevelopmentDO extends DurableObjectBase {
   async openSession(input: {
     repositoryId: string;
     mode: "semantic" | "native-tool";
-    nativeTool?: "claude-code" | "system-editor";
+    nativeTool?: "system-editor";
     idempotencyKey: string;
   }): Promise<
     | { kind: "opened"; session: DevelopmentSession }
@@ -289,7 +289,7 @@ export class DevelopmentDO extends DurableObjectBase {
   @schemaRpc()
   async listNativeTools(): Promise<
     Array<{
-      toolId: "claude-code" | "system-editor";
+      toolId: "system-editor";
       executorId: string | null;
       available: boolean;
       unavailableReason: string | null;
@@ -297,7 +297,7 @@ export class DevelopmentDO extends DurableObjectBase {
     }>
   > {
     return Promise.all(
-      (["claude-code", "system-editor"] as const).map(async (toolId) => {
+      (["system-editor"] as const).map(async (toolId) => {
         const tool = await this.rpc.call<{
           toolId: typeof toolId;
           executorId: string;
