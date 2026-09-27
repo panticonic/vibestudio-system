@@ -1,4 +1,5 @@
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { useCallback, useEffect, useRef } from "react";
 import type { PanelPresentationSnapshot } from "@vibestudio/shared/panel/presentation";
 
@@ -41,7 +42,8 @@ export function NextPanelBuildWarmup() {
     cancelIdle.current = null;
     void buildUnits.warmPanel(NEXT_PANEL_SOURCE).catch((error: unknown) => {
       scheduled.current = false;
-      console.warn("[PanelApp] Next-panel warmup failed:", error);
+      if (!isRpcConnectionLost(error))
+        console.warn("[PanelApp] Next-panel warmup failed:", error);
     });
   }, []);
 
@@ -77,9 +79,10 @@ export function NextPanelBuildWarmup() {
       .then((snapshot) => {
         if (snapshot) acceptPresentation(snapshot);
       })
-      .catch((error: unknown) =>
-        console.warn("[PanelApp] Could not inspect first-panel readiness:", error),
-      );
+      .catch((error: unknown) => {
+        if (!isRpcConnectionLost(error))
+          console.warn("[PanelApp] Could not inspect first-panel readiness:", error);
+      });
   }, [acceptPresentation, initialized]);
 
   useEffect(inspectFocusedPanel, [inspectFocusedPanel]);

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, render, waitFor } from "@testing-library/react";
+import { RpcBoundaryError } from "@vibestudio/rpc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NextPanelBuildWarmup } from "./NextPanelBuildWarmup";
@@ -90,4 +91,22 @@ describe("NextPanelBuildWarmup", () => {
     expect(cancelIdleCallback).toHaveBeenCalledWith(41);
     expect(mocks.warmPanel).not.toHaveBeenCalled();
   });
+
+  it.each(["transport", "internal"] as const)(
+    "preserves real readiness diagnostics while ignoring %s connection loss",
+    async (kind) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mocks.getFocusedPanelId.mockRejectedValue(
+        new RpcBoundaryError("unavailable", kind, "CONNECTION_LOST"),
+      );
+      try {
+        render(<NextPanelBuildWarmup />);
+        await waitFor(() => expect(mocks.getFocusedPanelId).toHaveBeenCalled());
+        await act(async () => Promise.resolve());
+        expect(warn).toHaveBeenCalledTimes(kind === "transport" ? 0 : 1);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 });

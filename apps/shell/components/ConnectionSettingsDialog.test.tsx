@@ -46,6 +46,9 @@ vi.mock("./HostTargetsSection", () => ({
 vi.mock("./TemplatesSection", () => ({
   TemplatesSection: () => <div>Template settings</div>,
 }));
+vi.mock("./WorkspaceConnectionsSection", () => ({
+  WorkspaceConnectionsSection: () => <div>Workspace connection settings</div>,
+}));
 
 const { ConnectionSettingsDialog } = await import("./ConnectionSettingsDialog");
 
@@ -61,7 +64,9 @@ describe("ConnectionSettingsDialog", () => {
     );
 
     expect(
-      await screen.findByText(/Currently connected to home/i),
+      await screen.findByText(
+        /Currently connected to your server \(device device-1\)/i,
+      ),
     ).toBeTruthy();
     expect(screen.queryByLabelText("Pairing link")).toBeNull();
 
@@ -78,6 +83,7 @@ describe("ConnectionSettingsDialog", () => {
     const renderDialog = (
       section:
         | "connection"
+        | "workspaces"
         | "devices"
         | "profile"
         | "appearance"
@@ -95,7 +101,9 @@ describe("ConnectionSettingsDialog", () => {
     const { rerender } = render(renderDialog("connection"));
 
     expect(
-      await screen.findByText(/Currently connected to home/i),
+      await screen.findByText(
+        /Currently connected to your server \(device device-1\)/i,
+      ),
     ).toBeTruthy();
     expect(screen.queryByText("Device access settings")).toBeNull();
 
@@ -106,7 +114,14 @@ describe("ConnectionSettingsDialog", () => {
     expect(onSectionChange).toHaveBeenCalledWith("devices");
     rerender(renderDialog("devices"));
     expect(screen.getByText("Device access settings")).toBeTruthy();
-    expect(screen.queryByText(/Currently connected to home/i)).toBeNull();
+    expect(
+      screen.queryByText(
+        /Currently connected to your server \(device device-1\)/i,
+      ),
+    ).toBeNull();
+
+    rerender(renderDialog("workspaces"));
+    expect(screen.getByText("Workspace connection settings")).toBeTruthy();
 
     rerender(renderDialog("profile"));
     expect(screen.getByText("Account profile settings")).toBeTruthy();

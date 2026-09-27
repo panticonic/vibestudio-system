@@ -320,9 +320,7 @@ describe("SettingsScreen workspace selector", () => {
     );
 
     await waitFor(() =>
-      expect(view.shellClient.hubControl.pairDevice).toHaveBeenCalledWith({
-        workspace: "alpha",
-      }),
+      expect(view.shellClient.hubControl.pairDevice).toHaveBeenCalledWith(),
     );
     expect(
       view.getByText("https://vibestudio.app/p#device-invite"),
