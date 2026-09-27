@@ -362,8 +362,9 @@ export function TitleBar({
           }
         >
           {/* macOS: reserve the native traffic-light cluster and hover target. */}
-          {isMac && (!navigationHost || !navigationHost.sidebarVisible) && (
+          {isMac && (
             <Box
+              data-macos-titlebar-control-reserve="true"
               style={{
                 width: MACOS_TITLEBAR_CONTROL_RESERVE_PX,
                 flexShrink: 0,
