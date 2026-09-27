@@ -4,9 +4,11 @@ import { useAtomValue } from "jotai";
 import { isDarkModeAtom, themeColorsAtom } from "../state/themeAtoms";
 
 const LOGO = require("../assets/vibestudio-logo.png");
+const LOGO_ON_DARK = require("../assets/vibestudio-logo-dark.png");
 const SYMBOL = require("../assets/vibestudio-symbol.png");
-const SYMBOL_ON_DARK = require("../assets/vibestudio-symbol-on-dark.png");
-const SYMBOL_ON_LIGHT = require("../assets/vibestudio-symbol-on-light.png");
+const SYMBOL_DARK = require("../assets/vibestudio-symbol-dark.png");
+const SYMBOL_TILE_ON_DARK = require("../assets/vibestudio-symbol-on-dark.png");
+const SYMBOL_TILE_ON_LIGHT = require("../assets/vibestudio-symbol-on-light.png");
 
 export interface VibestudioLogoProps {
   size?: number;
@@ -25,12 +27,12 @@ export function VibestudioLogo({
   const colors = useAtomValue(themeColorsAtom);
   const source =
     variant === "logo"
-      ? LOGO
+      ? isDark ? LOGO_ON_DARK : LOGO
       : variant === "symbol"
-        ? SYMBOL
+        ? isDark ? SYMBOL_DARK : SYMBOL
         : isDark
-          ? SYMBOL_ON_DARK
-          : SYMBOL_ON_LIGHT;
+          ? SYMBOL_TILE_ON_DARK
+          : SYMBOL_TILE_ON_LIGHT;
   const width = variant === "logo" ? Math.round((size * 2) / 3) : size;
 
   return (

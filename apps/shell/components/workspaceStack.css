@@ -1,5 +1,5 @@
 .workspace-stack {
-  --workspace-stack-gutter: 4px;
+  --workspace-stack-gutter: 5px;
   /* Concentric corners: a frame's radius is its child's plus the gutter
      between them, so the gap around a filter field or a row stays the width
      of the gutter through the curve instead of opening up at each corner. */
@@ -40,7 +40,7 @@
      heading's own — so this label and the workspace names share a left edge,
      and the add button lines up with each section's new-panel button. */
   padding: 2px calc(var(--workspace-stack-gutter) * 3);
-  color: var(--gray-10);
+  color: var(--gray-11);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -59,7 +59,7 @@
   width: 28px;
   height: 32px;
   flex-shrink: 0;
-  border-radius: 7px;
+  border-radius: 4px;
 }
 .workspace-stack-add:hover,
 .workspace-section-new:not(:disabled):hover,
@@ -75,7 +75,8 @@
   padding: var(--workspace-stack-gutter);
 }
 .workspace-section-focused {
-  background: var(--gray-a2);
+  background: var(--gray-2);
+  border-color: var(--gray-6);
 }
 .workspace-section-system {
   margin-top: var(--workspace-stack-gutter);
@@ -110,7 +111,7 @@
   min-width: 0;
   padding: 2px;
   text-align: left;
-  border-radius: 7px;
+  border-radius: 4px;
 }
 .workspace-section-symbol {
   display: grid;
@@ -119,7 +120,7 @@
   height: 28px;
   flex-shrink: 0;
   border: 1px solid var(--gray-5);
-  border-radius: 9px;
+  border-radius: 5px;
   color: var(--gray-11);
   background: var(--gray-2);
 }
@@ -137,13 +138,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 13px;
+  line-height: 19px;
   font-weight: 600;
 }
 .workspace-section-caption {
-  color: var(--gray-10);
-  font-size: 10px;
+  color: var(--gray-11);
+  font-size: 11px;
   line-height: 14px;
 }
 .workspace-section-new {
@@ -160,7 +161,7 @@
   display: grid;
   gap: 8px;
   padding: 12px 12px 12px 24px;
-  color: var(--gray-10);
+  color: var(--gray-11);
   font-size: 12px;
   line-height: 1.5;
 }

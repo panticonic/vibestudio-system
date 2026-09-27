@@ -1948,7 +1948,7 @@ function OverviewView({
                               </Badge>
                             ) : null}
                             {agents > 0 ? (
-                              <Badge color="violet" variant="soft" size="1">
+                              <Badge color="gray" variant="soft" size="1">
                                 {agents} agent{agents === 1 ? "" : "s"}
                               </Badge>
                             ) : null}

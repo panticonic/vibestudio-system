@@ -10,61 +10,33 @@ body,
   height: 100%;
   min-height: 100%;
   overflow: hidden;
-  /* Pre-paint background before the Radix theme mounts — follow the system
-     preference so a light-mode user never gets a dark flash. Literal because
-     nothing is themed yet; this is the default `grayColor` (mauve) step 3,
-     matching `--app-chrome-bg` below in both appearances so the first paint is
-     already the frame the user is about to see. */
-  background: #f2eff3;
+  /* Match the neutral native frame before the theme mounts. */
+  background: #eaebed;
 }
 
 @media (prefers-color-scheme: dark) {
   html,
   body,
   #app {
-    background: #232225;
+    background: #202225;
   }
 }
 
-/* ============================================================================
-   Shell surfaces. These override the shared `--surface-*` tokens (defined in
-   foundation.css) but are SHELL-SCOPED: this file is loaded only by the shell
-   bundle — the main window AND the transparent approval overlay, both Radix
-   themes. Panels render in their own webContents that load foundation.css but never
-   this file, so panel surfaces keep the original tokens. Re-tinting
-   `--surface-*` here (rather than swapping `grayColor`) is what keeps the
-   recolour on the chrome and off the panels.
-
-   Hue rides the theme's own `grayColor` — `--gray-*`, which the app pairs with
-   its violet accent as `mauve`. That keeps the frame in the brand's neutral
-   family rather than a foreign one, and it follows the user's gray choice for
-   free. In light mode the frame deliberately uses the same calm step as the
-   approval prompt: across a large desktop area the deeper rungs read muddy,
-   while this faint mauve still distinguishes the chrome from panel content.
-
-   ONE ramp serves both the frame (titlebar, tree, pane backing — via the
-   `--app-chrome-*` aliases below) and the floating surfaces (approval card and
-   pill, which read `--surface-raised`/`--surface-card` directly). That is
-   deliberate: the frame and floating card share a neutral family. In light
-   mode their main surfaces meet at gray-3; the card's border and shadow,
-   rather than a second background hue, carry its elevation. Dark mode keeps
-   its existing tonal lift because that contrast remains useful there.
-   ============================================================================ */
+/* Shell documents use a neutral Radix theme. Panels render in separate
+   webContents and receive the user's content theme without these overrides. */
 .radix-themes:where(.light, .light-theme) {
-  --surface-chrome: var(--gray-3);
-  --surface-card: var(--gray-4);
-  --surface-raised: var(--gray-3);
-  --surface-border: var(--gray-a7);
-  /* Approval cards already carry a hairline border. Keep their light-mode lift
-     compact enough for the native overlay's 16px transparent margin. */
+  --surface-chrome: #eaebed;
+  --surface-card: var(--gray-2);
+  --surface-raised: #f4f4f5;
+  --surface-border: var(--gray-7);
   --approval-card-shadow: 0 4px 12px var(--gray-a5), 0 1px 3px var(--black-a3);
 }
 
 .radix-themes:where(.dark, .dark-theme) {
-  --surface-chrome: var(--gray-3);
+  --surface-chrome: #202225;
   --surface-card: var(--gray-3);
-  --surface-raised: var(--gray-4);
-  --surface-border: var(--gray-a7);
+  --surface-raised: #282a2d;
+  --surface-border: var(--gray-7);
   --approval-card-shadow: var(--elevation-overlay);
 }
 
@@ -95,7 +67,6 @@ body,
 
 .app-titlebar-brand {
   opacity: 0.9;
-  filter: drop-shadow(0 1px 1px var(--black-a3));
 }
 
 .app-shell-panel-card {
@@ -107,9 +78,7 @@ body,
      (Same class of problem as the `::after` ring cleared further down.) */
   --card-background-color: var(--app-chrome-bg-strong);
   background-color: var(--app-chrome-bg-strong);
-  /* No frame: the sidebar and panel panes read as flush regions of the chrome,
-     not boxed cards. Separation comes from tone (panel content is darker than
-     the chrome) and the slim resize handle between them — no outline seams. */
+  /* Structural panes meet the frame flush; resize handles separate them. */
   box-shadow: none;
   /* Structural panes fill their slot flush — the rounded global radius is for
      controls (buttons, rows, badges), not these big rectangular containers. */
@@ -154,8 +123,8 @@ body,
 
 /* Panel tree: row action buttons (add child / archive) */
 .app-tree-action {
-  opacity: 0.6;
-  color: var(--gray-10);
+  opacity: 1;
+  color: var(--gray-11);
   transition:
     opacity var(--motion-fast) var(--ease-standard),
     color var(--motion-fast) var(--ease-standard),
@@ -188,49 +157,25 @@ body,
   outline-offset: -1px;
 }
 
-/* Panel tree footer actions: distinct semantic accents keep the two entry
-   points easy to scan without hard-coding a light/dark palette. */
+/* Navigation actions share the neutral frame palette. */
 .app-panel-tree-command,
 .app-panel-tree-new {
-  border: 1px solid transparent;
+  border: 1px solid var(--gray-6);
+  box-shadow: none;
   transition:
     background-color var(--motion-fast) var(--ease-standard),
-    border-color var(--motion-fast) var(--ease-standard),
-    box-shadow var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
+    border-color var(--motion-fast) var(--ease-standard);
 }
 
-.app-panel-tree-command {
-  box-shadow: inset 0 0 0 1px var(--violet-a5);
-}
-
-.app-panel-tree-new {
-  box-shadow: inset 0 0 0 1px var(--cyan-a5);
-}
-
-.app-panel-tree-command:hover {
-  border-color: var(--violet-a6);
-  box-shadow:
-    0 3px 10px var(--violet-a3),
-    inset 0 0 0 1px var(--violet-a6);
-  transform: translateY(-1px);
-}
-
+.app-panel-tree-command:hover,
 .app-panel-tree-new:hover {
-  border-color: var(--cyan-a6);
-  box-shadow:
-    0 3px 10px var(--cyan-a3),
-    inset 0 0 0 1px var(--cyan-a6);
-  transform: translateY(-1px);
+  background: var(--gray-4);
+  border-color: var(--gray-8);
 }
 
-.app-panel-tree-command:focus-visible {
-  outline: 2px solid var(--violet-8);
-  outline-offset: 1px;
-}
-
+.app-panel-tree-command:focus-visible,
 .app-panel-tree-new:focus-visible {
-  outline: 2px solid var(--cyan-8);
+  outline: 2px solid var(--gray-9);
   outline-offset: 1px;
 }
 
@@ -727,7 +672,7 @@ html[data-overlay-dragging] * {
 }
 
 .approval-caller-chip-kind {
-  color: var(--gray-10);
+  color: var(--gray-11);
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -1311,16 +1256,8 @@ html[data-overlay-dragging] * {
   }
 }
 
-/* ---------------------------------------------------------------------------
-   Placement blueprint — what the viewport becomes while a panel is being
-   dragged into position.
-
-   Panel views are native and composite above every shell pixel, so they are
-   hidden for the length of the gesture and this stands in for them. It is
-   built out of translucency rather than flat fills: the chrome below stays
-   readable through the scrim, each pane reads as a pane of glass at its own
-   geometry, and the drop highlight is the only saturated thing on screen.
-   --------------------------------------------------------------------------- */
+/* Panel placement keeps the neutral frame visible while native views are
+   temporarily hidden. Solid panes and a strong outline show the drop target. */
 
 @keyframes layout-blueprint-in {
   from {
@@ -1345,25 +1282,15 @@ html[data-overlay-dragging] * {
 .layout-blueprint {
   animation: layout-blueprint-in 130ms ease-out both;
   padding: 4px;
-  /* Radix's own dim + glass pairing: the workspace recedes behind an overlay
-     veil, and each pane comes forward as a translucent panel. Flat greys were
-     the previous look and they read as "the panels are gone", not "the panels
-     are being arranged". */
-  background:
-    radial-gradient(120% 90% at 50% 0%, var(--accent-a4), transparent 64%), var(--color-overlay);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  background: var(--surface-chrome);
 }
 
 .layout-blueprint__pane {
   animation: layout-blueprint-pane-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   border: 1px solid var(--gray-a5);
   border-radius: var(--radius-4);
-  background: linear-gradient(180deg, var(--white-a3), transparent 46%), var(--gray-a3);
-  box-shadow:
-    0 1px 2px var(--black-a3),
-    0 8px 24px -16px var(--black-a6),
-    inset 0 1px 0 var(--white-a3);
+  background: var(--gray-3);
+  box-shadow: none;
   transition:
     opacity 140ms ease-out,
     border-color 140ms ease-out;
@@ -1384,14 +1311,9 @@ html[data-overlay-dragging] * {
 
 .layout-blueprint__preview {
   border-radius: var(--radius-4);
-  border: 1.5px solid var(--accent-a8);
-  background: linear-gradient(180deg, var(--accent-a6), var(--accent-a3) 70%);
-  box-shadow:
-    0 0 0 1px var(--accent-a4),
-    0 24px 60px -20px var(--accent-a9),
-    inset 0 1px 0 var(--white-a4);
-  backdrop-filter: blur(2px) saturate(120%);
-  -webkit-backdrop-filter: blur(2px) saturate(120%);
+  border: 2px solid var(--gray-11);
+  background: var(--gray-5);
+  box-shadow: none;
   transition:
     left 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
     top 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
@@ -1401,16 +1323,8 @@ html[data-overlay-dragging] * {
 
 .layout-blueprint__insertion {
   border-radius: 999px;
-  background: linear-gradient(
-    180deg,
-    var(--accent-a6),
-    var(--accent-9) 18%,
-    var(--accent-9) 82%,
-    var(--accent-a6)
-  );
-  box-shadow:
-    0 0 0 1px var(--accent-a5),
-    0 0 18px var(--accent-a8);
+  background: var(--gray-11);
+  box-shadow: none;
   transition: left 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -1419,14 +1333,10 @@ html[data-overlay-dragging] * {
   max-width: calc(100% - 24px);
   border-radius: 999px;
   padding: 4px 12px;
-  background: color-mix(in oklab, var(--accent-9) 26%, transparent);
-  border: 1px solid var(--accent-a8);
-  box-shadow:
-    0 6px 18px -10px var(--black-a8),
-    inset 0 1px 0 var(--white-a5);
-  backdrop-filter: blur(8px) saturate(140%);
-  -webkit-backdrop-filter: blur(8px) saturate(140%);
-  color: var(--accent-12);
+  background: var(--gray-12);
+  border: 1px solid var(--gray-12);
+  box-shadow: none;
+  color: var(--gray-1);
 }
 .user-notification-message-summary {
   display: flex;
@@ -1471,6 +1381,6 @@ html[data-overlay-dragging] * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--gray-9);
+  color: var(--gray-11);
   flex-shrink: 2;
 }

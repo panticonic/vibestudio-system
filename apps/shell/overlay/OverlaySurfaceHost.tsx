@@ -152,11 +152,9 @@ export function OverlaySurfaceHost() {
     <Theme
       appearance={theme.appearance}
       hasBackground={false}
-      {...(theme.accentColor ? { accentColor: theme.accentColor } : {})}
-      {...(theme.grayColor ? { grayColor: theme.grayColor } : {})}
-      {...(theme.panelBackground
-        ? { panelBackground: theme.panelBackground }
-        : {})}
+      accentColor="gray"
+      grayColor="gray"
+      panelBackground="solid"
       {...(theme.radius ? { radius: theme.radius } : {})}
       {...(theme.scaling ? { scaling: theme.scaling } : {})}
       style={{ background: "transparent", minHeight: 0 }}

@@ -65,7 +65,9 @@ export function PanelIcon({
   if (favicon) {
     return (
       <Suspense fallback={<GlobeIcon width={size} height={size} />}>
-        <BrowserFavicon handle={favicon} size={size} />
+        <span style={{ display: "inline-flex", filter: "grayscale(1)" }}>
+          <BrowserFavicon handle={favicon} size={size} />
+        </span>
       </Suspense>
     );
   }
@@ -85,7 +87,8 @@ export function PanelIcon({
           flexShrink: 0,
           display: "block",
           objectFit: "contain",
-          borderRadius: Math.max(2, Math.round(size * 0.2))
+          borderRadius: Math.max(2, Math.round(size * 0.2)),
+          filter: "grayscale(1)"
         }}
         onError={() => setFailedSource(imageSource)}
       />
@@ -104,7 +107,8 @@ export function PanelIcon({
           justifyContent: "center",
           fontSize: size,
           lineHeight: 1,
-          fontFamily: "Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif"
+          fontFamily: "Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif",
+          filter: "grayscale(1)"
         }}
       >
         {icon}

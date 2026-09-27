@@ -480,8 +480,8 @@ const SortableTreeItem = memo(
     const rowStyle: CSSProperties = {
       height: ROW_HEIGHT,
       cursor: "pointer",
-      backgroundColor: getRowBackground(isSelected, isHovered, isVisible),
-      backgroundImage: trust.backgroundImage,
+      backgroundColor:
+        getRowBackground(isSelected, isHovered, isVisible) ?? trust.backgroundColor,
       borderRadius: "var(--radius-2)",
       paddingLeft: ROW_PADDING_LEFT + depth * INDENTATION_WIDTH,
       paddingRight: ROW_PADDING_LEFT,

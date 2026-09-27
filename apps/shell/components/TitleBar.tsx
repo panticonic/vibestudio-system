@@ -340,7 +340,7 @@ export function TitleBar({
           appRegion: "drag",
           WebkitAppRegion: "drag",
           userSelect: "none",
-          height: "28px",
+          height: "36px",
           // Same tone as the panel tree so the chrome reads as one calm grey
           // shelf. No border of its own: the cards sit flush beneath and carry
           // their own top border, so a titlebar border would double it into a
@@ -1429,7 +1429,6 @@ function HoverableBreadcrumbItem({
           position: "relative",
           ...itemStyle,
           // Keep selection and hover beneath the quiet website hue.
-          backgroundImage: trust.backgroundImage,
           borderColor: "transparent",
           backgroundColor: isCurrentActive
             ? isHovered
@@ -1437,7 +1436,7 @@ function HoverableBreadcrumbItem({
               : "var(--gray-a4)"
             : isHovered
               ? "var(--gray-a3)"
-              : undefined,
+              : trust.backgroundColor,
           color: isCurrentActive ? "var(--gray-12)" : undefined,
           // A persistent close-pane ✕ needs its own room; the hover-only archive
           // ✕ may overlap the title's tail, since it only appears under a cursor.

@@ -106,7 +106,7 @@ export function ThemeSettingsControls() {
 
       <Flex direction="column" gap="1">
         <Text size="1" color="gray" weight="medium">
-          Accent
+          Panel accent
         </Text>
         <Flex gap="2" wrap="wrap">
           {ACCENTS.map((accent) => {
@@ -137,7 +137,7 @@ export function ThemeSettingsControls() {
                     } as CSSProperties
                   }
                 >
-                  {selected ? <CheckIcon style={{ color: "white" }} /> : null}
+                  {selected ? <CheckIcon style={{ color: `var(--${accent}-contrast)` }} /> : null}
                 </button>
               </Tooltip>
             );
@@ -147,7 +147,7 @@ export function ThemeSettingsControls() {
 
       <Flex direction="column" gap="1">
         <Text size="1" color="gray" weight="medium">
-          Gray
+          Panel neutrals
         </Text>
         <Select.Root
           size="1"

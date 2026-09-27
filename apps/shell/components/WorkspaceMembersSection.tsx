@@ -125,7 +125,7 @@ export function WorkspaceMembersSection({
                 ) : null}
               </Flex>
               <Flex align="center" gap="2" wrap="wrap">
-                <Badge color={member.role === "admin" ? "violet" : "gray"}>
+                <Badge color="gray">
                   {member.role === "admin" ? "Workspace admin" : "Member"}
                 </Badge>
                 {canManage && member.userId !== userId ? (

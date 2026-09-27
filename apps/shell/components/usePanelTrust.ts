@@ -15,8 +15,10 @@ export function usePanelTrust(panelId: string, source?: string) {
         ? "Website connected to this workspace; additional resources require permission."
         : "External website with no workspace connection."
       : "Panel installed in this workspace.",
-    backgroundImage: browser
-      ? `linear-gradient(${connected ? "var(--cyan-a3)" : "var(--blue-a2)"}, ${connected ? "var(--cyan-a3)" : "var(--blue-a2)"})`
+    backgroundColor: browser
+      ? connected
+        ? "var(--gray-4)"
+        : "var(--gray-2)"
       : undefined,
   };
 }
