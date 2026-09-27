@@ -314,28 +314,6 @@ describe("ApprovalCard", () => {
     });
   });
 
-  it("renders failed preparation as a dismissible result, not a denial", () => {
-    const { emit } = renderCard(
-      capabilityApproval({
-        approvalId: "publication-failed",
-        title: "Update workspace repositories",
-        lifecycle: {
-          state: "failed",
-          diagnostics: ["packages/example.ts:1: Broken type"],
-        },
-      }),
-    );
-
-    expect(screen.getByText("packages/example.ts:1: Broken type")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Don't allow" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(emit).toHaveBeenCalledWith({
-      type: "decide",
-      decision: "dismiss",
-      approvalId: "publication-failed",
-    });
-  });
-
   it("exposes a labelled, described dialog and assertive decision errors with long copy", () => {
     const title =
       "Autoriser la publication de cette très longue synthèse dans l’espace de travail partagé";

@@ -155,8 +155,6 @@ export function ApprovalCard({
     return () => window.clearInterval(interval);
   }, [lifecycleState]);
   const validationPending = lifecycleState === "preparing";
-  const validationTerminal =
-    lifecycleState === "failed" || lifecycleState === "cancelled";
   // Secret-config / credential-input values are held locally and only leave the
   // surface on submit.
   const [secretConfigValues, setSecretConfigValues] = useState<
@@ -333,14 +331,6 @@ export function ApprovalCard({
       onClick={() => emitForApproval({ type: "minimize" })}
     >
       Run in background
-    </Button>
-  ) : validationTerminal ? (
-    <Button
-      variant="soft"
-      color="gray"
-      onClick={() => emitForApproval({ type: "decide", decision: "dismiss" })}
-    >
-      Dismiss
     </Button>
   ) : null;
   const actions =
@@ -636,37 +626,27 @@ export function ApprovalCard({
                 ))}
               </Flex>
             ) : null}
-            {lifecycleState !== "ready" ? (
+            {validationPending ? (
               <Flex direction="column" gap="1">
                 <Flex align="center" gap="2">
-                  {lifecycleState === "preparing" ? (
-                    <ReloadIcon
-                      aria-hidden
-                      style={{
-                        animation: "app-tree-spin 0.7s linear infinite",
-                      }}
-                    />
-                  ) : null}
+                  <ReloadIcon
+                    aria-hidden
+                    style={{ animation: "app-tree-spin 0.7s linear infinite" }}
+                  />
                   <Text
                     size="1"
-                    color={lifecycleState === "failed" ? "red" : "gray"}
+                    color="gray"
                     role="status"
                     aria-live="polite"
                   >
-                    {lifecycleState === "preparing"
-                      ? `${approval.lifecycle?.progress?.label ?? "Checking builds, schemas, and authority"}${
-                          approval.lifecycle?.progress?.total !== undefined
-                            ? ` (${approval.lifecycle.progress.completed ?? 0} of ${approval.lifecycle.progress.total})`
-                            : ""
-                        }… ${Math.max(0, Math.floor((lifecycleNow - approval.requestedAt) / 1_000))}s elapsed`
-                      : (approval.lifecycle?.diagnostics?.[0] ??
-                        (lifecycleState === "cancelled"
-                          ? "Publication was cancelled."
-                          : "Workspace validation failed."))}
+                    {`${approval.lifecycle?.progress?.label ?? "Checking builds, schemas, and authority"}${
+                      approval.lifecycle?.progress?.total !== undefined
+                        ? ` (${approval.lifecycle.progress.completed ?? 0} of ${approval.lifecycle.progress.total})`
+                        : ""
+                    }… ${Math.max(0, Math.floor((lifecycleNow - approval.requestedAt) / 1_000))}s elapsed`}
                   </Text>
                 </Flex>
-                {lifecycleState === "preparing" &&
-                approval.lifecycle?.progress?.detail ? (
+                {approval.lifecycle?.progress?.detail ? (
                   <Text size="1" color="gray">
                     {approval.lifecycle.progress.detail}
                   </Text>
@@ -872,9 +852,7 @@ export function ApprovalCard({
         disabled={actionPending}
         aria-busy={actionPending}
       >
-        {!validationPending &&
-        !validationTerminal &&
-        approval.kind === "unit-install-review" ? (
+        {!validationPending && approval.kind === "unit-install-review" ? (
           <InstallReviewActions
             approval={approval}
             selection={installSelection}
