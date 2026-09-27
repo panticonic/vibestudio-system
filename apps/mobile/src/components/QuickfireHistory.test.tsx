@@ -50,9 +50,10 @@ function renderHistory() {
 }
 it("shows useful previews and expands every payload with shared history controls", () => {
   const { getByText, getByLabelText, queryByText } = renderHistory();
-  expect(getByText("path: src/panel.ts")).toBeTruthy();
+  expect(queryByText("path: src/panel.ts")).toBeNull();
   expect(queryByText("Unique output diagnostic")).toBeNull();
   fireEvent.press(getByLabelText("Expand all history details"));
+  expect(getByText("path: src/panel.ts")).toBeTruthy();
   expect(getByText("Unique output diagnostic")).toBeTruthy();
   expect(getByText("Model: Provider / Model")).toBeTruthy();
   fireEvent.press(getByLabelText("Collapse all history details"));
