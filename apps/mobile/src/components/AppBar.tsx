@@ -326,7 +326,7 @@ export function AppBar({
               icon={Bell}
               label={`Approvals, ${approvalCount} waiting`}
               onPress={onApprovalsPress}
-              color={colors.primary}
+              color={colors.accent}
             />
           )}
           {onShowActions ? (
@@ -342,7 +342,7 @@ export function AppBar({
               icon={Sparkles}
               onPress={onOpenCommands}
               label="Command"
-              color={colors.primary}
+              color={colors.accent}
             />
           ) : null}
           <IconButton
@@ -382,7 +382,7 @@ export function AppBar({
               styles.inputWrap,
               {
                 backgroundColor: colors.surfaceSunken,
-                borderColor: colors.primary,
+                borderColor: colors.accent,
               },
             ]}
           >
@@ -466,7 +466,7 @@ export function AppBar({
                     style={[styles.suggestionLabel, { color: colors.text }]}
                     highlightStyle={[
                       styles.suggestionMatch,
-                      { color: colors.primary },
+                      { color: colors.accent },
                     ]}
                   />
                   <HighlightedText
@@ -478,7 +478,7 @@ export function AppBar({
                     ]}
                     highlightStyle={[
                       styles.suggestionMatch,
-                      { color: colors.primary },
+                      { color: colors.accent },
                     ]}
                   />
                 </View>

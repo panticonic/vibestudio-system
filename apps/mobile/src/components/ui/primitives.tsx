@@ -84,7 +84,7 @@ export function Button({
   const palette = {
     filled: { bg: colors.primary, border: colors.primary, fg: colors.onPrimary },
     outline: { bg: "transparent", border: colors.border, fg: colors.text },
-    ghost: { bg: "transparent", border: "transparent", fg: colors.primary },
+    ghost: { bg: "transparent", border: "transparent", fg: colors.accent },
     danger: { bg: colors.dangerSoft, border: colors.danger, fg: colors.danger },
   }[variant];
   return (
@@ -135,7 +135,7 @@ export function Badge({
   const colors = useAtomValue(themeColorsAtom);
   const palette = {
     neutral: { bg: colors.surfaceSunken, fg: colors.textSecondary },
-    primary: { bg: colors.accentSoft, fg: colors.primary },
+    primary: { bg: colors.accentSoft, fg: colors.accent },
     success: { bg: colors.successSoft, fg: colors.success },
     warning: { bg: colors.warningSoft, fg: colors.warning },
     danger: { bg: colors.dangerSoft, fg: colors.danger },

@@ -16,8 +16,8 @@ import {
   useSetAtom,
   useStore,
 } from "jotai";
-import { Button, Callout, Flex, Text } from "@radix-ui/themes";
-import { GearIcon, ReloadIcon } from "@radix-ui/react-icons";
+import { Button, Callout, Text } from "@radix-ui/themes";
+import { GearIcon, LightningBoltIcon, ReloadIcon } from "@radix-ui/react-icons";
 import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
 import {
   app,
@@ -42,11 +42,11 @@ import {
   workspaceChooserDialogOpenAtom,
 } from "../state/appModeAtoms";
 import { themeConfigAtom, themeModeAtom } from "../state/themeAtoms";
+import { openCommandAgentAtom } from "../state/commandAgentAtoms";
 import { workspaceLabel } from "../shell/workspaceLabel";
 import { WorkspaceStack, type WorkspaceSection } from "./WorkspaceStack";
 import { PanelApp } from "./PanelApp";
-import { ConnectionStatusBadge } from "./ConnectionStatusBadge";
-import { ThemeSettings } from "./ThemeSettings";
+import { ResizableDivider } from "./ResizableDivider";
 import "./workspaceDesktop.css";
 
 import {
@@ -59,6 +59,19 @@ type OpenWorkspace = ClientOwner & {
   workspace: HubWorkspaceEntry;
   store: ReturnType<typeof createStore>;
 };
+
+const DEFAULT_SIDEBAR_WIDTH = 272;
+const SIDEBAR_WIDTH_STORAGE_KEY = "workspace-sidebar-width";
+
+function sidebarWidthBounds(windowWidth: number) {
+  const min = windowWidth <= 720 ? 180 : 220;
+  return { min, max: Math.max(min, Math.min(600, Math.floor(windowWidth / 2))) };
+}
+
+function clampSidebarWidth(width: number, windowWidth: number) {
+  const { min, max } = sidebarWidthBounds(windowWidth);
+  return Math.min(max, Math.max(min, width));
+}
 
 /** System owns this window. Each retained child owns its store, clients, tree and drafts. */
 export function WorkspaceDesktop({
@@ -78,6 +91,38 @@ export function WorkspaceDesktop({
   const accessibleIds = useRef<Set<string> | null>(null);
   const openings = useRef(new Map<string, Promise<OpenWorkspace>>());
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window === "undefined" ? 1024 : window.innerWidth,
+  );
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
+    try {
+      const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+      return Number.isFinite(saved) && saved > 0 ? saved : DEFAULT_SIDEBAR_WIDTH;
+    } catch {
+      return DEFAULT_SIDEBAR_WIDTH;
+    }
+  });
+  const visibleSidebarWidth = clampSidebarWidth(sidebarWidth, windowWidth);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    } catch {
+      // The in-memory width still works when browser storage is unavailable.
+    }
+  }, [sidebarWidth]);
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const resizeSidebar = useCallback(
+    (delta: number) =>
+      setSidebarWidth((current) =>
+        clampSidebarWidth(clampSidebarWidth(current, windowWidth) + delta, windowWidth),
+      ),
+    [windowWidth],
+  );
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedRef = useRef(focusedId);
   focusedRef.current = focusedId;
@@ -110,8 +155,8 @@ export function WorkspaceDesktop({
   const workspaceCatalogRevision = useAtomValue(workspaceCatalogRevisionAtom);
   const setChooser = useSetAtom(workspaceChooserDialogOpenAtom);
   // Appearance and theme identity are one app-wide choice, but each retained
-  // workspace renders in its own Jotai store, and the control that sets them
-  // (ThemeSettings, in this chrome) writes only to the window's store. Without
+  // workspace renders in its own Jotai store. The settings dialog writes only
+  // to the window's store. Without
   // this mirror the chrome re-themes while every workspace keeps whatever it
   // read from localStorage at mount — and since it is the workspace's
   // PanelStack that broadcasts appearance to the panel views, the panels stop
@@ -483,6 +528,7 @@ export function WorkspaceDesktop({
             <aside
               className="workspace-desktop-navigation"
               hidden={!sidebarVisible}
+              style={{ width: visibleSidebarWidth }}
             >
               <WorkspaceStack
                 scrollRef={setScrollElement}
@@ -510,14 +556,13 @@ export function WorkspaceDesktop({
                 }
                 onAddWorkspace={() => setChooser(true)}
               />
-              <Flex
-                className="workspace-desktop-controls"
-                gap="2"
-                align="center"
-              >
+              <div className="workspace-desktop-controls">
                 <Button
-                  variant="ghost"
+                  variant="soft"
                   color="gray"
+                  size="2"
+                  aria-label="Settings"
+                  title="Settings"
                   onClick={() =>
                     setSettings({
                       section: "workspaces",
@@ -525,14 +570,34 @@ export function WorkspaceDesktop({
                     })
                   }
                 >
-                  <GearIcon /> Settings
+                  <GearIcon />
                 </Button>
-                <ConnectionStatusBadge
-                  onOpenSettings={() => setSettings({ section: "connection" })}
-                />
-                <ThemeSettings />
-              </Flex>
+                <Button
+                  variant="soft"
+                  color="gray"
+                  size="2"
+                  disabled={!focusedId}
+                  onClick={() => {
+                    const owner = focusedId
+                      ? owners.current.get(focusedId)
+                      : undefined;
+                    owner?.store.set(openCommandAgentAtom);
+                  }}
+                >
+                  <LightningBoltIcon /> Quickfire
+                </Button>
+              </div>
             </aside>
+            {sidebarVisible && (
+              <ResizableDivider
+                orientation="vertical"
+                label="Resize panel tree sidebar"
+                valueNow={(visibleSidebarWidth / Math.max(1, windowWidth)) * 100}
+                onDrag={resizeSidebar}
+                onKeyboardStep={resizeSidebar}
+                onReset={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+              />
+            )}
             <main className="workspace-desktop-content">
               {visibleError && (
                 <Callout.Root color="red">

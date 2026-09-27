@@ -212,7 +212,7 @@ export function WorkspaceCreateSheet({
               gap: spacing.sm,
             }}
           >
-            <Workflow size={22} color={colors.primary} />
+            <Workflow size={22} color={colors.accent} />
             <Text
               accessibilityRole="header"
               style={[type.heading, { flex: 1, color: colors.text }]}
@@ -267,7 +267,7 @@ export function WorkspaceCreateSheet({
                     borderWidth: 1,
                     borderColor:
                       sourceKind === option.value
-                        ? colors.primary
+                        ? colors.accent
                         : colors.border,
                     borderRadius: radius.md,
                     padding: spacing.md,
@@ -280,7 +280,7 @@ export function WorkspaceCreateSheet({
                       {
                         color:
                           sourceKind === option.value
-                            ? colors.primary
+                            ? colors.accent
                             : colors.text,
                       },
                     ]}
@@ -380,7 +380,7 @@ export function WorkspaceCreateSheet({
                     onPress={() => setShowContents(!showContents)}
                     style={{ minHeight: touchTarget, justifyContent: "center" }}
                   >
-                    <Text style={[type.bodyStrong, { color: colors.primary }]}>
+                    <Text style={[type.bodyStrong, { color: colors.accent }]}>
                       {showContents
                         ? "Hide contents"
                         : `View ${currentInspection.repositories.length} workspace units`}

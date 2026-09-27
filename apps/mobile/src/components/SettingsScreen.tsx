@@ -612,14 +612,14 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
                 >
                   <Icon
                     size={16}
-                    color={selected ? colors.primary : colors.textSecondary}
+                    color={selected ? colors.accent : colors.textSecondary}
                   />
                   <Text
                     style={[
                       type.bodyStrong,
                       styles.segmentLabel,
                       {
-                        color: selected ? colors.primary : colors.textSecondary,
+                        color: selected ? colors.accent : colors.textSecondary,
                       },
                     ]}
                   >
@@ -650,7 +650,7 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
                     style={[
                       type.caption,
                       styles.retryText,
-                      { color: colors.primary },
+                      { color: colors.accent },
                     ]}
                   >
                     Retry
@@ -721,7 +721,7 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
                 style={({ pressed }) => [
                   styles.workspaceRow,
                   {
-                    borderColor: current ? colors.primary : colors.border,
+                    borderColor: current ? colors.accent : colors.border,
                     backgroundColor: current
                       ? colors.accentSoft
                       : colors.surfaceSunken,
@@ -756,7 +756,7 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
                       style={[
                         type.caption,
                         styles.switchingText,
-                        { color: colors.primary },
+                        { color: colors.accent },
                       ]}
                     >
                       Switching…
@@ -771,7 +771,7 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
                     style={[
                       type.bodyStrong,
                       styles.openText,
-                      { color: colors.primary },
+                      { color: colors.accent },
                     ]}
                   >
                     Open

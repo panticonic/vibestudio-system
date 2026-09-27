@@ -103,7 +103,7 @@ export function WorkspaceTransferSheet({
           >
             <Text style={{ color: colors.text }}>{workspaceName(entry)}</Text>
             {selected === entry.workspaceId && (
-              <Check size={18} color={colors.primary} />
+              <Check size={18} color={colors.accent} />
             )}
           </Pressable>
         ))}
@@ -347,7 +347,7 @@ export function WorkspaceTransferSheet({
                         }}
                       >
                         {paths.includes(file.path) && (
-                          <Check size={18} color={colors.primary} />
+                          <Check size={18} color={colors.accent} />
                         )}
                       </View>
                       <Text style={{ flex: 1, color: colors.text }}>

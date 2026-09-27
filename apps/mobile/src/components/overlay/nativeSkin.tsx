@@ -132,9 +132,9 @@ function toneTable(colors: ThemeColors): Record<QuickfireTone | "muted", Tone> {
       edge: colors.borderSubtle,
     },
     accent: {
-      fg: colors.primary,
+      fg: colors.accent,
       wash: colors.accentSoft,
-      edge: withAlpha(colors.primary, "55"),
+      edge: withAlpha(colors.accent, "55"),
     },
     success: {
       fg: colors.success,
@@ -553,7 +553,7 @@ export function createNativeSkin(
               <RNText
                 style={[
                   type.caption,
-                  { color: wrapped ? colors.primary : colors.textSecondary },
+                  { color: wrapped ? colors.accent : colors.textSecondary },
                 ]}
               >
                 Wrap
@@ -586,7 +586,7 @@ export function createNativeSkin(
                 }
               }}
             >
-              <RNText style={[type.caption, { color: colors.primary }]}>
+              <RNText style={[type.caption, { color: colors.accent }]}>
                 {copied ? "Copied" : copyError ? "Try copy again" : "Copy"}
               </RNText>
             </RNPressable>
@@ -698,7 +698,7 @@ export function createNativeSkin(
 
   /** No blink: an animated cursor on a phone costs a frame loop for a hint. */
   function Caret() {
-    return <RNText style={{ color: colors.primary }}>▌</RNText>;
+    return <RNText style={{ color: colors.accent }}>▌</RNText>;
   }
 
   return {

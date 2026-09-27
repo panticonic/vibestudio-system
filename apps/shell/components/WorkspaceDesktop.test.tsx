@@ -22,6 +22,7 @@ import {
   useWorkspaceVisible,
 } from "../shell/workspaceContext";
 import { effectiveThemeAtom, themeModeAtom } from "../state/themeAtoms";
+import { commandAgentRequestAtom } from "../state/commandAgentAtoms";
 const nativeSync = vi.hoisted(() => ({
   snapshot: { error: null as string | null },
   listeners: new Set<() => void>(),
@@ -131,11 +132,13 @@ vi.mock("./PanelApp", () => ({
     const visible = useWorkspaceVisible();
     const [value, setValue] = useAtom(draft);
     const appearance = useAtomValue(effectiveThemeAtom);
+    const commandAgentRequest = useAtomValue(commandAgentRequestAtom);
     return (
       <input
         aria-label={`${owner?.workspaceId} draft`}
         data-visible={String(visible)}
         data-appearance={appearance}
+        data-command-agent-sequence={commandAgentRequest?.sequence ?? 0}
         value={value}
         onChange={(event) => setValue(event.target.value)}
       />
@@ -169,6 +172,62 @@ function OpenWorkspace({ workspaceId }: { workspaceId: string }) {
   );
 }
 describe("desktop workspace ownership", () => {
+  it("resizes the panel tree sidebar by dragging its right edge", async () => {
+    const previousWidth = localStorage.getItem("workspace-sidebar-width");
+    localStorage.removeItem("workspace-sidebar-width");
+    const originalSetPointerCapture = HTMLElement.prototype.setPointerCapture;
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      const sidebar = document.querySelector(".workspace-desktop-navigation") as HTMLElement;
+      const divider = screen.getByRole("separator", {
+        name: "Resize panel tree sidebar",
+      });
+      expect(sidebar.style.width).toBe("272px");
+
+      fireEvent.pointerDown(divider, { pointerId: 7, clientX: 272 });
+      fireEvent.pointerMove(window, { pointerId: 7, clientX: 320 });
+      fireEvent.pointerUp(window, { pointerId: 7, clientX: 320 });
+      expect(sidebar.style.width).toBe("320px");
+      expect(localStorage.getItem("workspace-sidebar-width")).toBe("320");
+
+      fireEvent.keyDown(divider, { key: "ArrowLeft" });
+      expect(sidebar.style.width).toBe("296px");
+      fireEvent.doubleClick(divider);
+      expect(sidebar.style.width).toBe("272px");
+    } finally {
+      result.unmount();
+      HTMLElement.prototype.setPointerCapture = originalSetPointerCapture;
+      if (previousWidth === null) localStorage.removeItem("workspace-sidebar-width");
+      else localStorage.setItem("workspace-sidebar-width", previousWidth);
+    }
+  });
+  it("opens Quickfire in the focused workspace from the two-button footer", async () => {
+    const result = render(<Desktop />);
+    try {
+      const personal = await screen.findByLabelText("personal draft");
+      await waitFor(() =>
+        expect(personal.getAttribute("data-visible")).toBe("true"),
+      );
+      expect(screen.getByRole("button", { name: "Settings" }).textContent).toBe(
+        "",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Quickfire" }));
+      expect(personal.getAttribute("data-command-agent-sequence")).toBe("1");
+
+      fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+      const system = await screen.findByLabelText("system draft");
+      await waitFor(() =>
+        expect(system.getAttribute("data-visible")).toBe("true"),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Quickfire" }));
+      expect(system.getAttribute("data-command-agent-sequence")).toBe("1");
+      expect(personal.getAttribute("data-command-agent-sequence")).toBe("1");
+    } finally {
+      result.unmount();
+    }
+  });
   it("opens a System-role link in its destination with state and placement intact", async () => {
     const result = render(<Desktop />);
     try {

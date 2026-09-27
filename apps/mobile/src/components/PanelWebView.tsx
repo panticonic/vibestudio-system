@@ -1576,7 +1576,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
             <VibestudioLogo size={64} variant="symbol" style={styles.logo} />
             <ActivityIndicator
               size="large"
-              color={colors?.primary ?? "#65d4de"}
+              color={colors?.primary ?? "#afc8f0"}
             />
             <Text
               style={[
@@ -1710,14 +1710,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 32,
-    backgroundColor: "#0c202b",
+    backgroundColor: "#1a202a",
   },
   externalAssetContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 32,
-    backgroundColor: "#0a0b0c",
+    backgroundColor: "#1a202a",
   },
   errorTitle: {
     fontSize: 18,
@@ -1736,7 +1736,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    backgroundColor: "#006d86",
+    backgroundColor: "#496fa8",
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",

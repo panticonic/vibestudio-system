@@ -271,7 +271,7 @@ const DOMAIN_META: Record<
     short: "Web",
     description: "Browsing data, websites, and downloads",
     icon: Globe,
-    accent: "cyan",
+    accent: "blue",
   },
   automation: {
     label: "Apps & automation",

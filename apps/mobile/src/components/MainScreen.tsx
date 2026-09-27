@@ -2602,7 +2602,7 @@ export function MainScreen({
             },
           ]}
         >
-          <BellIcon size={17} color={colors.primary} />
+          <BellIcon size={17} color={colors.accent} />
           <View style={styles.userNotificationCopy}>
             <Text
               style={[styles.userNotificationTitle, { color: colors.text }]}
@@ -2627,7 +2627,7 @@ export function MainScreen({
                 { backgroundColor: colors.accentSoft },
               ]}
             >
-              <Text style={[typeScale.micro, { color: colors.primary }]}>
+              <Text style={[typeScale.micro, { color: colors.accent }]}>
                 +{userNotifications.length - 1}
               </Text>
             </View>
@@ -2638,13 +2638,13 @@ export function MainScreen({
               onPress={() => void joinInvitedChannel()}
               style={[
                 styles.userNotificationButton,
-                { borderColor: colors.primary },
+                { borderColor: colors.accent },
               ]}
             >
               <Text
                 style={[
                   styles.userNotificationButtonText,
-                  { color: colors.primary },
+                  { color: colors.accent },
                 ]}
               >
                 Join
@@ -2691,7 +2691,7 @@ export function MainScreen({
                 variant="symbol"
                 style={styles.placeholderLogo}
               />
-              <ActivityIndicator size="large" color={colors.primary} />
+              <ActivityIndicator size="large" color={colors.accent} />
               <Text
                 style={[styles.loadingText, { color: colors.textSecondary }]}
               >

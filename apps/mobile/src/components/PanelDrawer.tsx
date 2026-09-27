@@ -357,12 +357,12 @@ export function PanelDrawer({
         kind: "owner",
         owner: "__pinned__",
         label: "Pinned",
-        color: colors.primary,
+        color: colors.accent,
       },
       ...pinnedRows.map((row) => ({ ...row, depth: 0, isCollapsed: true })),
       ...forestRows,
     ] as MobilePanelForestRow[];
-  }, [colors.primary, forestRows, pinnedPanelIds, searchResults, trimmedQuery]);
+  }, [colors.accent, forestRows, pinnedPanelIds, searchResults, trimmedQuery]);
 
   const handleLoadMore = useCallback(
     async (row: Extract<MobilePanelForestRow, { kind: "load-more" }>) => {
@@ -620,7 +620,7 @@ export function PanelDrawer({
               { paddingLeft: spacing.lg + item.depth * 18 },
             ]}
           >
-            <Text style={[type.caption, { color: colors.primary }]}>
+            <Text style={[type.caption, { color: colors.accent }]}>
               {loadingGroupKey === item.groupKey
                 ? "Loading…"
                 : `Load older panels (${item.remaining})`}
@@ -693,7 +693,7 @@ export function PanelDrawer({
       style={styles.loadMore}
       accessibilityRole="button"
     >
-      <Text style={[type.caption, { color: colors.primary }]}>
+      <Text style={[type.caption, { color: colors.accent }]}>
         {loadingIndexPage
           ? "Loading…"
           : trimmedQuery

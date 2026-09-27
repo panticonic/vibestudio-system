@@ -328,7 +328,7 @@ export function BrowserPrivacyManager({
                 styles.tab,
                 {
                   borderColor:
-                    section === entry.id ? colors.primary : colors.border,
+                    section === entry.id ? colors.accent : colors.border,
                 },
                 section === entry.id && { backgroundColor: colors.accentSoft },
               ]}
@@ -337,7 +337,7 @@ export function BrowserPrivacyManager({
                 style={{
                   color:
                     section === entry.id
-                      ? colors.primary
+                      ? colors.accent
                       : colors.textSecondary,
                 }}
               >
@@ -490,7 +490,7 @@ export function BrowserPrivacyManager({
           {busy ? (
             <ActivityIndicator
               accessibilityLabel="Loading privacy data"
-              color={colors.primary}
+              color={colors.accent}
             />
           ) : null}
           {error ? (

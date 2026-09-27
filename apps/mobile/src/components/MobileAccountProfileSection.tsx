@@ -152,7 +152,7 @@ export function MobileAccountProfileSection({ client }: MobileAccountProfileSect
 
         {loading ? (
           <View style={styles.loading} accessibilityRole="progressbar">
-            <ActivityIndicator size="small" color={colors.primary} />
+            <ActivityIndicator size="small" color={colors.accent} />
             <Text style={[type.caption, { color: colors.textSecondary }]}>Loading profile…</Text>
           </View>
         ) : null}
@@ -199,7 +199,7 @@ export function MobileAccountProfileSection({ client }: MobileAccountProfileSect
                 onPress={() => void pasteAvatar()}
                 style={({ pressed }) => [styles.avatarAction, pressed && styles.pressed]}
               >
-                <Text style={[type.body, { color: colors.primary }]}>
+                <Text style={[type.body, { color: colors.accent }]}>
                   {avatarLoading
                     ? "Reading…"
                     : previewAvatar
@@ -352,7 +352,7 @@ export function MobileAccountProfileSection({ client }: MobileAccountProfileSect
                 onPress={() => void load()}
                 style={styles.retryButton}
               >
-                <Text style={[styles.retry, { color: colors.primary }]}>Retry</Text>
+                <Text style={[styles.retry, { color: colors.accent }]}>Retry</Text>
               </Pressable>
             ) : null}
           </View>

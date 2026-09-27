@@ -321,7 +321,7 @@ export function ApprovalSheet({
       ? colors.danger
       : riskTone === "caution"
         ? colors.warning
-        : colors.primary;
+        : colors.accent;
 
   const isBusy = pendingAction !== null;
   const currentApprovalId = current?.approvalId;
@@ -1959,7 +1959,7 @@ function InstallReviewDetails({
                       backgroundColor: selected
                         ? colors.accentSoft
                         : colors.surfaceSunken,
-                      borderColor: selected ? colors.primary : colors.border,
+                      borderColor: selected ? colors.accent : colors.border,
                       opacity: pressed ? pressedOpacity : 1,
                     },
                   ]}
@@ -1969,7 +1969,7 @@ function InstallReviewDetails({
                     style={[
                       styles.installReviewKindFilterText,
                       {
-                        color: selected ? colors.primary : colors.textSecondary,
+                        color: selected ? colors.accent : colors.textSecondary,
                       },
                     ]}
                   >
@@ -2260,7 +2260,7 @@ function InstallReviewPartDetail({
               style={styles.disclosureButton}
             >
               <Text
-                style={[styles.disclosureButtonText, { color: colors.primary }]}
+                style={[styles.disclosureButtonText, { color: colors.accent }]}
               >
                 {copy.sections.showAllNotable(notable.length)}
               </Text>
@@ -2279,9 +2279,9 @@ function InstallReviewPartDetail({
             onPress={() => setShowEveryday((open) => !open)}
             style={styles.disclosureButton}
           >
-            <ChevronDown size={12} color={colors.primary} />
+            <ChevronDown size={12} color={colors.accent} />
             <Text
-              style={[styles.disclosureButtonText, { color: colors.primary }]}
+              style={[styles.disclosureButtonText, { color: colors.accent }]}
             >
               {copy.sections.everyday(part.everydayRows.length)}
             </Text>
@@ -2797,7 +2797,7 @@ function MobileDiffFile({
         <View style={styles.mobileDiffFileBody}>
           {state.status === "idle" || state.status === "loading" ? (
             <View style={styles.mobileDiffLoading}>
-              <ActivityIndicator size="small" color={colors.primary} />
+              <ActivityIndicator size="small" color={colors.accent} />
               <Text
                 style={[styles.mobileDiffHelp, { color: colors.textSecondary }]}
               >
@@ -2973,10 +2973,10 @@ function MobileOpenDiffFileButton({
       ]}
       testID={`approval-diff-open-${file.path}`}
     >
-      <Text style={[styles.mobileDiffOpenFileText, { color: colors.primary }]}>
+      <Text style={[styles.mobileDiffOpenFileText, { color: colors.accent }]}>
         Open full file inspector
       </Text>
-      <ChevronRight size={14} color={colors.primary} />
+      <ChevronRight size={14} color={colors.accent} />
     </Pressable>
   );
 }

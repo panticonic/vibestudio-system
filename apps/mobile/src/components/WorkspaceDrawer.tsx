@@ -94,8 +94,8 @@ export function WorkspaceDrawer({
             },
           ]}
         >
-          <Bell size={18} color={colors.primary} />
-          <Text style={[type.bodyStrong, { color: colors.primary }]}>
+          <Bell size={18} color={colors.accent} />
+          <Text style={[type.bodyStrong, { color: colors.accent }]}>
             Approvals
           </Text>
           <Text style={[type.caption, { color: colors.textSecondary }]}>
@@ -142,7 +142,7 @@ export function WorkspaceDrawer({
               style={[
                 styles.section,
                 {
-                  borderColor: selected ? colors.primary : colors.borderSubtle,
+                  borderColor: selected ? colors.accent : colors.borderSubtle,
                   backgroundColor: selected ? colors.surface : "transparent",
                 },
               ]}
@@ -178,7 +178,7 @@ export function WorkspaceDrawer({
                   >
                     <Icon
                       size={17}
-                      color={selected ? colors.primary : colors.textSecondary}
+                      color={selected ? colors.accent : colors.textSecondary}
                     />
                   </View>
                   <View style={styles.copy}>
@@ -215,8 +215,8 @@ export function WorkspaceDrawer({
                     onSelect();
                   }}
                 >
-                  <Bell size={15} color={colors.primary} />
-                  <Text style={[type.caption, { color: colors.primary }]}>
+                  <Bell size={15} color={colors.accent} />
+                  <Text style={[type.caption, { color: colors.accent }]}>
                     {directory.pendingApprovalCounts.get(entry.workspaceId)}{" "}
                     awaiting your review
                   </Text>
@@ -248,7 +248,7 @@ export function WorkspaceDrawer({
                     onPress={() => perform(directory.open(entry.workspaceId))}
                     style={styles.retry}
                   >
-                    <Text style={[type.bodyStrong, { color: colors.primary }]}>
+                    <Text style={[type.bodyStrong, { color: colors.accent }]}>
                       Try opening again
                     </Text>
                   </Pressable>

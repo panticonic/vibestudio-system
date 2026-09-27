@@ -683,7 +683,7 @@ export function CommandSheet({
                     ]}
                   >
                     <Text
-                      style={[type.caption, { color: colors.primary }]}
+                      style={[type.caption, { color: colors.accent }]}
                       numberOfLines={1}
                     >
                       {argSession.spec.title}
@@ -777,7 +777,7 @@ export function CommandSheet({
                               ? colors.accentSoft
                               : colors.surfaceSunken,
                             borderColor: selected
-                              ? colors.primary
+                              ? colors.accent
                               : colors.borderSubtle,
                           },
                         ]}
@@ -787,7 +787,7 @@ export function CommandSheet({
                             type.caption,
                             {
                               color: selected
-                                ? colors.primary
+                                ? colors.accent
                                 : colors.textSecondary,
                             },
                           ]}
@@ -874,7 +874,7 @@ export function CommandSheet({
                             part.highlighted ? (
                               <Text
                                 key={index}
-                                style={{ color: colors.primary }}
+                                style={{ color: colors.accent }}
                               >
                                 {part.text}
                               </Text>

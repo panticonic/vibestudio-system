@@ -467,7 +467,7 @@ export function QuickfireSheet({
                       onPress={returnToCommands}
                       style={styles.navigationButton}
                     >
-                      <Text style={[type.caption, { color: colors.primary }]}>
+                      <Text style={[type.caption, { color: colors.accent }]}>
                         ‹ Commands
                       </Text>
                     </Pressable>
@@ -540,7 +540,7 @@ export function QuickfireSheet({
                       scrollRef.current?.scrollToEnd({ animated: true });
                     }}
                   >
-                    <Text style={[type.caption, { color: colors.primary }]}>
+                    <Text style={[type.caption, { color: colors.accent }]}>
                       ↓ Jump to latest
                     </Text>
                   </Pressable>
@@ -592,7 +592,7 @@ export function QuickfireSheet({
                         draft.trim().length === 0 ||
                         composeDisabledReason !== null
                       }
-                      color={colors.primary}
+                      color={colors.accent}
                       size={17}
                     />
                   </View>

@@ -100,7 +100,7 @@ function LoadedPanelWebViewImpl({
           background: colors.background,
           text: colors.text,
           textSecondary: colors.textSecondary,
-          accent: colors.primary,
+          accent: colors.accent,
           accentText: colors.text,
         }}
       >

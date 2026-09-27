@@ -186,7 +186,7 @@ export function ActionSheetHost() {
                 tone === "danger"
                   ? colors.danger
                   : tone === "primary"
-                    ? colors.primary
+                    ? colors.accent
                     : colors.text;
               const Icon = item.icon;
               return (
@@ -229,7 +229,7 @@ export function ActionSheetHost() {
                     ) : null}
                   </View>
                   {item.selected ? (
-                    <Check size={18} color={colors.primary} />
+                    <Check size={18} color={colors.accent} />
                   ) : null}
                 </Pressable>
               );

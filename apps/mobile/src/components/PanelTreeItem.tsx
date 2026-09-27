@@ -146,8 +146,8 @@ export function PanelTreeItem({
     onToggleCollapse(item.id, !item.isCollapsed);
   }, [item.id, item.isCollapsed, onToggleCollapse]);
 
-  const titleColor = isActive ? colors.primary : colors.text;
-  const mutedColor = isActive ? colors.primary : colors.textTertiary;
+  const titleColor = isActive ? colors.accent : colors.text;
+  const mutedColor = isActive ? colors.accent : colors.textTertiary;
 
   return (
     <Animated.View style={[styles.outerContainer, containerAnimatedStyle]}>

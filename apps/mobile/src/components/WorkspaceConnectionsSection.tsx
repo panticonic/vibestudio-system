@@ -197,7 +197,7 @@ function PolicyEditor({
                   {
                     color:
                       direction === value
-                        ? colors.primary
+                        ? colors.accent
                         : colors.textSecondary,
                   },
                 ]}
@@ -406,7 +406,7 @@ function PolicyEditor({
                             {
                               color:
                                 purpose === value
-                                  ? colors.primary
+                                  ? colors.accent
                                   : colors.textSecondary,
                             },
                           ]}
@@ -424,7 +424,7 @@ function PolicyEditor({
                       { backgroundColor: colors.accentSoft },
                     ]}
                   >
-                    <ArrowRight size={18} color={colors.primary} />
+                    <ArrowRight size={18} color={colors.accent} />
                     <Text style={[type.bodyStrong, { color: colors.text }]}>
                       {direction === "outgoing"
                         ? workspaceName

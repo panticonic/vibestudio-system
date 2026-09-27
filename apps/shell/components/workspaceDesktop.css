@@ -10,16 +10,17 @@
 /* The navigation is frame, not content: it takes the same chrome fill as the
    titlebar (`--app-chrome-bg`) rather than Radix's panel colour, which in light
    mode is near-white and reads as lighter than the panels it lists. */
-.workspace-desktop-navigation { display: flex; flex-direction: column; width: 272px; min-width: 220px; max-width: 32vw; min-height: 0; flex-shrink: 0; border-right: 1px solid var(--app-chrome-border); background: var(--app-chrome-bg); }
+.workspace-desktop-navigation { display: flex; flex-direction: column; min-height: 0; flex-shrink: 0; background: var(--app-chrome-bg); }
 .workspace-desktop-navigation > .workspace-stack { flex: 1; min-height: 0; overflow-y: auto; }
 .workspace-tree-host { display: flex; flex-direction: column; min-height: 0; flex: none; }
-.workspace-desktop-controls { flex-shrink: 0; padding: 12px 14px; border-top: 1px solid var(--app-chrome-border); }
-.workspace-desktop-controls > :first-child { margin-right: auto; }
+.workspace-desktop-controls { display: flex; gap: 8px; align-items: center; flex-shrink: 0; padding: 8px; border-top: 1px solid var(--app-chrome-border); }
+.workspace-desktop-controls > :first-child { flex: 0 0 32px; padding: 0; }
+.workspace-desktop-controls > :last-child { flex: 1; min-width: 0; }
 .workspace-desktop-content { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; min-width: 0; }
 .workspace-desktop-runtime { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; }
 .workspace-desktop-runtime[hidden] { display: none; }
 .workspace-desktop-starting { margin: auto; }
-@media(max-width: 720px) { .workspace-desktop-navigation { width: 220px; min-width: 180px; max-width: 40vw; } .workspace-desktop-controls { flex-wrap: wrap; } .workspace-connection-notice { align-items: flex-start; flex-wrap: wrap; } .workspace-connection-notice-copy { align-items: flex-start; flex-direction: column; gap: 2px; } .workspace-connection-notice-message { white-space: normal; } }
+@media(max-width: 720px) { .workspace-connection-notice { align-items: flex-start; flex-wrap: wrap; } .workspace-connection-notice-copy { align-items: flex-start; flex-direction: column; gap: 2px; } .workspace-connection-notice-message { white-space: normal; } }
 
 .workspace-desktop-navigation[hidden] { display: none; }
 

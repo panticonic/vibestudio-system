@@ -289,7 +289,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
 
         {authLoading ? (
           <View style={styles.loadingBlock}>
-            <ActivityIndicator color={colors.primary} size="large" />
+            <ActivityIndicator color={colors.accent} size="large" />
             <Text style={[styles.message, { color: colors.textSecondary }]}>
               {connectionPhase}
               {connectionAttempt > 0 ? ` Attempt ${connectionAttempt}.` : ""}
