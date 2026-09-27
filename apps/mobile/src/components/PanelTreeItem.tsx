@@ -50,6 +50,7 @@ const ITEM_HEIGHT = 46;
 
 interface PanelTreeItemProps {
   item: MobilePanelRowPresentation;
+  subtitle?: string;
   isActive: boolean;
   isPinned?: boolean;
   colors: ThemeColors;
@@ -63,6 +64,7 @@ interface PanelTreeItemProps {
 
 export function PanelTreeItem({
   item,
+  subtitle,
   isActive,
   isPinned = false,
   colors,
@@ -210,7 +212,7 @@ export function PanelTreeItem({
             onLongPress={() => onLongPress?.(item.id)}
             style={styles.titlePressable}
             accessibilityRole="button"
-            accessibilityLabel={`${item.title}. Long-press for actions.`}
+            accessibilityLabel={`${item.title}${subtitle ? `. ${subtitle}` : ""}. Long-press for actions.`}
             accessibilityHint={trust.description}
           >
             <MobilePanelIcon
@@ -224,18 +226,25 @@ export function PanelTreeItem({
               color={mutedColor}
               resolveBrowserFavicon={resolveBrowserFavicon}
             />
-            <Text
-              style={[
-                type.body,
-                isActive && type.bodyStrong,
-                styles.title,
-                { color: titleColor },
-              ]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              {item.title}
-            </Text>
+            <View style={styles.titleGroup}>
+              <Text
+                style={[
+                  type.body,
+                  isActive && type.bodyStrong,
+                  styles.title,
+                  { color: titleColor },
+                ]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {item.title}
+              </Text>
+              {subtitle ? (
+                <Text style={[type.micro, { color: colors.textTertiary }]} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
           </Pressable>
 
           {/* Pin indicator — quiet glyph, only when pinned */}
@@ -307,6 +316,7 @@ const styles = StyleSheet.create({
     lineHeight: undefined,
     flexShrink: 1,
   },
+  titleGroup: { flex: 1, minWidth: 0 },
   childCount: {
     marginLeft: spacing.sm,
   },

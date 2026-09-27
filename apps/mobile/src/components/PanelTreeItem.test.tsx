@@ -38,6 +38,24 @@ jest.mock("react-native-reanimated", () => {
 });
 
 describe("PanelTreeItem identity", () => {
+  it("keeps a search match title visible above its ancestor path", () => {
+    const colors = createStore().get(themeColorsAtom);
+    const view = render(
+      <PanelTreeItem
+        item={{ id: "panel-1", title: "Matching panel", depth: 0, childCount: 0, isCollapsed: true }}
+        subtitle="Parent › Ancestor"
+        isActive={false}
+        colors={colors}
+        serverUrl=""
+        resolveBrowserFavicon={jest.fn(async () => null)}
+        onPress={jest.fn()}
+        onToggleCollapse={jest.fn()}
+        onArchive={jest.fn()}
+      />,
+    );
+    expect(view.getByText("Matching panel")).toBeTruthy();
+    expect(view.getByText("Parent › Ancestor")).toBeTruthy();
+  });
   it("renders the panel's canonical manifest image in the mobile drawer", () => {
     const colors = createStore().get(themeColorsAtom);
     const { UNSAFE_getByType } = render(

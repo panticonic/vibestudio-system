@@ -17,6 +17,7 @@
   padding: var(--workspace-stack-gutter);
   color: var(--gray-12);
 }
+.workspace-stack[hidden] { display: none; }
 .workspace-stack button {
   font: inherit;
   color: inherit;
@@ -33,6 +34,12 @@
   cursor: default;
 }
 .workspace-stack-heading {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 32px;
+  flex: none;
+  background: var(--app-chrome-bg);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -85,6 +92,10 @@
     var(--workspace-section-radius);
 }
 .workspace-section-heading {
+  position: sticky;
+  top: 32px;
+  z-index: 2;
+  background: var(--app-chrome-bg);
   display: flex;
   align-items: center;
   min-width: 0;
@@ -93,6 +104,7 @@
      button would otherwise sit right against the frame's edge. */
   padding-inline: var(--workspace-stack-gutter);
 }
+.workspace-section-focused .workspace-section-heading { background: var(--gray-2); }
 .workspace-section-toggle {
   width: 20px;
   color: var(--gray-9) !important;

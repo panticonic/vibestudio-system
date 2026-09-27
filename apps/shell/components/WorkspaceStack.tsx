@@ -36,9 +36,11 @@ export function WorkspaceStack({
   onOpenWorkspaceSettings,
   onAddWorkspace,
   scrollRef,
+  hidden,
 }: {
   sections: readonly WorkspaceSection[];
   scrollRef(element: HTMLElement | null): void;
+  hidden?: boolean;
   onToggleExpanded(workspaceId: string): void;
   onOpenWorkspace(workspaceId: string): void;
   onCreatePanel(workspaceId: string): void;
@@ -54,7 +56,7 @@ export function WorkspaceStack({
         : 1;
   const ordered = [...sections].sort((a, b) => rank(a) - rank(b));
   return (
-    <nav ref={scrollRef} className="workspace-stack" aria-label="Workspaces">
+    <nav ref={scrollRef} className="workspace-stack" aria-label="Workspaces" hidden={hidden}>
       <div className="workspace-stack-heading">
         <span>Your workspaces</span>
         <button

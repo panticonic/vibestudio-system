@@ -32,7 +32,6 @@ import {
   CaretRightIcon,
   Cross2Icon,
   DrawingPinFilledIcon,
-  MagnifyingGlassIcon,
   PlusIcon,
 } from "@radix-ui/react-icons";
 import { Badge, Box, Button, Flex, IconButton, Text, Tooltip } from "@radix-ui/themes";
@@ -58,6 +57,7 @@ import { pinnedPanelIdsAtom } from "../state/appModeAtoms.js";
 import { assertPresent } from "../utils/assertPresent";
 import { PanelIcon } from "./PanelIcon";
 import { buildGuides } from "./panelTreeGuides.js";
+import { panelTreeKeyboardTarget, type TreeMoveKey } from "./panelTreeKeyboard.js";
 
 // ============================================================================
 // Style Constants
@@ -295,6 +295,7 @@ interface SortableTreeItemProps {
   onAddChild?: (panelId: string) => void;
   onIndent: (panelId: string) => void;
   onUnindent: (panelId: string) => void;
+  onMoveFocus: (panelId: string, key: TreeMoveKey) => void;
 }
 
 const SortableTreeItem = memo(
@@ -318,6 +319,7 @@ const SortableTreeItem = memo(
     onAddChild,
     onIndent,
     onUnindent,
+    onMoveFocus,
   }: SortableTreeItemProps) {
     const { panel, depth, collapsed } = item;
     const [isHovered, setIsHovered] = useState(false);
@@ -408,23 +410,8 @@ const SortableTreeItem = memo(
           return;
         }
         if (["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) {
-          const rows = Array.from(
-            document.querySelectorAll<HTMLElement>('[data-panel-tree-row="true"]')
-          );
-          const current = rows.indexOf(e.currentTarget as HTMLElement);
-          const nextIndex =
-            e.key === "Home"
-              ? 0
-              : e.key === "End"
-                ? rows.length - 1
-                : e.key === "ArrowUp"
-                  ? Math.max(0, current - 1)
-                  : Math.min(rows.length - 1, current + 1);
-          const next = rows[nextIndex];
-          if (next) {
-            e.preventDefault();
-            next.focus();
-          }
+          e.preventDefault();
+          onMoveFocus(panel.id, e.key as TreeMoveKey);
         }
       },
       [
@@ -433,6 +420,7 @@ const SortableTreeItem = memo(
         hasChildren,
         isSortable,
         onIndent,
+        onMoveFocus,
         onToggleCollapse,
         onUnindent,
         panel.id,
@@ -497,6 +485,7 @@ const SortableTreeItem = memo(
           <Box style={getDropIndicatorStyle(projectedDepth, showIndicatorBelow ? "100%" : -1)} />
         )}
 
+        <Tooltip content={[panel.title, ownerDescription, trust.description].filter(Boolean).join(". ")}>
         <Flex
           {...attributes}
           {...listeners}
@@ -515,7 +504,6 @@ const SortableTreeItem = memo(
           data-panel-id={panel.id}
           aria-label={`Select panel ${panel.title}`}
           aria-description={[ownerDescription, trust.description].filter(Boolean).join(". ")}
-          title={[ownerDescription, trust.description].filter(Boolean).join(". ")}
           data-panel-trust={trust.state}
           style={rowStyle}
           data-active={isSelected ? "true" : "false"}
@@ -670,6 +658,7 @@ const SortableTreeItem = memo(
             </>
           )}
         </Flex>
+        </Tooltip>
 
         <TreeConnectors guides={guides} isSelected={isSelected} />
       </Box>
@@ -703,6 +692,7 @@ const SortableTreeItem = memo(
       prev.showIndicatorBelow === next.showIndicatorBelow &&
       prev.isTouch === next.isTouch &&
       prev.onSelect === next.onSelect &&
+      prev.onMoveFocus === next.onMoveFocus &&
       prev.onToggleCollapse === next.onToggleCollapse &&
       prev.onPanelContextMenu === next.onPanelContextMenu &&
       prev.onArchive === next.onArchive &&
@@ -774,7 +764,6 @@ function ownerDisplayName(owner: string, profile: ShellAccountProfile | undefine
 type SidebarRow =
   | { kind: "panel"; item: FlattenedPanel }
   | { kind: "root-groups-more" }
-  | { kind: "search-more" }
   | {
       kind: "load-more";
       groupKey: string;
@@ -889,19 +878,11 @@ export function LazyPanelTreeSidebar({
     selfUserId,
     selfIdentityError,
     treeLoadError,
-    treeRevision,
     refreshTree,
     loadMore,
     loadMoreRootGroups,
     hasMoreRootGroups,
-    search,
   } = usePanelTree();
-  const [query, setQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<
-    Array<{ id: string; title: string; breadcrumb: string }>
-  >([]);
-  const [searchCursor, setSearchCursor] = useState<string | null>(null);
-  const [loadingSearch, setLoadingSearch] = useState(false);
   const [loadingGroupKey, setLoadingGroupKey] = useState<string | null>(null);
   const ownerIds = useMemo(
     () => ownerGroups.map((group) => group.owner).filter((owner) => owner !== ""),
@@ -928,70 +909,9 @@ export function LazyPanelTreeSidebar({
     () => buildSidebarRows(flattenedItems, ownerGroups),
     [flattenedItems, ownerGroups]
   );
-  const trimmedQuery = query.trim();
-  useEffect(() => {
-    if (!trimmedQuery) {
-      setSearchResults([]);
-      setSearchCursor(null);
-      return;
-    }
-    setSearchResults([]);
-    setSearchCursor(null);
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      void search(trimmedQuery)
-        .then((results) => {
-          if (!cancelled) {
-            setSearchResults(
-              results.hits.map((hit) => ({
-                id: hit.node.slotId,
-                title: hit.node.title,
-                breadcrumb: [
-                  ...(hit.ancestorsTruncated ? ["…"] : []),
-                  ...hit.ancestors.map((node) => node.title),
-                ].join(" › "),
-              }))
-            );
-            setSearchCursor(results.nextCursor);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setSearchResults([]);
-        });
-    }, 150);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [search, treeRevision, trimmedQuery]);
-
   const rows = useMemo<SidebarRow[]>(() => {
-    if (!trimmedQuery) {
-      return hasMoreRootGroups ? [...treeRows, { kind: "root-groups-more" as const }] : treeRows;
-    }
-    const matches: SidebarRow[] = searchResults.map((found) => {
-      return [
-        {
-          kind: "panel" as const,
-          item: {
-            id: found.id,
-            parentId: null,
-            depth: 0,
-            index: 0,
-            panel: {
-              id: found.id,
-              title: found.breadcrumb ? `${found.breadcrumb} › ${found.title}` : found.title,
-              childCount: 0,
-              position: 0,
-            },
-            collapsed: true,
-          },
-        },
-      ][0]!;
-    });
-    if (searchCursor) matches.push({ kind: "search-more" });
-    return matches;
-  }, [hasMoreRootGroups, searchCursor, searchResults, treeRows, trimmedQuery]);
+    return hasMoreRootGroups ? [...treeRows, { kind: "root-groups-more" as const }] : treeRows;
+  }, [hasMoreRootGroups, treeRows]);
 
   // Per-row connector descriptors (rounded elbows + sibling stems).
   const guidesById = useMemo(
@@ -1077,31 +997,6 @@ export function LazyPanelTreeSidebar({
     [loadMore, loadingGroupKey]
   );
 
-  const handleLoadMoreSearch = useCallback(async () => {
-    if (!searchCursor || loadingSearch) return;
-    setLoadingSearch(true);
-    try {
-      const results = await search(trimmedQuery, searchCursor);
-      const seen = new Set(searchResults.map((item) => item.id));
-      const additions = results.hits
-        .filter((hit) => !seen.has(hit.node.slotId))
-        .map((hit) => ({
-          id: hit.node.slotId,
-          title: hit.node.title,
-          breadcrumb: [
-            ...(hit.ancestorsTruncated ? ["…"] : []),
-            ...hit.ancestors.map((node) => node.title),
-          ].join(" › "),
-        }))
-        .slice(0, Math.max(0, 500 - searchResults.length));
-      const next = [...searchResults, ...additions];
-      setSearchResults(next);
-      setSearchCursor(next.length >= 500 ? null : results.nextCursor);
-    } finally {
-      setLoadingSearch(false);
-    }
-  }, [loadingSearch, search, searchCursor, searchResults, trimmedQuery]);
-
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const [scrollMargin, setScrollMargin] = useState<number | null>(null);
   const measureListOffset = useCallback(() => {
@@ -1145,10 +1040,28 @@ export function LazyPanelTreeSidebar({
     count: rows.length + 1,
     getScrollElement: () => scrollElement,
     scrollMargin: scrollMargin ?? 0,
+    // Keep revealed rows below the sticky workspace and section headings.
+    scrollPaddingStart: 64,
     estimateSize: (index) =>
       index === rows.length ? (dragging ? END_DROP_ZONE_DRAG_HEIGHT : 0) : ROW_HEIGHT,
     overscan: 10,
   });
+  const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
+  const moveFocus = useCallback(
+    (panelId: string, key: TreeMoveKey) => {
+      const targetIndex = panelTreeKeyboardTarget(
+        rows.map((row) => row.kind === "panel" ? row.item.id : null),
+        panelId,
+        key,
+      );
+      if (targetIndex === null) return;
+      const target = rows[targetIndex];
+      if (target?.kind !== "panel") return;
+      setPendingFocusId(target.item.id);
+      virtualizer.scrollToIndex(targetIndex, { align: "auto" });
+    },
+    [rows, virtualizer],
+  );
   // The estimate above changes with the drag, and the virtualizer caches it.
   useLayoutEffect(() => virtualizer.measure(), [dragging, virtualizer]);
 
@@ -1206,6 +1119,18 @@ export function LazyPanelTreeSidebar({
       </Flex>
     ) : null;
 
+  const virtualItems = virtualizer.getVirtualItems();
+  useLayoutEffect(() => {
+    if (!pendingFocusId || !listElement) return;
+    const row = Array.from(
+      listElement.querySelectorAll<HTMLElement>('[data-panel-tree-row="true"]'),
+    ).find((element) => element.dataset["panelId"] === pendingFocusId);
+    if (row) {
+      row.focus();
+      setPendingFocusId(null);
+    }
+  }, [listElement, pendingFocusId, virtualItems]);
+
   if (flattenedItems.length === 0) {
     return (
       <Flex direction="column">
@@ -1242,58 +1167,9 @@ export function LazyPanelTreeSidebar({
     );
   }
 
-  const virtualItems = virtualizer.getVirtualItems();
-
   return (
     <Flex direction="column">
       {diagnostics}
-      <Flex
-        align="center"
-        gap="1"
-        mb="1"
-        style={{
-          // The workspace section frame owns the whole gutter around the tree,
-          // so the field adds no outer margin of its own and runs edge to edge
-          // with the rows below it. The inner padding is the row gutter, so the
-          // search icon lands on the same x as a row's expander.
-          paddingInline: ROW_PADDING_LEFT,
-          minHeight: 24,
-          // The same radius as a row: both are the section frame's direct
-          // children, and the frame's own radius is derived from theirs.
-          borderRadius: "var(--radius-2)",
-          background: "var(--gray-a3)",
-          border: "1px solid var(--gray-a5)",
-        }}
-      >
-        <MagnifyingGlassIcon color="var(--gray-9)" />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Filter panels by title"
-          aria-label="Filter panels by title"
-          style={{
-            minWidth: 0,
-            flex: 1,
-            border: 0,
-            outline: 0,
-            background: "transparent",
-            color: "var(--gray-12)",
-            font: "inherit",
-            fontSize: 12,
-          }}
-        />
-        {query ? (
-          <IconButton
-            size="1"
-            variant="ghost"
-            color="gray"
-            aria-label="Clear panel filter"
-            onClick={() => setQuery("")}
-          >
-            <Cross2Icon />
-          </IconButton>
-        ) : null}
-      </Flex>
       {/* The workspace section frame owns the gutter; this list adds none. */}
       <div ref={setListElement}>
         <Box
@@ -1355,8 +1231,7 @@ export function LazyPanelTreeSidebar({
               );
             }
 
-            if (row.kind === "root-groups-more" || row.kind === "search-more") {
-              const searchMore = row.kind === "search-more";
+            if (row.kind === "root-groups-more") {
               return (
                 <Box
                   key={row.kind}
@@ -1373,16 +1248,10 @@ export function LazyPanelTreeSidebar({
                     size="1"
                     variant="ghost"
                     color="gray"
-                    disabled={searchMore ? loadingSearch : loadingGroupKey !== null}
-                    onClick={() =>
-                      searchMore ? void handleLoadMoreSearch() : void loadMoreRootGroups()
-                    }
+                    disabled={loadingGroupKey !== null}
+                    onClick={() => void loadMoreRootGroups()}
                   >
-                    {searchMore && loadingSearch
-                      ? "Loading…"
-                      : searchMore
-                        ? "Load more matches"
-                        : "Load more panel owners"}
+                    Load more panel owners
                   </Button>
                 </Box>
               );
@@ -1425,7 +1294,7 @@ export function LazyPanelTreeSidebar({
                   isDraggingAny={dragging}
                   showIndicatorBelow={showIndicatorBelow}
                   isTouch={isTouch}
-                  isSortable={!trimmedQuery}
+                  isSortable
                   onSelect={onSelect}
                   onToggleCollapse={toggleCollapse}
                   onPanelContextMenu={onPanelContextMenu}
@@ -1433,6 +1302,7 @@ export function LazyPanelTreeSidebar({
                   onAddChild={handleAddChild}
                   onIndent={indentPanel}
                   onUnindent={unindentPanel}
+                  onMoveFocus={moveFocus}
                 />
               </Box>
             );

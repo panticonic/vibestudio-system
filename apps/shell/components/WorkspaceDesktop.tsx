@@ -46,6 +46,7 @@ import { openCommandAgentAtom } from "../state/commandAgentAtoms";
 import { workspaceLabel } from "../shell/workspaceLabel";
 import { WorkspaceStack, type WorkspaceSection } from "./WorkspaceStack";
 import { PanelApp } from "./PanelApp";
+import { PanelFinder } from "./PanelFinder";
 import { ResizableDivider } from "./ResizableDivider";
 import "./workspaceDesktop.css";
 
@@ -91,6 +92,14 @@ export function WorkspaceDesktop({
   const accessibleIds = useRef<Set<string> | null>(null);
   const openings = useRef(new Map<string, Promise<OpenWorkspace>>());
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [panelQuery, setPanelQuery] = useState("");
+  const navigatePanelHandlers = useRef(new Map<string, (panelId: string) => void>());
+  const pendingPanelNavigation = useRef<{
+    workspaceId: string;
+    panelId: string;
+    sequence: number;
+  } | null>(null);
+  const panelNavigationSequence = useRef(0);
   const [windowWidth, setWindowWidth] = useState(() =>
     typeof window === "undefined" ? 1024 : window.innerWidth,
   );
@@ -122,6 +131,39 @@ export function WorkspaceDesktop({
         clampSidebarWidth(clampSidebarWidth(current, windowWidth) + delta, windowWidth),
       ),
     [windowWidth],
+  );
+  const searchWorkspacePanels = useCallback(
+    async (workspaceId: string, query: string, cursor?: string) => {
+      const owner = owners.current.get(workspaceId);
+      if (owner)
+        return owner.client.panel.searchTree({ query, ...(cursor ? { cursor } : {}), limit: 50 });
+      const transient = await createWorkspaceShellClient(workspaceId);
+      try {
+        return await transient.client.panel.searchTree({
+          query,
+          ...(cursor ? { cursor } : {}),
+          limit: 50,
+        });
+      } finally {
+        transient.close();
+      }
+    },
+    [],
+  );
+  const registerPanelNavigation = useCallback(
+    (workspaceId: string, navigate: (panelId: string) => void) => {
+      navigatePanelHandlers.current.set(workspaceId, navigate);
+      const pending = pendingPanelNavigation.current;
+      if (pending?.workspaceId === workspaceId) {
+        pendingPanelNavigation.current = null;
+        navigate(pending.panelId);
+      }
+      return () => {
+        if (navigatePanelHandlers.current.get(workspaceId) === navigate)
+          navigatePanelHandlers.current.delete(workspaceId);
+      };
+    },
+    [],
   );
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedRef = useRef(focusedId);
@@ -453,6 +495,24 @@ export function WorkspaceDesktop({
       setError(error instanceof Error ? error.message : String(error));
     }
   };
+  const selectSearchResult = (workspaceId: string, panelId: string) => {
+    setPanelQuery("");
+    const sequence = ++panelNavigationSequence.current;
+    pendingPanelNavigation.current = { workspaceId, panelId, sequence };
+    void openWorkspace(workspaceId)
+      .then(() => {
+        const pending = pendingPanelNavigation.current;
+        if (pending?.sequence !== sequence) return;
+        const navigate = navigatePanelHandlers.current.get(workspaceId);
+        if (!navigate) return;
+        pendingPanelNavigation.current = null;
+        navigate(panelId);
+      })
+      .catch(() => {
+        if (pendingPanelNavigation.current?.sequence === sequence)
+          pendingPanelNavigation.current = null;
+      });
+  };
   const refFor = (id: string) => {
     let callback = treeRefs.current.get(id);
     if (!callback) {
@@ -530,9 +590,17 @@ export function WorkspaceDesktop({
               hidden={!sidebarVisible}
               style={{ width: visibleSidebarWidth }}
             >
+              <PanelFinder
+                workspaces={catalog}
+                query={panelQuery}
+                onQueryChange={setPanelQuery}
+                search={searchWorkspacePanels}
+                onSelect={selectSearchResult}
+              />
               <WorkspaceStack
                 scrollRef={setScrollElement}
                 sections={sections}
+                hidden={Boolean(panelQuery.trim())}
                 onToggleExpanded={(id) => {
                   if (!owners.current.has(id)) {
                     void openWorkspace(id).catch(() => undefined);
@@ -659,6 +727,8 @@ export function WorkspaceDesktop({
                                 owner.workspace.workspaceId,
                               ).catch(() => undefined);
                             },
+                            registerNavigateToPanel: (navigate) =>
+                              registerPanelNavigation(owner.workspace.workspaceId, navigate),
                           }}
                         >
                           <WorkspacePanelOwner

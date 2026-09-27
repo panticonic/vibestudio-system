@@ -1257,6 +1257,9 @@ export const PanelStack = memo(function PanelStack({
     },
     [closeMobileTree, dispatch, layout.focusedPaneId],
   );
+  useEffect(() => {
+    return navigationHost?.registerNavigateToPanel?.(navigateFromTree);
+  }, [navigationHost?.registerNavigateToPanel, navigateFromTree]);
 
   const focusPane = useCallback(
     (paneId: string) => dispatch({ type: "focus-pane", paneId }),

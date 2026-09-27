@@ -24,6 +24,7 @@ export const WorkspaceNavigationHostContext = createContext<{
   sidebarVisible: boolean;
   toggleSidebar(): void;
   focus(): void;
+  registerNavigateToPanel?(navigate: (panelId: string) => void): () => void;
 } | null>(null);
 export const useWorkspaceNavigationHost = () =>
   useContext(WorkspaceNavigationHostContext);

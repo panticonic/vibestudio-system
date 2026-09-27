@@ -44,6 +44,7 @@ import { savePinnedPanelIds } from "../shellCore/pinnedPanels";
 import { PanelTreeItem } from "./PanelTreeItem";
 import { VibestudioLogo } from "./VibestudioLogo";
 import { isBrowserPanelSource } from "@vibestudio/shared/panelChrome";
+import { panelTreeSearchBreadcrumb } from "@vibestudio/shared/panel/treeIndex";
 import {
   getPanelCommandDefinitions,
   type PanelCommandId,
@@ -128,8 +129,11 @@ export function PanelDrawer({
   const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<MobilePanelTreeNode[]>([]);
+  const [searchResults, setSearchResults] = useState<
+    Array<MobilePanelTreeNode & { breadcrumb: string }>
+  >([]);
   const [searchCursor, setSearchCursor] = useState<string | null>(null);
+  const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [loadingIndexPage, setLoadingIndexPage] = useState(false);
   const [loadingGroupKey, setLoadingGroupKey] = useState<string | null>(null);
   const [cacheVersion, setCacheVersion] = useState(0);
@@ -241,10 +245,12 @@ export function PanelDrawer({
     if (!shellClient || !trimmedQuery) {
       setSearchResults([]);
       setSearchCursor(null);
+      setSearchStatus("idle");
       return;
     }
     setSearchResults([]);
     setSearchCursor(null);
+    setSearchStatus("loading");
     let cancelled = false;
     const timer = setTimeout(() => {
       void shellClient.panels.treeCache
@@ -252,30 +258,30 @@ export function PanelDrawer({
         .then((results) => {
           if (!cancelled) {
             setSearchResults(
-              results.hits.map(({ node, ancestors, ancestorsTruncated }) => ({
-                id: node.slotId,
-                title:
-                  ancestors.length > 0
-                    ? `${ancestorsTruncated ? "… › " : ""}${ancestors
-                        .map((ancestor) => ancestor.title)
-                        .join(" › ")} › ${node.title}`
-                    : node.title,
-                parentId: node.parentSlotId,
-                owner: node.ownerUserId,
-                icon: node.icon,
-                iconVersion: node.iconVersion,
-                iconState: node.iconState,
-                source: node.source,
-                kind: node.kind,
-                childCount: node.childCount,
+              results.hits.map((hit) => ({
+                id: hit.node.slotId,
+                title: hit.node.title,
+                breadcrumb: panelTreeSearchBreadcrumb(hit),
+                parentId: hit.node.parentSlotId,
+                owner: hit.node.ownerUserId,
+                icon: hit.node.icon,
+                iconVersion: hit.node.iconVersion,
+                iconState: hit.node.iconState,
+                source: hit.node.source,
+                kind: hit.node.kind,
+                childCount: hit.node.childCount,
                 children: [],
               })),
             );
             setSearchCursor(results.nextCursor);
+            setSearchStatus("ready");
           }
         })
         .catch(() => {
-          if (!cancelled) setSearchResults([]);
+          if (!cancelled) {
+            setSearchResults([]);
+            setSearchStatus("error");
+          }
         });
     }, 150);
     return () => {
@@ -297,14 +303,14 @@ export function PanelDrawer({
         const seen = new Set(searchResults.map((panel) => panel.id));
         const additions = results.hits
           .filter(({ node }) => !seen.has(node.slotId))
-          .map(({ node, ancestors, ancestorsTruncated }) => ({
+          .map((hit) => ({
+            node: hit.node,
+            breadcrumb: panelTreeSearchBreadcrumb(hit),
+          }))
+          .map(({ node, breadcrumb }) => ({
             id: node.slotId,
-            title:
-              ancestors.length > 0
-                ? `${ancestorsTruncated ? "… › " : ""}${ancestors
-                    .map((ancestor) => ancestor.title)
-                    .join(" › ")} › ${node.title}`
-                : node.title,
+            title: node.title,
+            breadcrumb,
             parentId: node.parentSlotId,
             owner: node.ownerUserId,
             icon: node.icon,
@@ -363,6 +369,10 @@ export function PanelDrawer({
       ...forestRows,
     ] as MobilePanelForestRow[];
   }, [colors.accent, forestRows, pinnedPanelIds, searchResults, trimmedQuery]);
+  const searchBreadcrumbs = useMemo(
+    () => new Map(searchResults.map((panel) => [panel.id, panel.breadcrumb])),
+    [searchResults],
+  );
 
   const handleLoadMore = useCallback(
     async (row: Extract<MobilePanelForestRow, { kind: "load-more" }>) => {
@@ -632,6 +642,7 @@ export function PanelDrawer({
       return (
         <PanelTreeItem
           item={panelItem}
+          subtitle={trimmedQuery ? searchBreadcrumbs.get(panelItem.id) : undefined}
           isActive={panelItem.id === activePanelId}
           isPinned={pinnedPanelIds.has(panelItem.id)}
           colors={colors}
@@ -656,6 +667,7 @@ export function PanelDrawer({
       loadingGroupKey,
       resolveBrowserFavicon,
       trimmedQuery,
+      searchBreadcrumbs,
     ],
   );
 
@@ -781,7 +793,13 @@ export function PanelDrawer({
           <Text
             style={[type.bodyStrong, styles.emptyTitle, { color: colors.text }]}
           >
-            {trimmedQuery ? "No matching panels" : "No panels open yet"}
+            {trimmedQuery
+              ? searchStatus === "loading"
+                ? "Searching panels…"
+                : searchStatus === "error"
+                  ? "Couldn’t search panels"
+                  : "No matching panels"
+              : "No panels open yet"}
           </Text>
           <Text
             style={[
@@ -791,7 +809,11 @@ export function PanelDrawer({
             ]}
           >
             {trimmedQuery
-              ? "Try a different search, or clear it to see the full tree."
+              ? searchStatus === "error"
+                ? "Check the connection and try again."
+                : searchStatus === "loading"
+                  ? "Looking through this workspace."
+                  : "Try a different search, or clear it to see the full tree."
               : "Tap + to open New Panel, or tap the address pill and enter a website or panel source."}
           </Text>
         </View>

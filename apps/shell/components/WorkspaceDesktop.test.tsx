@@ -13,7 +13,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import type { PanelLocation } from "@vibestudio/shared/panelLocation";
 import { WorkspaceDesktop } from "./WorkspaceDesktop";
 import {
@@ -64,6 +64,7 @@ const api = vi.hoisted(() => {
   return {
     catalog,
     calls,
+    navigate: vi.fn(),
     route: vi.fn(async () => {}),
     list: vi.fn(async () => catalog),
     incomingSurface: vi.fn(async (): Promise<unknown> => null),
@@ -77,6 +78,17 @@ const api = vi.hoisted(() => {
         close,
         client: {
           panel: {
+            searchTree: async () => ({
+              revision: 1,
+              hits:
+                id === "garden"
+                  ? [{
+                      node: { slotId: "garden-panel", title: "Garden notes" },
+                      ancestors: [{ slotId: "garden-root", title: "Research" }],
+                    }]
+                  : [],
+              nextCursor: null,
+            }),
             createAboutPanel: create,
             createPanel: create,
             createChild: create,
@@ -129,6 +141,10 @@ const draft = atom("");
 vi.mock("./PanelApp", () => ({
   PanelApp: function RetainedDraft() {
     const owner = useWorkspaceNavigationHost();
+    useEffect(
+      () => owner?.registerNavigateToPanel?.((panelId) => api.navigate(owner.workspaceId, panelId)),
+      [owner?.registerNavigateToPanel, owner?.workspaceId],
+    );
     const visible = useWorkspaceVisible();
     const [value, setValue] = useAtom(draft);
     const appearance = useAtomValue(effectiveThemeAtom);
@@ -172,6 +188,27 @@ function OpenWorkspace({ workspaceId }: { workspaceId: string }) {
   );
 }
 describe("desktop workspace ownership", () => {
+  it("finds a panel in a closed workspace and opens it through that workspace", async () => {
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      fireEvent.change(screen.getByRole("searchbox", { name: "Find panels" }), {
+        target: { value: "garden notes" },
+      });
+      const match = await screen.findByRole("button", { name: /Garden notes/ });
+      expect(match.textContent).toContain("Garden › Research");
+      api.navigate.mockClear();
+      fireEvent.click(match);
+      await waitFor(() =>
+        expect(api.navigate).toHaveBeenCalledWith("garden", "garden-panel"),
+      );
+      expect(screen.getByRole("searchbox", { name: "Find panels" })).toHaveProperty("value", "");
+    } finally {
+      result.unmount();
+      api.calls.delete("garden");
+      api.open.mockClear();
+    }
+  });
   it("resizes the panel tree sidebar by dragging its right edge", async () => {
     const previousWidth = localStorage.getItem("workspace-sidebar-width");
     localStorage.removeItem("workspace-sidebar-width");
