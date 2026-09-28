@@ -63,6 +63,7 @@ import { useShellEvent } from "../shell/useShellEvent";
 import { SavePasswordBar } from "./SavePasswordBar";
 import { assertPresent } from "../utils/assertPresent";
 import { ColumnRow } from "./ColumnRow";
+import { usePanelReload } from "./usePanelReload";
 import { usePanelLayout } from "../layout/usePanelLayout";
 import {
   canSplitColumnVertically,
@@ -171,6 +172,15 @@ export const PanelStack = memo(function PanelStack({
     panel: panelService,
     view,
   } = useShellWorkspaceClient();
+
+  const performReload = useCallback(async (panelId: string) => {
+    await panelService.markBrowserNavigationIntent(
+      panelId,
+      assertPresent(getBrowserNavigationIntentForCommand("reload-panel")),
+    );
+    return panelService.reload(panelId);
+  }, [panelService]);
+  const { reload: reloadPanel, pending: reloadingPanels } = usePanelReload(performReload);
 
   const navigationHost = useWorkspaceNavigationHost();
   const workspaceVisible = useWorkspaceVisible();
@@ -527,18 +537,8 @@ export const PanelStack = memo(function PanelStack({
           break;
         case "reload":
         case "reload-panel":
-          await panelService.markBrowserNavigationIntent(
-            panelId,
-            assertPresent(getBrowserNavigationIntentForCommand("reload-panel")),
-          );
-          await panelService.reload(panelId);
-          break;
         case "reload-view":
-          await panelService.markBrowserNavigationIntent(
-            panelId,
-            assertPresent(getBrowserNavigationIntentForCommand("reload-view")),
-          );
-          await panelService.reloadView(panelId);
+          await reloadPanel(panelId);
           break;
         case "force-reload":
         case "force-reload-view":
@@ -634,6 +634,7 @@ export const PanelStack = memo(function PanelStack({
       }
     },
     [
+      reloadPanel,
       navigatePanelHistory,
       createChildForPanel,
       openCommandAgent,
@@ -731,23 +732,8 @@ export const PanelStack = memo(function PanelStack({
           void navigatePanelHistory(panelId, 1);
           return;
         case "reload-panel":
-          void panelService.markBrowserNavigationIntent(
-            panelId,
-            assertPresent(getBrowserNavigationIntentForCommand(command.type)),
-          );
-          void panelService
-            .reload(panelId)
-            .catch((error) =>
-              reportPanelCommandError(notification, "Reload", error),
-            );
-          return;
         case "reload-view":
-          void panelService.markBrowserNavigationIntent(
-            panelId,
-            assertPresent(getBrowserNavigationIntentForCommand(command.type)),
-          );
-          void panelService
-            .reloadView(panelId)
+          void reloadPanel(panelId)
             .catch((error) =>
               reportPanelCommandError(notification, "Reload", error),
             );
@@ -1171,6 +1157,7 @@ export const PanelStack = memo(function PanelStack({
       }
     },
     [
+      reloadPanel,
       navigatePanelHistory,
       setPinnedPanelIds,
       bumpPinMutationSeq,
@@ -1541,6 +1528,14 @@ export const PanelStack = memo(function PanelStack({
           style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}
         >
           <SavePasswordBar visiblePanelId={focusedPanelId} />
+          {reloadingPanels.size > 0 && (
+            <Flex role="status" align="center" gap="2" px="3" py="2">
+              <Spinner size="1" />
+              <Text size="2">
+                Reloading {Array.from(reloadingPanels, (id) => panelMap.get(id)?.title ?? "panel").join(", ")}…
+              </Text>
+            </Flex>
+          )}
           {findOpen && (
             <Flex
               align="center"
