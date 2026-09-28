@@ -52,8 +52,9 @@ browser pages. Cache disabling affects Chromium's HTTP cache, not application
 state, service workers, DOs, or server build caches — reset only the layer the
 experiment calls cold.
 
-For a workspace-panel reload, use the canonical helper instead of composing a
-second CDP reload probe or inspecting its implementation:
+For a workspace-panel reload, use the canonical helper. It profiles the host
+across runtime replacement; CDP profiles cannot span two page incarnations.
+Acquire a fresh page afterward for browser interaction profiling:
 
 ```ts
 import { openPanel, profilePanelReload } from "@workspace/testkit";
@@ -62,10 +63,9 @@ const handle = await openPanel("panels/tour");
 try {
   const result = await profilePanelReload(handle, {
     label: "panel reload",
-    disableCache: true,
   });
-  // markerResetAfterReload proves the browser document was replaced. An
-  // in-place reload intentionally keeps the same panel attempt identity.
+  // The report measures host resources and wall time through boot readiness.
+  // Workspace code reload replaces the runtime: before/after attempt IDs differ.
   return result;
 } finally {
   await handle.archive().catch(() => undefined);
