@@ -82,6 +82,7 @@ export function WorkspaceDesktop({
   children?: ReactNode;
   connectionNotice?: ReactNode;
 }) {
+  const openingStartedAt = useRef<number | null>(performance.now());
   const presentationStore = useStore();
   const approvalPresentation = useApprovalPresentation();
   const [catalog, setCatalog] = useState<HubWorkspaceEntry[]>([]);
@@ -166,6 +167,13 @@ export function WorkspaceDesktop({
     [],
   );
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusedId || openingStartedAt.current === null) return;
+    // Native shell mount precedes workspace readiness. Keep this separate
+    // user-timing boundary so profiles include the opening screen's lifetime.
+    performance.measure("workspace:initial-open", { start: openingStartedAt.current });
+    openingStartedAt.current = null;
+  }, [focusedId]);
   const focusedRef = useRef(focusedId);
   focusedRef.current = focusedId;
   const nativeSync = useSyncExternalStore(
@@ -325,13 +333,18 @@ export function WorkspaceDesktop({
       const generation = epoch.current;
       const focusAtStart = focusGeneration.current;
       try {
-        const pair = await hubControl.ensureUserWorkspaces();
-        const sourceId = await systemWorkspaceId;
+        const [pair, sourceId, initialInfo] = await Promise.all([
+          hubControl.ensureUserWorkspaces(),
+          systemWorkspaceId,
+          !focusedRef.current && !focusWorkspaceId
+            ? app.getInfo()
+            : Promise.resolve(null),
+        ]);
         if (sourceId !== pair.system.workspaceId)
           throw new Error("Desktop chrome must run from your System workspace");
         const entries = await hubControl.listWorkspaces();
         if (!focusedRef.current && !focusWorkspaceId) {
-          focusWorkspaceId = (await app.getInfo()).initialFocusedWorkspaceId;
+          focusWorkspaceId = initialInfo?.initialFocusedWorkspaceId;
         }
         if (generation !== epoch.current) return;
         setCatalog(entries);

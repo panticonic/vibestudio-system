@@ -581,3 +581,34 @@ it("does not reopen a dismissed shared queue when an earlier exact selection fin
   expect(directory.activeWorkspaceId).toBe("personal");
   await directory.dispose();
 });
+
+it("opens Personal alongside System while retaining System's app-source owner", async () => {
+  let resolveSystem!: () => void;
+  mockOpening.set(
+    "system",
+    new Promise<void>((resolve) => {
+      resolveSystem = resolve;
+    }),
+  );
+  const { directory } = fixture();
+  const starting = directory.init();
+  try {
+    // Advance promise continuations without releasing System's readiness gate.
+    for (let i = 0; i < 30 && !directory.sessions.has("personal"); i++)
+      await Promise.resolve();
+    expect(directory.sessions.has("personal")).toBe(true);
+    const personal = mockClients.find(
+      ({ config }) => config["workspaceId"] === "personal",
+    )!;
+    expect(personal.config["appSourceClient"]).toBe(
+      directory.sessions.get("system")!.client,
+    );
+    resolveSystem();
+    await starting;
+    expect(directory.activeWorkspaceId).toBe("personal");
+  } finally {
+    resolveSystem();
+    await starting.catch(() => undefined);
+    await directory.dispose();
+  }
+});

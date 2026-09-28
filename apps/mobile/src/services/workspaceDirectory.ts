@@ -289,17 +289,29 @@ export class MobileWorkspaceDirectory {
 
   async init(): Promise<void> {
     this.startHubApprovalState();
-    const pair = await this.hubControl.ensureUserWorkspaces();
+    const [pair, saved] = await Promise.all([
+      this.hubControl.ensureUserWorkspaces(),
+      getNativeAppStorage().getItem(this.selectionKey),
+    ]);
     this.personalWorkspaceId = pair.personal.workspaceId;
     this.systemWorkspaceId = pair.system.workspaceId;
     await this.refresh();
-    const system = await this.open(this.systemWorkspaceId);
-    await system.client.refreshAccountProfile();
-    const saved = await getNativeAppStorage().getItem(this.selectionKey);
+    // open() publishes the System owner synchronously. Personal captures that
+    // same app-source client while both workspace connections become ready.
+    const system = this.open(this.systemWorkspaceId);
     const selected = this.entries.some((entry) => entry.workspaceId === saved)
       ? saved!
       : this.personalWorkspaceId;
-    await this.activate(selected);
+    const startup = [
+      system.then((session) => session.client.refreshAccountProfile()),
+      this.activate(selected),
+    ];
+    try {
+      await Promise.all(startup);
+    } catch (error) {
+      await Promise.allSettled(startup);
+      throw error;
+    }
   }
 
   private startHubApprovalState(): void {

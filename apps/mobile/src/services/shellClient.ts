@@ -1610,13 +1610,24 @@ export class ShellClient {
     for (;;) {
       try {
         const info = await this.connectWorkspace();
-        await this.refreshBrowserNotificationPermissions();
-        await this.startPanelAssetFacade(info.config.id);
-        let restored = await loadMobileShellStartupSnapshot(
-          this.serverEndpointId,
-          info.config.id,
-          this.credentials.deviceId,
-        );
+        const preparation = [
+          loadMobileShellStartupSnapshot(
+            this.serverEndpointId,
+            info.config.id,
+            this.credentials.deviceId,
+          ),
+          this.refreshBrowserNotificationPermissions(),
+          this.startPanelAssetFacade(info.config.id),
+        ] as const;
+        let restored: Awaited<(typeof preparation)[0]>;
+        try {
+          [restored] = await Promise.all(preparation);
+        } catch (error) {
+          // A failed permission read must not orphan a facade that finishes
+          // opening later, or race the next connection attempt.
+          await Promise.allSettled(preparation);
+          throw error;
+        }
         try {
           this.panels.prepare(
             info.config.id,
@@ -1643,7 +1654,8 @@ export class ShellClient {
           });
         } else {
           await this.panels.loadTreeForPaint();
-          await this.persistStartupSnapshot(info.config.id);
+          // Reconciliation owns the durable snapshot write. Painting the live
+          // tree does not need to wait for storage of next launch's cache.
           smokePhase("workspace-shell-ready", { source: "live-tree" });
         }
         this.onReadinessChange?.("shell-ready");
@@ -1812,12 +1824,21 @@ export class ShellClient {
     for (;;) {
       attempt += 1;
       let deferredResults: Promise<
-        [PromiseSettledResult<MobileAccountProfile>, PromiseSettledResult<void>]
+        [
+          PromiseSettledResult<MobileAccountProfile>,
+          PromiseSettledResult<void>,
+          PromiseSettledResult<void>,
+        ]
       > | null = null;
       try {
         deferredResults = Promise.allSettled([
           this.refreshAccountProfile(),
           this.ensureReactNativeHostTargetReady(signal),
+          // Keep the first usable tree durable even if host launch needs a
+          // review. This cache write belongs to reconciliation, not first paint.
+          refreshTree
+            ? Promise.resolve()
+            : this.persistStartupSnapshot(info.config.id),
         ]);
         await (refreshTree
           ? this.panels.reconcile()
@@ -1826,21 +1847,29 @@ export class ShellClient {
           await deferredResults;
           return;
         }
-        await this.events.subscribe("panel:runtimeLeaseChanged");
-        await this.events.subscribe("panel-tree-invalidated");
-        await this.events.subscribe("panel-presentation-changed");
-        await this.events.subscribe("panel:executionActivated");
+        await this.events.subscribeAll([
+          "panel:runtimeLeaseChanged",
+          "panel-tree-invalidated",
+          "panel-presentation-changed",
+          "panel:executionActivated",
+        ]);
         if (this.disposed || signal.aborted) {
           await deferredResults;
           return;
         }
         this.registerPanelRecoveryHandlers();
-        const [profile, host] = await deferredResults;
+        const [profile, host, snapshot] = await deferredResults;
         if (this.disposed || signal.aborted) return;
         if (profile.status === "rejected") {
           console.warn(
             "[ShellClient] Deferred account profile load failed",
             profile.reason,
+          );
+        }
+        if (snapshot.status === "rejected") {
+          console.warn(
+            "[ShellClient] Initial startup snapshot could not be saved",
+            snapshot.reason,
           );
         }
         if (host.status === "rejected") throw host.reason;
