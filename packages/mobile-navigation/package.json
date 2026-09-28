@@ -3,32 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Mobile navigation with a coordinated, patched URL-query dependency chain",
+  "description": "Mobile navigation with coordinated React Navigation dependencies",
   "exports": {
     ".": "./src/index.ts"
   },
-  "vibestudio": {
-    "dependencyResolution": {
-      "overrides": {
-        "@react-navigation/core": "7.21.13",
-        "query-string": "^9.5.1"
-      },
-      "patches": {
-        "@react-navigation/core@7.21.13": {
-          "path": "patches/@react-navigation__core@7.21.13.patch",
-          "roots": [
-            "@react-navigation/native",
-            "@react-navigation/drawer",
-            "@react-navigation/stack"
-          ]
-        }
-      }
-    }
-  },
   "dependencies": {
-    "@react-navigation/native": "^7.3.18",
-    "@react-navigation/drawer": "^7.13.10",
-    "@react-navigation/stack": "^7.10.24"
+    "@react-navigation/native": "^7.4.1",
+    "@react-navigation/drawer": "^7.14.2",
+    "@react-navigation/stack": "^7.11.2"
   },
   "peerDependencies": {
     "react": "~19.0.0",
