@@ -233,7 +233,7 @@ export class ImagesDO extends DurableObjectBase {
   }
 
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -310,7 +310,7 @@ export class ImagesDO extends DurableObjectBase {
     return this.getJob(id);
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -323,7 +323,7 @@ export class ImagesDO extends DurableObjectBase {
     return JSON.parse(String(row["job_json"])) as ImageGenerationJob;
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -337,7 +337,7 @@ export class ImagesDO extends DurableObjectBase {
     return cancelled;
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -357,7 +357,7 @@ export class ImagesDO extends DurableObjectBase {
     return retried;
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -376,7 +376,7 @@ export class ImagesDO extends DurableObjectBase {
     await this.reconcileRetentions();
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -391,7 +391,7 @@ export class ImagesDO extends DurableObjectBase {
     return row.asset;
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -403,7 +403,7 @@ export class ImagesDO extends DurableObjectBase {
     return { asset, base64 };
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -435,7 +435,7 @@ export class ImagesDO extends DurableObjectBase {
     });
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -454,7 +454,7 @@ export class ImagesDO extends DurableObjectBase {
     });
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -473,7 +473,7 @@ export class ImagesDO extends DurableObjectBase {
     });
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -535,7 +535,7 @@ export class ImagesDO extends DurableObjectBase {
     return direction;
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -552,7 +552,7 @@ export class ImagesDO extends DurableObjectBase {
     return JSON.parse(String(row["direction_json"])) as ArtDirection;
   }
   @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
-    principals: ["host", "user", "code", "session", "mission"],
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
