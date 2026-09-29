@@ -53,7 +53,7 @@ state, service workers, DOs, or server build caches — reset only the layer the
 experiment calls cold.
 
 For a workspace-panel reload, use the canonical helper. It profiles the host
-across runtime replacement; CDP profiles cannot span two page incarnations.
+across renderer replacement; CDP profiles cannot span two page incarnations.
 Acquire a fresh page afterward for browser interaction profiling:
 
 ```ts
@@ -65,7 +65,8 @@ try {
     label: "panel reload",
   });
   // The report measures host resources and wall time through boot readiness.
-  // Workspace code reload replaces the runtime: before/after attempt IDs differ.
+  // Reload preserves the runtime attempt, immutable build, and application storage.
+  // Use handle.rebuild() to adopt source changes into a new runtime attempt.
   return result;
 } finally {
   await handle.archive().catch(() => undefined);
@@ -98,6 +99,14 @@ source bytes as one total.
 Use bundle attribution before splitting code. Confirm allegedly unused imports
 with coverage or ownership evidence. Request executable module contents only in
 a separate, justified source-attribution investigation.
+
+Retain the baseline profile before editing, then repeat the same profiling
+options on the exact edited context, including `verifyCache: true`. Compare
+the same target's initial payload rather than a changed artifact count or
+dependency count. Keep required runtime peers even when the panel source does
+not import them directly. Verify the final candidate, commit its complete
+application chain, and reobserve clean status at that exact event before
+reporting the optimization as saved.
 
 ## Host, worker, and startup measurements
 

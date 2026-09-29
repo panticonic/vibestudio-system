@@ -551,7 +551,7 @@ describe("createServerSupervisor", () => {
     harness.models.set("toy", modelRecord("toy"));
 
     await harness.supervisor.ensureLoaded("toy");
-    expect(harness.supervisor.status().main).toMatchObject({
+    expect((await harness.supervisor.status()).main).toMatchObject({
       state: "running",
       loadedModels: ["toy"],
     });
@@ -569,7 +569,7 @@ describe("createServerSupervisor", () => {
     expect(readFileSync(join(harness.rootDir, "router-preset.ini"), "utf8")).toContain(
       "[new-model]"
     );
-    expect(harness.supervisor.status().main).toMatchObject({
+    expect((await harness.supervisor.status()).main).toMatchObject({
       state: "running",
       loadedModels: ["new-model"],
     });
@@ -585,7 +585,7 @@ describe("createServerSupervisor", () => {
       lastSpawn(harness, "utility").exit(1);
       await harness.timers.advance(backoffFor(index + 1, "utility"));
     }
-    expect(harness.supervisor.status().utility.state).toBe("running");
+    expect((await harness.supervisor.status()).utility.state).toBe("running");
     expect(harness.spawns.filter((spawn) => serverKind(spawn) === "utility")).toHaveLength(7);
 
     await harness.supervisor.ensureLoaded("toy");
@@ -595,7 +595,7 @@ describe("createServerSupervisor", () => {
       if (index < 4) await harness.timers.advance(backoffFor(index + 1, "main"));
     }
 
-    const mainState = harness.supervisor.status().main;
+    const mainState = (await harness.supervisor.status()).main;
     expect(mainState.state).toBe("error");
     if (mainState.state === "error") expect(mainState.logTail.at(-1)).toContain("main failure 4");
   });
@@ -626,8 +626,8 @@ describe("createServerSupervisor", () => {
     expect(harness.spawns.filter((spawn) => serverKind(spawn) === "utility")).toHaveLength(
       utilitySpawnCount
     );
-    expect(harness.supervisor.status().main.state).toBe("stopped");
-    expect(harness.supervisor.status().utility.state).toBe("stopped");
+    expect((await harness.supervisor.status()).main.state).toBe("stopped");
+    expect((await harness.supervisor.status()).utility.state).toBe("stopped");
   });
 
   it("lets an attached workspace re-warm an owner server after idle unload", async () => {
@@ -635,14 +635,30 @@ describe("createServerSupervisor", () => {
     const owner = makeHarness({ rootDir, workspaceId: "owner-ws" });
     await owner.supervisor.ensureLoaded(FALLBACK_MODEL.slug);
     await owner.timers.advance(15 * 60_000);
-    expect(owner.supervisor.status().utility.state).toBe("stopped");
+    expect((await owner.supervisor.status()).utility.state).toBe("stopped");
 
     const attached = makeHarness({ rootDir, workspaceId: "attached-ws" });
     await attached.supervisor.ensureLoaded(FALLBACK_MODEL.slug);
 
     expect(attached.spawns).toHaveLength(0);
     expect(owner.spawns.filter((spawn) => serverKind(spawn) === "utility")).toHaveLength(2);
-    expect(owner.supervisor.status().utility.state).toBe("running");
+    expect((await owner.supervisor.status()).utility.state).toBe("running");
+  });
+
+  it("reads serving state from the owner across attached workspace observations", async () => {
+    const rootDir = tempRoot();
+    const owner = makeHarness({ rootDir, workspaceId: "owner-ws" });
+    await owner.supervisor.ensureLoaded(FALLBACK_MODEL.slug);
+    const attached = makeHarness({ rootDir, workspaceId: "attached-ws" });
+    await attached.supervisor.activate();
+    expect(attached.supervisor.role()).toBe("attached");
+    expect((await attached.supervisor.status()).utility).toMatchObject({ state: "running" });
+    expect(await attached.supervisor.status()).toEqual(await owner.supervisor.status());
+    await owner.timers.advance(15 * 60_000);
+    expect((await attached.supervisor.status()).utility.state).toBe("stopped");
+    await attached.supervisor.ensureLoaded(FALLBACK_MODEL.slug);
+    expect((await attached.supervisor.status()).utility.state).toBe("running");
+    expect(attached.spawns).toHaveLength(0);
   });
 
   it("keeps only the last 500 log lines and returns requested tails", async () => {

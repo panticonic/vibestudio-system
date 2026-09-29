@@ -33,7 +33,7 @@ selection or performance depends on the machine.
 
 Downloading model weights is a large persistent effect. Do it only when the
 user asked to install, download, prepare, or run a model that is not installed.
-Start an offered one-click model's idempotent installation with its exact ref:
+Complete an offered one-click model's idempotent installation with its exact ref:
 
 ```ts
 await services.extensions.invoke("@workspace-extensions/local-models", "installModel", [
@@ -41,10 +41,18 @@ await services.extensions.invoke("@workspace-extensions/local-models", "installM
 ]);
 ```
 
-A returned job means the transfer is in progress; `null` means the current
-artifact was already present. `listModels` is the bounded progress/readiness
-surface. Do not start parallel duplicate downloads, invent a catalog slug, or
-remove a successfully installed model as cleanup.
+The call waits for transfer and executable validation. A returned job records
+the completed transfer; `null` means the current artifact was already present
+and its validation succeeded. Installation failures reject the call. `listModels`
+and `status` expose progress during installation; raw download jobs started by
+other clients remain in progress until their transfer completes. Do not start
+parallel duplicate downloads, invent a catalog slug, or remove a successfully
+installed model as cleanup.
+
+Before spawning a local-model child, confirm that its exact row is `startable`
+or `ready`. A download job is not an executable model: check its progress through
+`listModels`, and report a failed or incomplete installation honestly. Do not
+delegate to a downloading model and suspend expecting that child to install it.
 
 ## Run a task on the local model
 
@@ -55,8 +63,8 @@ are self-contained; the child's durable workspace context still derives from
 the parent. Use `mode: "fork"` only when the local child needs the parent's
 conversation trajectory. A local child cannot reuse a cloud provider's context
 cache, so forking across that model boundary carries input without the cache
-savings of a compatible same-model fork. The runtime joins an in-progress
-one-click download, starts the correct server, and injects loopback authentication
+savings of a compatible same-model fork. The runtime starts the installed
+model's server and injects loopback authentication
 at the trusted execution edge.
 
 Continue useful foreground work, then suspend while the child runs. Do not poll

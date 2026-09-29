@@ -5,7 +5,7 @@
   "type": "module",
   "vibestudio": {
     "title": "System Development",
-    "icon": "🛠️",
+    "icon": "\ud83d\udee0\ufe0f",
     "kind": "worker",
     "entry": "index.ts",
     "durable": {
@@ -113,15 +113,6 @@
         },
         {
           "capability": "development.native.session.retire",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "critical",
-          "evidence": "bounded-dynamic"
-        },
-        {
-          "capability": "development.native.build.retire",
           "resource": {
             "kind": "prefix",
             "prefix": ""

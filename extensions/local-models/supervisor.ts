@@ -62,9 +62,10 @@ export interface SupervisorDeps {
 
 export type SupervisorAdminCommand =
   | { kind: "ensure-loaded"; slug: string }
-  | { kind: "restart"; server: ServerKind };
+  | { kind: "restart"; server: ServerKind }
+  | { kind: "status" };
 
-export type SupervisorAdminResult = { baseUrl: string } | { ok: true };
+export type SupervisorAdminResult = { baseUrl: string } | { ok: true } | { servers: Record<ServerKind, ServerState> };
 
 export interface SupervisorAdminTransport {
   listen(
@@ -125,7 +126,7 @@ export function createServerSupervisor(deps: SupervisorDeps): {
   activate(): Promise<void>;
   role(): OwnershipRole;
   ownerInfo(): OwnerInfo | null;
-  status(): Record<ServerKind, ServerState>;
+  status(): Promise<Record<ServerKind, ServerState>>;
   ensureLoaded(slug: string): Promise<{ baseUrl: string }>;
   validateModel(slug: string): Promise<{ baseUrl: string }>;
   apiKey(): Promise<string>;
@@ -193,7 +194,7 @@ class ServerSupervisor {
     activate(): Promise<void>;
     role(): OwnershipRole;
     ownerInfo(): OwnerInfo | null;
-    status(): Record<ServerKind, ServerState>;
+    status(): Promise<Record<ServerKind, ServerState>>;
     ensureLoaded(slug: string): Promise<{ baseUrl: string }>;
     validateModel(slug: string): Promise<{ baseUrl: string }>;
     apiKey(): Promise<string>;
@@ -451,7 +452,22 @@ class ServerSupervisor {
     return this.readApiKeyFile();
   }
 
-  private status(): Record<ServerKind, ServerState> {
+  private async status(): Promise<Record<ServerKind, ServerState>> {
+    await this.activate();
+    if (this.roleValue === "attached") {
+      await this.ensureAttachedOwnerAlive();
+      if (this.roleValue === "attached") {
+        const result = await this.requestOwner({ kind: "status" });
+        if (!("servers" in result) || !isServerStates(result.servers)) {
+          throw new Error("local-models owner returned an invalid status response");
+        }
+        return result.servers;
+      }
+    }
+    return this.localStatus();
+  }
+
+  private localStatus(): Record<ServerKind, ServerState> {
     return {
       utility: this.currentState("utility"),
       main: this.currentState("main"),
@@ -670,6 +686,7 @@ class ServerSupervisor {
     if (command.kind === "ensure-loaded") {
       return this.ensureLoadedAsOwner(normalizeSlug(command.slug));
     }
+    if (command.kind === "status") return { servers: this.localStatus() };
     await this.restartAsOwner(command.server);
     return { ok: true };
   }
@@ -1488,6 +1505,7 @@ function parseAdminCommand(value: unknown): SupervisorAdminCommand {
   if (!isRecord(value) || typeof value["kind"] !== "string") {
     throw new Error("invalid admin command");
   }
+  if (value["kind"] === "status" && Object.keys(value).length === 1) return { kind: "status" };
   if (
     value["kind"] === "ensure-loaded" &&
     typeof value["slug"] === "string" &&
@@ -1505,7 +1523,26 @@ function parseAdminCommand(value: unknown): SupervisorAdminCommand {
 }
 
 function isAdminResult(value: unknown): value is SupervisorAdminResult {
-  return isRecord(value) && (typeof value["baseUrl"] === "string" || value["ok"] === true);
+  return isRecord(value) && (typeof value["baseUrl"] === "string" || value["ok"] === true || isServerStates(value["servers"]));
+}
+
+function isServerStates(value: unknown): value is Record<ServerKind, ServerState> {
+  return isRecord(value) && Object.keys(value).length === 2 &&
+    isServerState(value["utility"]) && isServerState(value["main"]);
+}
+
+function isServerState(value: unknown): value is ServerState {
+  if (!isRecord(value)) return false;
+  switch (value["state"]) {
+    case "stopped": case "starting": return Object.keys(value).length === 1;
+    case "running": return validPort(value["port"]) &&
+      Array.isArray(value["loadedModels"]) && value["loadedModels"].every((model) => typeof model === "string") &&
+      typeof value["uptimeMs"] === "number" && Number.isFinite(value["uptimeMs"]) && value["uptimeMs"] >= 0;
+    case "backoff": return typeof value["attempt"] === "number" && Number.isInteger(value["attempt"]) && value["attempt"] > 0 &&
+      typeof value["nextRetryMs"] === "number" && Number.isFinite(value["nextRetryMs"]) && value["nextRetryMs"] >= 0;
+    case "error": return typeof value["message"] === "string" && Array.isArray(value["logTail"]) && value["logTail"].every((line) => typeof line === "string");
+    default: return false;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

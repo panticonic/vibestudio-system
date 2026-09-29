@@ -11,6 +11,7 @@
  * (GGUF library/downloads) · supervisor.ts (servers + single-owner lock).
  */
 
+import type { ExtensionInvocation } from "@vibestudio/extension";
 import { execFile, spawn as nodeSpawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { promises as fs } from "node:fs";
@@ -34,7 +35,11 @@ import type {
 } from "@workspace/model-catalog/localModels";
 import { createHardwareProfiler } from "./hardware.js";
 import { createEngineInstaller } from "./engine.js";
-import { createModelLibrary, estimateFit, isCurrentFallbackRecord } from "./library.js";
+import {
+  createModelLibrary,
+  estimateFit,
+  isCurrentFallbackRecord,
+} from "./library.js";
 import { createServerSupervisor } from "./supervisor.js";
 import { runtimeContextLengthFor } from "./runtime-profiles.js";
 import { runModelBenchmark } from "./benchmark.js";
@@ -101,12 +106,15 @@ const CURATED_CATALOG: CuratedModel[] = [
       "cpu-min": "Q4_K_M",
     },
     sha256ByQuant: {
-      Q4_K_M: "79fdf00351b46cf26f020aead28d01889886be87c55fa0eb907e6f9b00bfee14",
-      Q5_K_M: "babb80c3249e1578e47d481bf494844a83b4cbfead6fc614a6450908b0f60c65",
+      Q4_K_M:
+        "79fdf00351b46cf26f020aead28d01889886be87c55fa0eb907e6f9b00bfee14",
+      Q5_K_M:
+        "babb80c3249e1578e47d481bf494844a83b4cbfead6fc614a6450908b0f60c65",
       Q8_0: "36587fdf27bdfc69caf2637273679a0870ec155162161bde6fd16e8c70bdb757",
     },
     toolsCapable: true,
-    blurb: "The local agent fallback: compact, tool-capable, and tuned for multi-step work.",
+    blurb:
+      "The local agent fallback: compact, tool-capable, and tuned for multi-step work.",
   },
   {
     slug: DEFAULT_MODEL.slug,
@@ -115,7 +123,8 @@ const CURATED_CATALOG: CuratedModel[] = [
     quantByTier: { "gpu-large": DEFAULT_MODEL.quant },
     sha256ByQuant: { [DEFAULT_MODEL.quant]: DEFAULT_MODEL.sha256 },
     toolsCapable: true,
-    blurb: "The preferred local agent model for long-horizon coding and tool use.",
+    blurb:
+      "The preferred local agent model for long-horizon coding and tool use.",
   },
   {
     slug: "qwen3.5-4b",
@@ -128,8 +137,10 @@ const CURATED_CATALOG: CuratedModel[] = [
       "cpu-strong": "Q4_K_M",
     },
     sha256ByQuant: {
-      Q4_K_M: "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
-      Q5_K_M: "8814232b85594dcd46c50e5b8b29324a7efe9e746edbe8a3d1df3d3fce7aad39",
+      Q4_K_M:
+        "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+      Q5_K_M:
+        "8814232b85594dcd46c50e5b8b29324a7efe9e746edbe8a3d1df3d3fce7aad39",
       Q8_0: "10cc391b403021dd11c614679d2fd92f611c3681d29e29651b717316965d61e1",
     },
     toolsCapable: true,
@@ -141,7 +152,8 @@ const CURATED_CATALOG: CuratedModel[] = [
     hfRepo: "unsloth/Qwen3.5-9B-GGUF",
     quantByTier: { "gpu-large": "Q8_0", "gpu-mid": "Q4_K_M" },
     sha256ByQuant: {
-      Q4_K_M: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+      Q4_K_M:
+        "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
       Q8_0: "809626574d0cb43d4becfa56169980da2bb448f2299270f7be443cb89d0a6ae4",
     },
     toolsCapable: true,
@@ -168,15 +180,13 @@ interface DownloadModelRequest {
   slug?: string;
 }
 
-interface ExtensionInvocationLike {
-  caller?: { kind?: string; id?: string };
-  userlandCaller?: { kind?: string; id?: string };
-}
-
 /** Structural slice of ExtensionContext we use (git-bridge precedent: keep
  *  the extension decoupled from host packages via structural typing). */
 interface Ctx {
-  log: { info(msg: string, data?: unknown): void; warn?(msg: string, data?: unknown): void };
+  log: {
+    info(msg: string, data?: unknown): void;
+    warn?(msg: string, data?: unknown): void;
+  };
   emit(event: string, payload: unknown): void;
   health?: {
     healthy(detail?: unknown): void;
@@ -184,7 +194,7 @@ interface Ctx {
     unhealthy(detail: unknown): void;
   };
   invocation?: {
-    current(): ExtensionInvocationLike | null;
+    current(): ExtensionInvocation | null;
     signal?(): AbortSignal | null;
   };
   workspace?: { getInfo(): Promise<{ id: string }> };
@@ -222,8 +232,13 @@ function cleanEnv(): Record<string, string> {
 function execAdapter(
   cmd: string,
   args: string[],
-  opts?: { timeoutMs?: number; env?: Record<string, string> }
-): Promise<{ ok: boolean; stdout: string; stderr: string; code: number | null }> {
+  opts?: { timeoutMs?: number; env?: Record<string, string> },
+): Promise<{
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  code: number | null;
+}> {
   return new Promise((resolve) => {
     execFile(
       cmd,
@@ -240,8 +255,13 @@ function execAdapter(
             : error
               ? null
               : 0;
-        resolve({ ok: !error, stdout: String(stdout), stderr: String(stderr), code });
-      }
+        resolve({
+          ok: !error,
+          stdout: String(stdout),
+          stderr: String(stderr),
+          code,
+        });
+      },
     );
   });
 }
@@ -254,7 +274,7 @@ function spawnAdapter(
     onExit(code: number | null): void;
     onStdout(line: string): void;
     onStderr(line: string): void;
-  }
+  },
 ): { pid: number; kill(signal?: string): void } {
   const child = nodeSpawn(bin, args, {
     env: { ...cleanEnv(), ...opts.env },
@@ -277,32 +297,42 @@ function spawnAdapter(
 }
 
 function jsonLineStream<T>(
-  subscribe: (push: (value: T) => void, end: (error?: string) => void) => () => void
+  subscribe: (
+    push: (value: T) => void,
+    end: (error?: string) => void,
+  ) => () => void,
 ): Response {
   const encoder = new TextEncoder();
   let cleanup: (() => void) | null = null;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       cleanup = subscribe(
-        (value) => controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)),
+        (value) =>
+          controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)),
         (error) => {
-          if (error) controller.enqueue(encoder.encode(`${JSON.stringify({ error })}\n`));
+          if (error)
+            controller.enqueue(
+              encoder.encode(`${JSON.stringify({ error })}\n`),
+            );
           controller.close();
           cleanup?.();
-        }
+        },
       );
     },
     cancel() {
       cleanup?.();
     },
   });
-  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson" } });
+  return new Response(stream, {
+    headers: { "Content-Type": "application/x-ndjson" },
+  });
 }
 
 export async function activate(ctx: Ctx) {
   const rootDir = defaultRootDir();
   await fs.mkdir(rootDir, { recursive: true });
-  const log = (msg: string, data?: unknown) => ctx.log.info(`local-models: ${msg}`, data);
+  const log = (msg: string, data?: unknown) =>
+    ctx.log.info(`local-models: ${msg}`, data);
   const emit = (event: LocalModelsEvent) => {
     try {
       ctx.emit(event.kind, event);
@@ -359,7 +389,7 @@ export async function activate(ctx: Ctx) {
     log,
     emit: (event) => {
       emit(event);
-      if (event.kind === "server.state") reportHealth();
+      if (event.kind === "server.state") void reportHealth();
     },
     engines: () => engineState,
     fallbackModel: () => library.get(FALLBACK_MODEL.slug),
@@ -380,7 +410,7 @@ export async function activate(ctx: Ctx) {
    *  utility server is normal, not degraded. Healthy = engines installed and
    *  the owner lock resolved; degraded during install; unhealthy only if the
    *  engine install failed or a demanded server hit its terminal error. */
-  function reportHealth(): void {
+  async function reportHealth(): Promise<void> {
     if (!ctx.health) return;
     if (bootstrapStage === "error") {
       ctx.health.unhealthy({ reason: bootstrapError, stage: "bootstrap" });
@@ -393,7 +423,12 @@ export async function activate(ctx: Ctx) {
     // A server only reaches "error" after a caller demanded it and it failed
     // its retry budget — surface that as degraded (the floor is best-effort,
     // cloud providers may still be serving), never as a hard unhealthy.
-    const utility = supervisor.status().utility;
+    let utility: ServerState;
+    try { utility = (await supervisor.status()).utility; }
+    catch (error) {
+      ctx.health.degraded({ stage: "runtime-status", reason: error instanceof Error ? error.message : String(error) });
+      return;
+    }
     if (utility.state === "error") {
       ctx.health.degraded({ reason: utility.message, server: "utility" });
       return;
@@ -403,7 +438,10 @@ export async function activate(ctx: Ctx) {
 
   async function loadCachedProfile(): Promise<HardwareProfile | null> {
     try {
-      const raw = await fs.readFile(path.join(rootDir, "hardware.json"), "utf8");
+      const raw = await fs.readFile(
+        path.join(rootDir, "hardware.json"),
+        "utf8",
+      );
       return JSON.parse(raw) as HardwareProfile;
     } catch (error) {
       if (isNodeErrorWithCode(error, "ENOENT")) return null;
@@ -422,7 +460,10 @@ export async function activate(ctx: Ctx) {
     const probed = await profiler.probe();
     profile = probed;
     try {
-      await fs.writeFile(path.join(rootDir, "hardware.json"), JSON.stringify(probed, null, 2));
+      await fs.writeFile(
+        path.join(rootDir, "hardware.json"),
+        JSON.stringify(probed, null, 2),
+      );
     } catch (error) {
       log("hardware profile cache write failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -456,7 +497,7 @@ export async function activate(ctx: Ctx) {
       log("bootstrap failed", { error: bootstrapError });
       throw err instanceof Error ? err : new Error(bootstrapError);
     } finally {
-      reportHealth();
+      await reportHealth();
     }
   }
 
@@ -469,7 +510,9 @@ export async function activate(ctx: Ctx) {
 
   /** Normalize a "local:slug" or bare "slug" ref to its bare slug. */
   function bareSlug(modelId: string): string {
-    return modelId.startsWith("local:") ? modelId.slice("local:".length) : modelId;
+    return modelId.startsWith("local:")
+      ? modelId.slice("local:".length)
+      : modelId;
   }
 
   /** Release this caller's wait when its RPC is cancelled. Model bootstrap is
@@ -479,7 +522,9 @@ export async function activate(ctx: Ctx) {
     const signal = ctx.invocation?.signal?.() ?? null;
     if (!signal) return work;
     const abortError = (): Error =>
-      signal.reason instanceof Error ? signal.reason : new Error("local-model invocation aborted");
+      signal.reason instanceof Error
+        ? signal.reason
+        : new Error("local-model invocation aborted");
     if (signal.aborted) throw abortError();
     return new Promise<T>((resolve, reject) => {
       const onAbort = () => reject(abortError());
@@ -492,7 +537,7 @@ export async function activate(ctx: Ctx) {
         (error) => {
           signal.removeEventListener("abort", onAbort);
           reject(error);
-        }
+        },
       );
     });
   }
@@ -503,7 +548,10 @@ export async function activate(ctx: Ctx) {
   if (process.env["VIBESTUDIO_EXTENSION_SMOKE"] !== "1") {
     void ensureBootstrap().catch(() => {});
   }
-  const benchmarkRuns = new Map<string, Promise<{ tokensPerSec: number } | null>>();
+  const benchmarkRuns = new Map<
+    string,
+    Promise<{ tokensPerSec: number } | null>
+  >();
   const addValidationRuns = new Map<string, Promise<void>>();
 
   function hasRecentBenchmark(record: ModelRecord | null): boolean {
@@ -518,7 +566,7 @@ export async function activate(ctx: Ctx) {
 
   async function ensureLoadedInternal(
     modelId: string,
-    options: { scheduleFallbackBenchmark?: boolean } = {}
+    options: { scheduleFallbackBenchmark?: boolean } = {},
   ): Promise<{ baseUrl: string }> {
     await awaitInvocation(ensureBootstrap());
     const slug = bareSlug(modelId);
@@ -528,7 +576,8 @@ export async function activate(ctx: Ctx) {
         await awaitInvocation(validateAddedModel(slug));
       } else if (fallback.runtimeValidation?.status === "error") {
         throw new Error(
-          fallback.runtimeValidation.error ?? `Local model ${slug} failed installation validation`
+          fallback.runtimeValidation.error ??
+            `Local model ${slug} failed installation validation`,
         );
       }
       if (options.scheduleFallbackBenchmark) {
@@ -541,7 +590,8 @@ export async function activate(ctx: Ctx) {
       }
       if (record?.runtimeValidation?.status === "error") {
         throw new Error(
-          record.runtimeValidation.error ?? `Local model ${slug} failed installation validation`
+          record.runtimeValidation.error ??
+            `Local model ${slug} failed installation validation`,
         );
       }
     }
@@ -554,10 +604,15 @@ export async function activate(ctx: Ctx) {
     const record = await library.get(slug);
     // Records created before add-time validation are preconfigured models:
     // they remain trusted and are never probed during startup or invocation.
-    if (!record?.runtimeValidation || record.runtimeValidation.status === "ready") return;
+    if (
+      !record?.runtimeValidation ||
+      record.runtimeValidation.status === "ready"
+    )
+      return;
     if (record.runtimeValidation.status === "error") {
       throw new Error(
-        record.runtimeValidation.error ?? `Local model ${slug} failed installation validation`
+        record.runtimeValidation.error ??
+          `Local model ${slug} failed installation validation`,
       );
     }
 
@@ -593,7 +648,7 @@ export async function activate(ctx: Ctx) {
 
   async function benchmarkModelInternal(
     modelId: string,
-    opts: { force?: boolean } = {}
+    opts: { force?: boolean } = {},
   ): Promise<{ tokensPerSec: number } | null> {
     const slug = bareSlug(modelId);
     const existingRun = benchmarkRuns.get(slug);
@@ -604,7 +659,11 @@ export async function activate(ctx: Ctx) {
     const run = (async () => {
       const record = await library.get(slug);
       const recentBenchmark = record?.benchmark ?? null;
-      if (opts.force !== true && hasRecentBenchmark(record) && recentBenchmark) {
+      if (
+        opts.force !== true &&
+        hasRecentBenchmark(record) &&
+        recentBenchmark
+      ) {
         return { tokensPerSec: recentBenchmark.tokensPerSec };
       }
 
@@ -612,7 +671,8 @@ export async function activate(ctx: Ctx) {
         fetch: globalThis.fetch,
         ensureLoaded: (candidate) => ensureLoadedInternal(candidate),
         apiKey: () => supervisor.apiKey(),
-        setBenchmark: (candidate, result) => library.setBenchmark(candidate, result),
+        setBenchmark: (candidate, result) =>
+          library.setBenchmark(candidate, result),
         now: () => Date.now(),
         log,
       });
@@ -637,29 +697,40 @@ export async function activate(ctx: Ctx) {
     });
   }
 
-  async function finishModelAddition(download: Promise<DownloadJob>): Promise<DownloadJob> {
+  async function finishModelAddition(
+    download: Promise<DownloadJob>,
+  ): Promise<DownloadJob> {
     const job = await download;
     await validateAddedModel(job.slug);
     scheduleBenchmark(job.slug);
     return job;
   }
 
-  function startDownloadWithBenchmark(req: DownloadModelRequest): Promise<DownloadJob> {
+  function startDownloadWithBenchmark(
+    req: DownloadModelRequest,
+  ): Promise<DownloadJob> {
     return finishModelAddition(library.startDownload(req));
   }
 
-  async function startDownloadJobWithBenchmark(req: DownloadModelRequest): Promise<DownloadJob> {
+  async function startDownloadJobWithBenchmark(
+    req: DownloadModelRequest,
+  ): Promise<DownloadJob> {
     const job = await library.startDownloadJob(req);
-    void finishModelAddition(library.startDownload(req)).catch((error: unknown) => {
-      log("model installation validation failed", {
-        slug: job.slug,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    void finishModelAddition(library.startDownload(req)).catch(
+      (error: unknown) => {
+        log("model installation validation failed", {
+          slug: job.slug,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
     return job;
   }
 
-  function matchesDownloadRequest(job: DownloadJob, req: DownloadModelRequest): boolean {
+  function matchesDownloadRequest(
+    job: DownloadJob,
+    req: DownloadModelRequest,
+  ): boolean {
     if (req.slug && job.slug !== req.slug) return false;
     return job.hfRepo === req.hfRepo && job.file === req.file;
   }
@@ -679,9 +750,11 @@ export async function activate(ctx: Ctx) {
 
   function findDownloadForRequest(
     req: DownloadModelRequest,
-    opts: { id?: string | null; ignoreIds?: ReadonlySet<string> } = {}
+    opts: { id?: string | null; ignoreIds?: ReadonlySet<string> } = {},
   ): DownloadJob | null {
-    const matches = library.listDownloads().filter((job) => matchesDownloadRequest(job, req));
+    const matches = library
+      .listDownloads()
+      .filter((job) => matchesDownloadRequest(job, req));
     if (opts.id) return matches.find((job) => job.id === opts.id) ?? null;
     return matches.find((job) => !opts.ignoreIds?.has(job.id)) ?? null;
   }
@@ -690,28 +763,43 @@ export async function activate(ctx: Ctx) {
     return record.slug === FALLBACK_MODEL.slug ? "utility" : "main";
   }
 
-  function baseUrlFor(kind: ServerKind, servers: Record<ServerKind, ServerState>): string {
+  function baseUrlFor(
+    kind: ServerKind,
+    servers: Record<ServerKind, ServerState>,
+  ): string {
     const state = servers[kind];
     if (state.state === "running") return `http://127.0.0.1:${state.port}/v1`;
     const info = supervisor.ownerInfo();
-    const port = info ? (kind === "utility" ? info.ports.utility : info.ports.main) : 0;
+    const port = info
+      ? kind === "utility"
+        ? info.ports.utility
+        : info.ports.main
+      : 0;
     return `http://127.0.0.1:${port}/v1`;
   }
 
   function recordState(
     record: ModelRecord,
     servers: Record<ServerKind, ServerState>,
-    downloads: DownloadJob[]
+    downloads: DownloadJob[],
   ): {
     state: LocalModelEntry["state"];
     download: LocalModelEntry["download"];
     error: string | null;
   } {
-    const download = downloads.find((job) => job.slug === record.slug && !job.error);
+    const download = downloads.find(
+      (job) => job.slug === record.slug && !job.error,
+    );
     if (download) {
-      return { state: "downloading", download: downloadStatus(download), error: null };
+      return {
+        state: "downloading",
+        download: downloadStatus(download),
+        error: null,
+      };
     }
-    const failedDownload = downloads.find((job) => job.slug === record.slug && job.error);
+    const failedDownload = downloads.find(
+      (job) => job.slug === record.slug && job.error,
+    );
     if (failedDownload) {
       return {
         state: "error",
@@ -736,7 +824,9 @@ export async function activate(ctx: Ctx) {
       return {
         state: "error",
         download: null,
-        error: record.runtimeValidation.error ?? "Model installation validation failed",
+        error:
+          record.runtimeValidation.error ??
+          "Model installation validation failed",
       };
     }
     const kind = serverForRecord(record);
@@ -745,15 +835,22 @@ export async function activate(ctx: Ctx) {
       return { state: "error", download: null, error: server.message };
     }
     if (server.state === "running") {
-      const loaded = kind === "utility" || server.loadedModels.includes(record.slug);
-      return { state: loaded ? "ready" : "startable", download: null, error: null };
+      const loaded =
+        kind === "utility" || server.loadedModels.includes(record.slug);
+      return {
+        state: loaded ? "ready" : "startable",
+        download: null,
+        error: null,
+      };
     }
     // Downloaded but the server is cold: startable — ensureLoaded starts the
     // server (and, for the fallback, its lazy load) on demand.
     return { state: "startable", download: null, error: null };
   }
 
-  function downloadStatus(job: DownloadJob): NonNullable<LocalModelEntry["download"]> {
+  function downloadStatus(
+    job: DownloadJob,
+  ): NonNullable<LocalModelEntry["download"]> {
     return {
       progress: job.totalBytes ? job.receivedBytes / job.totalBytes : 0,
       phase: job.phase,
@@ -762,7 +859,9 @@ export async function activate(ctx: Ctx) {
     };
   }
 
-  function oneClickModel(slug: string): typeof DEFAULT_MODEL | typeof FALLBACK_MODEL | null {
+  function oneClickModel(
+    slug: string,
+  ): typeof DEFAULT_MODEL | typeof FALLBACK_MODEL | null {
     if (slug === DEFAULT_MODEL.slug) return DEFAULT_MODEL;
     if (slug === FALLBACK_MODEL.slug) return FALLBACK_MODEL;
     return null;
@@ -770,7 +869,7 @@ export async function activate(ctx: Ctx) {
 
   function shouldOfferOneClickModel(
     model: typeof DEFAULT_MODEL | typeof FALLBACK_MODEL,
-    hw: HardwareProfile | null
+    hw: HardwareProfile | null,
   ): boolean {
     return (
       model.slug === FALLBACK_MODEL.slug ||
@@ -783,18 +882,22 @@ export async function activate(ctx: Ctx) {
     model: typeof DEFAULT_MODEL | typeof FALLBACK_MODEL,
     hw: HardwareProfile | null,
     servers: Record<ServerKind, ServerState>,
-    downloads: DownloadJob[]
+    downloads: DownloadJob[],
   ): LocalModelEntry {
     const server = model.slug === FALLBACK_MODEL.slug ? "utility" : "main";
-    const download = downloads.find((job) => job.slug === model.slug && !job.error);
-    const failure = downloads.find((job) => job.slug === model.slug && job.error);
+    const download = downloads.find(
+      (job) => job.slug === model.slug && !job.error,
+    );
+    const failure = downloads.find(
+      (job) => job.slug === model.slug && job.error,
+    );
     const fit = hw
       ? estimateFit(
           {
             sizeBytes: model.downloadSizeBytes,
             trainedContextLength: model.contextLength,
           },
-          hw
+          hw,
         )
       : {
           fit: "cpu-only" as const,
@@ -835,10 +938,14 @@ export async function activate(ctx: Ctx) {
       library.list(),
       probeHardware(false).catch(() => null),
     ]);
-    const servers = supervisor.status();
+    const servers = await awaitInvocation(supervisor.status());
     const downloads = library.listDownloads();
     const entries = records
-      .filter((record) => record.slug !== FALLBACK_MODEL.slug || isCurrentFallbackRecord(record))
+      .filter(
+        (record) =>
+          record.slug !== FALLBACK_MODEL.slug ||
+          isCurrentFallbackRecord(record),
+      )
       .map((record) => {
         const kind = serverForRecord(record);
         const status = recordState(record, servers, downloads);
@@ -882,9 +989,11 @@ export async function activate(ctx: Ctx) {
   }
 
   async function status(): Promise<LocalModelsStatus> {
-    const servers = supervisor.status();
+    const servers = await awaitInvocation(supervisor.status());
     const storedFallback = await library.get(FALLBACK_MODEL.slug);
-    const fallbackRecord = isCurrentFallbackRecord(storedFallback) ? storedFallback : null;
+    const fallbackRecord = isCurrentFallbackRecord(storedFallback)
+      ? storedFallback
+      : null;
     const utilityRunning = servers.utility.state === "running";
     let diskFreeBytes = 0;
     try {
@@ -914,7 +1023,8 @@ export async function activate(ctx: Ctx) {
           fallbackRecord?.runtimeValidation?.status === "pending"
             ? "installing"
             : fallbackRecord?.runtimeValidation?.status === "error"
-              ? (fallbackRecord.runtimeValidation.error ?? "installation validation failed")
+              ? (fallbackRecord.runtimeValidation.error ??
+                "installation validation failed")
               : fallbackRecord
                 ? null
                 : bootstrapStage === "error"
@@ -927,22 +1037,17 @@ export async function activate(ctx: Ctx) {
     };
   }
 
-  /** getLoopbackAuth caller gate (design §6.3): refuse panels/apps/workers
-   *  outright; among do-kind callers require the agent-vessel allowlist.
-   *  Defense in depth — workspace DOs are trusted units; the key's threat
-   *  model is foreign local processes. */
+  /** Credentials stay in the trusted DO execution plane. Class names do not
+   * grant authority; outbound access requires the host's sealed runtime-use
+   * capability and the provider's current endpoint/key attestation. */
   function assertLoopbackAuthCaller(): void {
     const invocation = ctx.invocation?.current();
-    if (!invocation) return; // direct host invocation (tests, CLI bridge)
-    const caller = invocation.userlandCaller ?? invocation.caller;
-    if (!caller?.kind) return;
-    if (caller.kind !== "do") {
-      throw new Error(`getLoopbackAuth: refused for caller kind "${caller.kind}"`);
-    }
-    const id = caller.id ?? "";
-    const allowlisted = /agent|vessel/iu.test(id);
-    if (!allowlisted) {
-      throw new Error(`getLoopbackAuth: do-kind caller "${id}" is not an agent vessel`);
+    if (!invocation) return; // Direct trusted host calls have no userland invocation.
+    const caller = invocation.chainCaller ?? invocation.caller;
+    if (caller.callerKind !== "do") {
+      throw new Error(
+        `getLoopbackAuth: refused for caller kind "${caller.callerKind}"`,
+      );
     }
   }
 
@@ -964,19 +1069,25 @@ export async function activate(ctx: Ctx) {
     },
 
     /**
-     * Start installation without waiting for the model transfer. The model
-     * remains unavailable to agents until listModels() reports startable/ready.
+     * Complete installation, including transfer and executable validation.
+     * Progress remains observable through listModels/status while this call
+     * waits. Cancellation releases this caller, not the shared installation.
      */
     async installModel(modelId: string): Promise<DownloadJob | null> {
       const slug = bareSlug(modelId);
       const model = oneClickModel(slug);
       if (!model) {
-        throw new Error(`Model ${modelId} is not available for one-click installation`);
+        throw new Error(
+          `Model ${modelId} is not available for one-click installation`,
+        );
       }
       const existing = await library.get(slug);
       if (
-        model.slug === FALLBACK_MODEL.slug ? isCurrentFallbackRecord(existing) : existing !== null
+        model.slug === FALLBACK_MODEL.slug
+          ? isCurrentFallbackRecord(existing)
+          : existing !== null
       ) {
+        await awaitInvocation(validateAddedModel(slug));
         return null;
       }
       await awaitInvocation(ensureBootstrap());
@@ -985,32 +1096,38 @@ export async function activate(ctx: Ctx) {
           rootDir,
           ROOT_LAYOUT.modelsDir,
           ...FALLBACK_MODEL.hfRepo.split("/"),
-          FALLBACK_MODEL.file
+          FALLBACK_MODEL.file,
         );
         try {
           const cached = await fs.stat(cachedFallbackPath);
           if (cached.isFile()) {
-            const record = await library.ensureFallback();
-            await validateAddedModel(record.slug);
+            const record = await awaitInvocation(library.ensureFallback());
+            await awaitInvocation(validateAddedModel(record.slug));
             return null;
           }
         } catch (error) {
           if (!isNodeErrorWithCode(error, "ENOENT")) throw error;
         }
       }
-      return startDownloadJobWithBenchmark({
-        hfRepo: model.hfRepo,
-        file: model.file,
-        expectedSha256: model.sha256,
-        displayName: model.displayName,
-        slug: model.slug,
-      });
+      return awaitInvocation(
+        startDownloadWithBenchmark({
+          hfRepo: model.hfRepo,
+          file: model.file,
+          expectedSha256: model.sha256,
+          displayName: model.displayName,
+          slug: model.slug,
+        }),
+      );
     },
 
-    async getLoopbackAuth(): Promise<{ apiKey: string }> {
+    async getLoopbackAuth(): Promise<{ apiKey: string; origins: string[] }> {
       assertLoopbackAuthCaller();
       await awaitInvocation(ensureBootstrap());
-      return { apiKey: await awaitInvocation(supervisor.apiKey()) };
+      const apiKey = await awaitInvocation(supervisor.apiKey());
+      const origins = Object.values(await awaitInvocation(supervisor.status())).flatMap((server) =>
+        server.state === "running" ? [`http://127.0.0.1:${server.port}`] : [],
+      );
+      return { apiKey, origins };
     },
 
     async getHardwareProfile(refresh?: boolean): Promise<HardwareProfile> {
@@ -1020,14 +1137,14 @@ export async function activate(ctx: Ctx) {
     async searchCatalog(query?: string): Promise<CuratedModel[]> {
       const hw = await probeHardware(false).catch(() => null);
       const tierFiltered = CURATED_CATALOG.filter(
-        (model) => !hw || model.quantByTier[hw.tier] !== undefined
+        (model) => !hw || model.quantByTier[hw.tier] !== undefined,
       );
       if (!query || !query.trim()) return tierFiltered;
       const needle = query.trim().toLowerCase();
       return tierFiltered.filter(
         (model) =>
           model.displayName.toLowerCase().includes(needle) ||
-          model.hfRepo.toLowerCase().includes(needle)
+          model.hfRepo.toLowerCase().includes(needle),
       );
     },
 
@@ -1044,7 +1161,9 @@ export async function activate(ctx: Ctx) {
         let downloadId: string | null = null;
         let lastPushedKey: string | null = null;
         let poll: ReturnType<typeof setInterval> | null = null;
-        const ignoredDownloadIds = new Set(library.listDownloads().map((job) => job.id));
+        const ignoredDownloadIds = new Set(
+          library.listDownloads().map((job) => job.id),
+        );
 
         const stop = (error?: string) => {
           if (closed) return;
@@ -1091,7 +1210,9 @@ export async function activate(ctx: Ctx) {
             pushOnce(job);
             stop();
           })
-          .catch((err) => stop(err instanceof Error ? err.message : String(err)));
+          .catch((err) =>
+            stop(err instanceof Error ? err.message : String(err)),
+          );
         return () => {
           closed = true;
           if (poll) clearInterval(poll);
@@ -1119,10 +1240,14 @@ export async function activate(ctx: Ctx) {
 
     async importDir(dir: string): Promise<ModelRecord[]> {
       const imported = await library.importDir(dir);
-      await Promise.all(imported.map((record) => validateAddedModel(record.slug)));
+      await Promise.all(
+        imported.map((record) => validateAddedModel(record.slug)),
+      );
       emit({ kind: "models.changed" });
       return Promise.all(
-        imported.map(async (record) => (await library.get(record.slug)) ?? record)
+        imported.map(
+          async (record) => (await library.get(record.slug)) ?? record,
+        ),
       );
     },
 
@@ -1133,7 +1258,7 @@ export async function activate(ctx: Ctx) {
 
     async benchmarkModel(
       slug: string,
-      opts?: { force?: boolean }
+      opts?: { force?: boolean },
     ): Promise<{ tokensPerSec: number } | null> {
       return benchmarkModelInternal(slug, opts);
     },
@@ -1143,7 +1268,10 @@ export async function activate(ctx: Ctx) {
     },
 
     /** Plain log tail for panel/CLI consumers that don't stream. */
-    async tailServerLogLines(which: ServerKind, lines?: number): Promise<string[]> {
+    async tailServerLogLines(
+      which: ServerKind,
+      lines?: number,
+    ): Promise<string[]> {
       return supervisor.tailLog(which, lines ?? 200);
     },
 
@@ -1178,7 +1306,9 @@ export async function activate(ctx: Ctx) {
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
-    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code
+    error instanceof Error &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === code
   );
 }
 

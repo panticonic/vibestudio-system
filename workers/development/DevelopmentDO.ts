@@ -9,6 +9,7 @@ import {
   type DevelopmentSession
 } from "@vibestudio/service-schemas/development";
 import type {
+  developmentNativeMethods,
   nativeDevelopmentSessionReceiptSchema,
   nativeDevelopmentTerminalSnapshotSchema,
   preparedNativeBuildSchema
@@ -525,15 +526,16 @@ export class DevelopmentDO extends DurableObjectBase {
       intent: { runId: run.runId }
     });
     if (TERMINAL_RUN_STATES.has(run.state) || run.state === "requires-repair") return run;
-    await this.rpc.call("main", "developmentNative.stopBuild", [
+    const stopped = await this.rpc.call<Pick<DevelopmentRun, "artifact" | "instance" | "hostReadiness" | "client" | "attachedHost">>("main", "developmentNative.stopBuild", [
       { runId: run.runId, snapshotDigest: run.snapshot.snapshotDigest }
     ]);
+    run = this.requireRun(input.runId);
     run = this.store.transitionRun({
       runId: run.runId,
       expected: [run.state],
       state: "stopped",
       terminal: true,
-      hostReadiness: run.target.kind === "isolated-host" ? "stopped" : run.hostReadiness,
+      ...stopped,
       message: "Exact native build stopped"
     });
     return run;
@@ -558,7 +560,9 @@ export class DevelopmentDO extends DurableObjectBase {
         pair: {
           kind: run.snapshot.pair.kind,
           hostRepositoryId: run.snapshot.pair.host.repositoryId,
-          baseRepositoryId: run.snapshot.pair.base.repositoryId
+          baseRepositoryId: run.snapshot.pair.base.repositoryId,
+          personalRepositoryId: run.snapshot.pair.personal.repositoryId,
+          systemRepositoryId: run.snapshot.pair.system.repositoryId
         },
         target: run.target
       }
@@ -726,48 +730,7 @@ export class DevelopmentDO extends DurableObjectBase {
 
   private async reconcileRun(run: DevelopmentRun): Promise<DevelopmentRun> {
     if (TERMINAL_RUN_STATES.has(run.state) || run.state === "requires-repair") return run;
-    let status:
-      | {
-          state: "running";
-          artifact: DevelopmentRun["artifact"];
-          instance: DevelopmentRun["instance"];
-          hostReadiness: DevelopmentRun["hostReadiness"];
-          client: DevelopmentRun["client"];
-          attachedHost: DevelopmentRun["attachedHost"];
-          phases: Array<"installing" | "building">;
-          logs: Array<{ stream: "stdout" | "stderr"; line: string }>;
-        }
-      | {
-          state: "succeeded";
-          artifact: NonNullable<DevelopmentRun["artifact"]>;
-          phases: Array<"installing" | "building">;
-          logs: Array<{ stream: "stdout" | "stderr"; line: string }>;
-          instance: DevelopmentRun["instance"];
-          hostReadiness: DevelopmentRun["hostReadiness"];
-          client: DevelopmentRun["client"];
-          attachedHost: DevelopmentRun["attachedHost"];
-        }
-      | {
-          state: "ready";
-          artifact: NonNullable<DevelopmentRun["artifact"]>;
-          instance: DevelopmentRun["instance"];
-          hostReadiness: DevelopmentRun["hostReadiness"];
-          client: DevelopmentRun["client"];
-          attachedHost: DevelopmentRun["attachedHost"];
-          phases: Array<"installing" | "building">;
-          logs: Array<{ stream: "stdout" | "stderr"; line: string }>;
-        }
-      | {
-          state: "failed";
-          error: string;
-          artifact: DevelopmentRun["artifact"];
-          instance: DevelopmentRun["instance"];
-          hostReadiness: DevelopmentRun["hostReadiness"];
-          client: DevelopmentRun["client"];
-          attachedHost: DevelopmentRun["attachedHost"];
-          phases: Array<"installing" | "building">;
-          logs: Array<{ stream: "stdout" | "stderr"; line: string }>;
-        };
+    let status: z.infer<typeof developmentNativeMethods.inspectBuild.returns>;
     try {
       status = await this.rpc.call("main", "developmentNative.inspectBuild", [
         { runId: run.runId, snapshotDigest: run.snapshot.snapshotDigest }
@@ -794,6 +757,9 @@ export class DevelopmentDO extends DurableObjectBase {
       });
     }
     for (const log of status.logs) this.store.appendEvent(run.runId, "log", log);
+    if (status.state === "stopped") {
+      return this.store.transitionRun({ runId: run.runId, expected: [run.state], state: "stopped", artifact: status.artifact, instance: status.instance ?? undefined, hostReadiness: status.hostReadiness, client: status.client, attachedHost: status.attachedHost, terminal: true, repair: null, message: "Exact native effects stopped" });
+    }
     const phase = status.phases.at(-1);
     if (status.state === "running" && phase && run.state !== phase) {
       run = this.store.transitionRun({
@@ -1109,6 +1075,8 @@ export class DevelopmentDO extends DurableObjectBase {
       run.snapshot.pair.kind !== input.pair.kind ||
       run.snapshot.pair.host.repositoryId !== input.pair.hostRepositoryId ||
       run.snapshot.pair.base.repositoryId !== input.pair.baseRepositoryId ||
+      run.snapshot.pair.personal.repositoryId !== input.pair.personalRepositoryId ||
+      run.snapshot.pair.system.repositoryId !== input.pair.systemRepositoryId ||
       canonicalJson(run.target) !== canonicalJson(input.target)
     ) {
       throw coded("EIDEMPOTENCYDRIFT", "Run id was reused with different intent");

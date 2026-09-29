@@ -23,7 +23,10 @@ interface TestDownloadRequest {
 }
 
 const modelLibraryMock = vi.hoisted(() => {
-  const initialJob = (id = "job-1", request?: TestDownloadRequest): TestDownloadJob => ({
+  const initialJob = (
+    id = "job-1",
+    request?: TestDownloadRequest,
+  ): TestDownloadJob => ({
     id,
     slug: request?.slug ?? "lfm2.5-2.6b",
     hfRepo: request?.hfRepo ?? "LiquidAI/LFM2.5-2.6B-GGUF",
@@ -51,18 +54,25 @@ const modelLibraryMock = vi.hoisted(() => {
       state.downloads = [];
       state.nextDownloadOrdinal = 1;
       pendingDownload = null;
+      state.library.get.mockReset().mockResolvedValue(null);
+      state.library.list.mockReset().mockResolvedValue([]);
       state.library.startDownload.mockClear();
       state.library.startDownloadJob.mockClear();
       state.library.listDownloads.mockClear();
       state.library.setRuntimeValidation.mockClear();
+      state.library.cancelDownload.mockClear();
     },
     library: {
       list: vi.fn<() => Promise<ModelRecord[]>>(async () => []),
-      get: vi.fn<(slug: string) => Promise<ModelRecord | null>>(async () => null),
+      get: vi.fn<(slug: string) => Promise<ModelRecord | null>>(
+        async () => null,
+      ),
       ensureFallback: vi.fn<() => Promise<unknown>>(async () => {
         throw new Error("not used");
       }),
-      startDownload: vi.fn((request: TestDownloadRequest) => ensureDownload(request).promise),
+      startDownload: vi.fn(
+        (request: TestDownloadRequest) => ensureDownload(request).promise,
+      ),
       startDownloadJob: vi.fn(async (request: TestDownloadRequest) => ({
         ...ensureDownload(request).job,
       })),
@@ -120,9 +130,18 @@ const supervisorMock = vi.hoisted(() => {
   const state = {
     ensureLoaded: vi.fn(async () => ({ baseUrl: "http://127.0.0.1:8080/v1" })),
     validateModel: vi.fn(async () => {}),
+    status: vi.fn(() => ({
+      utility: { state: "stopped" as string, port: 8080 },
+      main: { state: "stopped" as string, port: 8081 },
+    })),
     reset(): void {
       state.ensureLoaded.mockClear();
       state.validateModel.mockClear();
+      state.status.mockReset();
+      state.status.mockReturnValue({
+        utility: { state: "stopped", port: 8080 },
+        main: { state: "stopped", port: 8081 },
+      });
     },
   };
   return state;
@@ -139,7 +158,7 @@ vi.mock("./library.js", () => ({
       record !== null &&
       record.slug === FALLBACK_MODEL.slug &&
       record.hfRepo === FALLBACK_MODEL.hfRepo &&
-      path.basename(record.file) === FALLBACK_MODEL.file
+      path.basename(record.file) === FALLBACK_MODEL.file,
   ),
   estimateFit: vi.fn(() => ({
     fit: "cpu-only",
@@ -178,10 +197,7 @@ vi.mock("./supervisor.js", () => ({
     activate: vi.fn(async () => {}),
     ensureLoaded: supervisorMock.ensureLoaded,
     validateModel: supervisorMock.validateModel,
-    status: vi.fn(() => ({
-      utility: { state: "stopped" },
-      main: { state: "stopped" },
-    })),
+    status: supervisorMock.status,
     ownerInfo: vi.fn(() => null),
     role: vi.fn(() => "owner"),
     apiKey: vi.fn(async () => "test-key"),
@@ -198,7 +214,9 @@ describe("local-models extension", () => {
   let tempRoot = "";
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(path.join(tmpdir(), "vibestudio-local-models-index-"));
+    tempRoot = mkdtempSync(
+      path.join(tmpdir(), "vibestudio-local-models-index-"),
+    );
     vi.stubEnv("VIBESTUDIO_LOCAL_MODELS_DIR", tempRoot);
     modelLibraryMock.reset();
     engineMock.reset();
@@ -275,7 +293,7 @@ describe("local-models extension", () => {
           server: "main",
           reasoningCapable: true,
         }),
-      ])
+      ]),
     );
   });
 
@@ -369,7 +387,9 @@ describe("local-models extension", () => {
       receivedBytes: 25,
     });
 
-    const startedJob = modelLibraryMock.downloads.find((job) => job.id === "job-1")!;
+    const startedJob = modelLibraryMock.downloads.find(
+      (job) => job.id === "job-1",
+    )!;
     modelLibraryMock.downloads = [
       modelLibraryMock.downloads[0]!,
       { ...startedJob, receivedBytes: 100 },
@@ -391,7 +411,10 @@ describe("local-models extension", () => {
       emit: vi.fn(),
     });
 
-    await waitUntil(async () => (await api.status()).fallback.reason === "engine install failed");
+    await waitUntil(
+      async () =>
+        (await api.status()).fallback.reason === "engine install failed",
+    );
     await expect(api.listModels()).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
@@ -401,11 +424,18 @@ describe("local-models extension", () => {
         errorMessage: "engine install failed",
       }),
     ]);
-    await expect(api.ensureLoaded(FALLBACK_MODEL.ref)).rejects.toThrow(/engine install failed/);
+    await expect(api.ensureLoaded(FALLBACK_MODEL.ref)).rejects.toThrow(
+      /engine install failed/,
+    );
 
     engineMock.fail = false;
-    await expect(api.getLoopbackAuth()).resolves.toEqual({ apiKey: "test-key" });
-    expect(engineMock.ensureInstalled.mock.calls.length).toBeGreaterThanOrEqual(3);
+    await expect(api.getLoopbackAuth()).resolves.toEqual({
+      apiKey: "test-key",
+      origins: [],
+    });
+    expect(engineMock.ensureInstalled.mock.calls.length).toBeGreaterThanOrEqual(
+      3,
+    );
     await expect(api.listModels()).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
@@ -416,7 +446,58 @@ describe("local-models extension", () => {
     ]);
   });
 
-  it("installs the fallback explicitly and exposes progress before it becomes usable", async () => {
+  it.each(["panel", "app", "worker", "user"])(
+    "refuses loopback credentials to %s callers",
+    async (callerKind) => {
+      const { activate } = await import("./index.js");
+      const api = await activate({
+        log: { info: vi.fn(), warn: vi.fn() },
+        emit: vi.fn(),
+        invocation: {
+          current: () => ({
+            caller: { callerKind, callerId: "agent-name-is-not-authority" },
+          }),
+        },
+      } as never);
+      await expect(api.getLoopbackAuth()).rejects.toThrow(
+        "refused for caller kind",
+      );
+    },
+  );
+
+  it("attests only currently running endpoints from the owning supervisor", async () => {
+    const { activate } = await import("./index.js");
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+      invocation: {
+        current: () => ({
+          caller: {
+            callerKind: "do",
+            callerId: "do:workers/custom:Processor:test",
+          },
+        }),
+      },
+    } as never);
+    supervisorMock.status.mockReturnValue({
+      utility: { state: "running", port: 8123 },
+      main: { state: "starting", port: 8124 },
+    });
+    await expect(api.getLoopbackAuth()).resolves.toEqual({
+      apiKey: "test-key",
+      origins: ["http://127.0.0.1:8123"],
+    });
+    supervisorMock.status.mockReturnValue({
+      utility: { state: "stopped", port: 8123 },
+      main: { state: "running", port: 8125 },
+    });
+    await expect(api.getLoopbackAuth()).resolves.toEqual({
+      apiKey: "test-key",
+      origins: ["http://127.0.0.1:8125"],
+    });
+  });
+
+  it("awaits installation while exposing progress before it becomes usable", async () => {
     const { activate } = await import("./index.js");
     const api = await activate({
       log: { info: vi.fn(), warn: vi.fn() },
@@ -430,11 +511,15 @@ describe("local-models extension", () => {
       }),
     ]);
 
-    await expect(api.installModel(FALLBACK_MODEL.ref)).resolves.toMatchObject({
-      slug: FALLBACK_MODEL.slug,
-      hfRepo: FALLBACK_MODEL.hfRepo,
-      file: FALLBACK_MODEL.file,
+    let completed = false;
+    const installation = api.installModel(FALLBACK_MODEL.ref).then((job) => {
+      completed = true;
+      return job;
     });
+    await vi.waitFor(() =>
+      expect(modelLibraryMock.library.startDownload).toHaveBeenCalledOnce(),
+    );
+    expect(completed).toBe(false);
     await expect(api.listModels()).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
@@ -447,6 +532,32 @@ describe("local-models extension", () => {
         }),
       }),
     ]);
+    const pending = fallbackRecord({
+      status: "pending",
+      error: null,
+      validatedAt: null,
+    });
+    modelLibraryMock.library.get.mockResolvedValue(pending);
+    let releaseValidation!: () => void;
+    supervisorMock.validateModel.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseValidation = resolve;
+        }),
+    );
+    const finalJob = { ...modelLibraryMock.downloads[0]!, receivedBytes: 100 };
+    modelLibraryMock.downloads = [];
+    modelLibraryMock.resolveDownload(finalJob);
+    await vi.waitFor(() =>
+      expect(supervisorMock.validateModel).toHaveBeenCalledOnce(),
+    );
+    expect(completed).toBe(false);
+    releaseValidation();
+    await expect(installation).resolves.toMatchObject(finalJob);
+    expect(modelLibraryMock.library.setRuntimeValidation).toHaveBeenCalledWith(
+      FALLBACK_MODEL.slug,
+      expect.objectContaining({ status: "ready" }),
+    );
   });
 
   it("installs the preferred Qwen model with its pinned artifact identity", async () => {
@@ -457,16 +568,65 @@ describe("local-models extension", () => {
       emit: vi.fn(),
     });
 
-    await expect(api.installModel(DEFAULT_MODEL.ref)).resolves.toMatchObject({
-      slug: DEFAULT_MODEL.slug,
-      hfRepo: DEFAULT_MODEL.hfRepo,
-      file: DEFAULT_MODEL.file,
-    });
-    expect(modelLibraryMock.library.startDownloadJob).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expectedSha256: DEFAULT_MODEL.sha256,
-      })
+    const installation = api.installModel(DEFAULT_MODEL.ref);
+    await vi.waitFor(() =>
+      expect(modelLibraryMock.library.startDownload).toHaveBeenCalledOnce(),
     );
+    expect(modelLibraryMock.library.startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedSha256: DEFAULT_MODEL.sha256 }),
+    );
+    const finalJob = { ...modelLibraryMock.downloads[0]!, receivedBytes: 100 };
+    modelLibraryMock.resolveDownload(finalJob);
+    await expect(installation).resolves.toMatchObject(finalJob);
+  });
+
+  it("rejects an existing model whose installation validation failed", async () => {
+    modelLibraryMock.library.get.mockResolvedValue(
+      fallbackRecord({
+        status: "error",
+        error: "invalid executable model",
+        validatedAt: null,
+      }),
+    );
+    const { activate } = await import("./index.js");
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+    });
+    await expect(api.installModel(FALLBACK_MODEL.ref)).rejects.toThrow(
+      "invalid executable model",
+    );
+    expect(modelLibraryMock.library.startDownload).not.toHaveBeenCalled();
+  });
+
+  it("cancels one install caller without cancelling another caller's shared transfer", async () => {
+    const { activate } = await import("./index.js");
+    const controller = new AbortController();
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+      invocation: { current: () => null, signal: () => controller.signal },
+    });
+    const cancelled = api.installModel(FALLBACK_MODEL.ref);
+    const rejected = expect(cancelled).rejects.toThrow("caller cancelled");
+    await vi.waitFor(() =>
+      expect(modelLibraryMock.library.startDownload).toHaveBeenCalledOnce(),
+    );
+    controller.abort(new Error("caller cancelled"));
+    await rejected;
+    const other = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+    });
+    const joined = other.installModel(FALLBACK_MODEL.ref);
+    await vi.waitFor(() =>
+      expect(modelLibraryMock.library.startDownload).toHaveBeenCalledTimes(2),
+    );
+    expect(modelLibraryMock.downloads).toHaveLength(1);
+    expect(modelLibraryMock.library.cancelDownload).not.toHaveBeenCalled();
+    const finalJob = { ...modelLibraryMock.downloads[0]!, receivedBytes: 100 };
+    modelLibraryMock.resolveDownload(finalJob);
+    await expect(joined).resolves.toMatchObject(finalJob);
   });
 
   it("does not expose a stale fallback artifact as installed", async () => {
@@ -518,14 +678,16 @@ describe("local-models extension", () => {
     expect(supervisorMock.validateModel).toHaveBeenCalledTimes(1);
     expect(modelLibraryMock.library.setRuntimeValidation).toHaveBeenCalledWith(
       FALLBACK_MODEL.slug,
-      expect.objectContaining({ status: "ready", error: null })
+      expect.objectContaining({ status: "ready", error: null }),
     );
     expect(supervisorMock.ensureLoaded).toHaveBeenCalledTimes(1);
   });
 
   it("never validates a preconfigured fallback record during invocation", async () => {
     const preconfigured = fallbackRecord();
-    modelLibraryMock.library.ensureFallback.mockResolvedValueOnce(preconfigured);
+    modelLibraryMock.library.ensureFallback.mockResolvedValueOnce(
+      preconfigured,
+    );
     const { activate } = await import("./index.js");
     const api = await activate({
       log: { info: vi.fn(), warn: vi.fn() },
@@ -537,7 +699,9 @@ describe("local-models extension", () => {
     });
 
     expect(supervisorMock.validateModel).not.toHaveBeenCalled();
-    expect(modelLibraryMock.library.setRuntimeValidation).not.toHaveBeenCalled();
+    expect(
+      modelLibraryMock.library.setRuntimeValidation,
+    ).not.toHaveBeenCalled();
     expect(supervisorMock.ensureLoaded).toHaveBeenCalledTimes(1);
   });
 
@@ -575,7 +739,9 @@ describe("local-models extension", () => {
     const sharedLoad = new Promise<void>((resolve) => {
       resolveSharedLoad = resolve;
     });
-    modelLibraryMock.library.ensureFallback.mockImplementation(async () => sharedLoad);
+    modelLibraryMock.library.ensureFallback.mockImplementation(
+      async () => sharedLoad,
+    );
     const controller = new AbortController();
     const { activate } = await import("./index.js");
     const api = await activate({
@@ -587,7 +753,9 @@ describe("local-models extension", () => {
       },
     });
     const pending = api.ensureLoaded(FALLBACK_MODEL.ref);
-    await vi.waitFor(() => expect(modelLibraryMock.library.ensureFallback).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(modelLibraryMock.library.ensureFallback).toHaveBeenCalled(),
+    );
 
     controller.abort(new Error("durable-object activation released"));
 
@@ -598,7 +766,9 @@ describe("local-models extension", () => {
   });
 });
 
-function fallbackRecord(runtimeValidation?: ModelRecord["runtimeValidation"]): ModelRecord {
+function fallbackRecord(
+  runtimeValidation?: ModelRecord["runtimeValidation"],
+): ModelRecord {
   return {
     slug: FALLBACK_MODEL.slug,
     displayName: FALLBACK_MODEL.displayName,
@@ -639,7 +809,10 @@ function jsonLineReader(response: Response): {
         const next = await Promise.race([
           reader.read(),
           new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
-            setTimeout(() => reject(new Error("timed out waiting for NDJSON line")), 1000);
+            setTimeout(
+              () => reject(new Error("timed out waiting for NDJSON line")),
+              1000,
+            );
           }),
         ]);
         if (next.done) throw new Error("stream ended before next line");
@@ -656,7 +829,7 @@ function jsonLineReader(response: Response): {
 
 async function waitUntil(
   predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 1000
+  timeoutMs = 1000,
 ): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
