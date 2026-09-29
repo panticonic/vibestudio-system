@@ -2144,6 +2144,7 @@ function InstallReviewPartRow({
         <MobileUnitIcon
           icon={part.icon}
           source={part.repoPath}
+          iconState={part.iconState}
           kind={
             part.kind === "panel"
               ? "panel"
