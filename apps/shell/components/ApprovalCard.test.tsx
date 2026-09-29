@@ -354,7 +354,7 @@ describe("ApprovalCard", () => {
     // A severe capability accents its recommended action by how much authority
     // that action grants: the narrow one-shot -- the recommendation here --
     // reads amber, while a standing version grant would read red. Unrecommended
-    // actions carry no accent at all.
+    // actions stay neutral gray rather than inheriting the theme accent.
     expect(
       screen
         .getByText("Allow once")
@@ -364,7 +364,7 @@ describe("ApprovalCard", () => {
     const trustButton = screen
       .getByText("Remember for this version")
       .closest("button");
-    expect(trustButton?.getAttribute("data-accent-color")).toBe("");
+    expect(trustButton?.getAttribute("data-accent-color")).toBe("gray");
     fireEvent.click(trustButton as HTMLButtonElement);
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
@@ -653,7 +653,7 @@ describe("ApprovalCard", () => {
         .getByText("Allow for this task")
         .closest("button")
         ?.getAttribute("data-accent-color"),
-    ).toBe("sky");
+    ).toBe("");
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
@@ -694,13 +694,13 @@ describe("ApprovalCard", () => {
         .getByText("Remember for this version")
         .closest("button")
         ?.getAttribute("data-accent-color"),
-    ).toBe("sky");
+    ).toBe("");
     expect(
       screen
         .getByText("Use once")
         .closest("button")
         ?.getAttribute("data-accent-color"),
-    ).toBe("");
+    ).toBe("gray");
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
     expect(emit).toHaveBeenCalledWith({

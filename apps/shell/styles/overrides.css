@@ -10,33 +10,34 @@ body,
   height: 100%;
   min-height: 100%;
   overflow: hidden;
-  /* Match the neutral native frame before the theme mounts. */
-  background: #eaebed;
+  /* Match the native frame (slate-3 / slate-1) before the theme mounts. */
+  background: #edf1f6;
 }
 
 @media (prefers-color-scheme: dark) {
   html,
   body,
   #app {
-    background: #202225;
+    background: #111419;
   }
 }
 
-/* Shell documents use a neutral Radix theme. Panels render in separate
-   webContents and receive the user's content theme without these overrides. */
+/* The shell wears the same theme identity as its panels. The frame is the
+   deepest rung in light mode (content sits on it as white sheets) and the
+   darkest in dark mode (content lifts off it as lighter sheets). */
 .radix-themes:where(.light, .light-theme) {
-  --surface-chrome: #eaebed;
+  --surface-chrome: var(--gray-3);
   --surface-card: var(--gray-2);
-  --surface-raised: #f4f4f5;
-  --surface-border: var(--gray-7);
-  --approval-card-shadow: 0 4px 12px var(--gray-a5), 0 1px 3px var(--black-a3);
+  --surface-raised: var(--color-panel-solid);
+  --surface-border: var(--gray-6);
+  --approval-card-shadow: 0 8px 24px var(--gray-a5), 0 1px 3px var(--gray-a6);
 }
 
 .radix-themes:where(.dark, .dark-theme) {
-  --surface-chrome: #202225;
+  --surface-chrome: var(--gray-1);
   --surface-card: var(--gray-3);
-  --surface-raised: #282a2d;
-  --surface-border: var(--gray-7);
+  --surface-raised: var(--gray-2);
+  --surface-border: var(--gray-6);
   --approval-card-shadow: var(--elevation-overlay);
 }
 
@@ -52,9 +53,10 @@ body,
   --app-chrome-bg: var(--surface-chrome);
   --app-chrome-bg-strong: var(--surface-raised);
   --app-chrome-border: var(--surface-border);
-  --app-chrome-hover: var(--gray-a3);
-  --app-chrome-selected: var(--gray-a4);
-  --app-chrome-selected-hover: var(--gray-a5);
+  --app-chrome-hover: var(--gray-a4);
+  --app-chrome-selected: var(--accent-a4);
+  --app-chrome-selected-hover: var(--accent-a5);
+  --app-chrome-selected-text: var(--accent-12);
 }
 
 .app-shell-theme {
@@ -253,17 +255,17 @@ body,
    not arrive as a cream-coloured card — the tone is a marker on a neutral
    surface, so it stays confined to the rail and the icon.
 
-   Tone variables are set via `data-approval-tone="sky|amber|red"` and resolve
-   straight off the Radix scales, so light/dark need no branching here.
+   Tone variables are set via `data-approval-tone="info|amber|red"` and resolve
+   straight off the Radix scales (info is the theme accent), so light/dark need no branching here.
    ============================================================================ */
 /* `--approval-ring` is the 38px icon box's own hairline (and its beacon pulse),
    not a frame around the card. */
-[data-approval-tone="sky"] {
-  --approval-accent: var(--sky-9);
-  --approval-accent-quiet: var(--sky-a5);
-  --approval-icon: var(--sky-11);
-  --approval-icon-bg: var(--sky-a3);
-  --approval-ring: var(--sky-a6);
+[data-approval-tone="info"] {
+  --approval-accent: var(--accent-9);
+  --approval-accent-quiet: var(--accent-a5);
+  --approval-icon: var(--accent-11);
+  --approval-icon-bg: var(--accent-a3);
+  --approval-ring: var(--accent-a6);
 }
 [data-approval-tone="amber"] {
   --approval-accent: var(--amber-9);

@@ -12,7 +12,7 @@
    mode is near-white and reads as lighter than the panels it lists. */
 .workspace-desktop-navigation { display: flex; flex-direction: column; min-height: 0; flex-shrink: 0; background: var(--app-chrome-bg); }
 .workspace-desktop-navigation > .workspace-stack { flex: 1; min-height: 0; overflow-y: auto; }
-.panel-finder-field { display: flex; align-items: center; gap: 7px; flex: none; height: 32px; margin: 8px 8px 3px; padding: 0 8px; border: 1px solid var(--gray-a5); border-radius: var(--radius-2); background: var(--gray-a3); color: var(--gray-9); }
+.panel-finder-field { display: flex; align-items: center; gap: 7px; flex: none; height: 32px; margin: 8px 8px 3px; padding: 0 8px; border: 1px solid var(--gray-a6); border-radius: var(--radius-2); background: var(--surface-raised); color: var(--gray-9); }
 .panel-finder-field:focus-within { border-color: var(--accent-8); }
 .panel-finder-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--gray-12); font: inherit; font-size: 12px; }
 .panel-finder-field input::-webkit-search-cancel-button { display: none; }

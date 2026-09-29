@@ -17,7 +17,7 @@ import type { DiffChangedFile, DiffReviewEntry } from "@workspace/ui/diff";
 export type CallerInfo = ApprovalCallerPresentation;
 
 /** Risk tone → accent token key used by `data-approval-tone` in overrides.css. */
-export type ApprovalTone = "sky" | "amber" | "red";
+export type ApprovalTone = "info" | "amber" | "red";
 
 /** Browse position for the queue navigator (null when a single approval). */
 export interface ApprovalQueueInfo {
@@ -183,15 +183,15 @@ export function approvalAccent(approval: PendingApproval): ApprovalTone {
   const tone = getApprovalRiskTone(approval);
   if (tone === "danger") return "red";
   if (tone === "caution") return "amber";
-  return "sky";
+  return "info";
 }
 
 /**
  * Highest-risk tone across the whole pending queue, so a minimized red request
- * can't hide behind a calmer sky one in the pill.
+ * can't hide behind a calmer info one in the pill.
  */
 export function highestPendingTone(pending: readonly PendingApproval[]): ApprovalTone {
-  let tone: ApprovalTone = "sky";
+  let tone: ApprovalTone = "info";
   for (const approval of pending) {
     const accent = approvalAccent(approval);
     if (accent === "red") return "red";

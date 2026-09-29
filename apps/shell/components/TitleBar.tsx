@@ -1433,12 +1433,12 @@ function HoverableBreadcrumbItem({
           borderColor: "transparent",
           backgroundColor: isCurrentActive
             ? isHovered
-              ? "var(--gray-a5)"
-              : "var(--gray-a4)"
+              ? "var(--app-chrome-selected-hover)"
+              : "var(--app-chrome-selected)"
             : isHovered
-              ? "var(--gray-a3)"
+              ? "var(--app-chrome-hover)"
               : trust.backgroundColor,
-          color: isCurrentActive ? "var(--gray-12)" : undefined,
+          color: isCurrentActive ? "var(--app-chrome-selected-text)" : undefined,
           // A persistent close-pane ✕ needs its own room; the hover-only archive
           // ✕ may overlap the title's tail, since it only appears under a cursor.
           ...(onClosePane ? { paddingRight: 20 } : {}),
