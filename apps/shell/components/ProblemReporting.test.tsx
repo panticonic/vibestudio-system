@@ -233,12 +233,34 @@ describe("one separate first-start prompt followed by the unit audit", () => {
     expect(mocks.decideServer).toHaveBeenCalledOnce();
     expect(mocks.send).not.toHaveBeenCalled();
   });
-  it("applies the explicit combined first-start decision to an existing server preference too", async () => {
+  it.each(["on", "off"] as const)(
+    "inherits an existing %s server choice without another prompt",
+    async (state) => {
+      mocks.serverConsent.mockResolvedValue({
+        ...decision,
+        state,
+        revision: 2,
+      });
+      render(
+        <Theme>
+          <ReportingFirstUse>
+            <span>Workspace</span>
+          </ReportingFirstUse>
+        </Theme>,
+      );
+      expect(screen.queryByRole("dialog")).toBeNull();
+      await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith(0, state));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(mocks.decideServer).not.toHaveBeenCalled();
+    },
+  );
+  it("retries inheritance failure without displaying a new consent prompt", async () => {
     mocks.serverConsent.mockResolvedValue({
       ...decision,
       state: "on",
       revision: 2,
     });
+    mocks.decide.mockRejectedValueOnce(new Error("Temporarily unavailable"));
     render(
       <Theme>
         <ReportingFirstUse>
@@ -246,14 +268,13 @@ describe("one separate first-start prompt followed by the unit audit", () => {
         </ReportingFirstUse>
       </Theme>,
     );
-    const off = await screen.findByRole("button", {
-      name: "Keep automatic reports off",
-    });
-    await waitFor(() => expect(off.hasAttribute("disabled")).toBe(false));
-    fireEvent.click(off);
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(mocks.decide).toHaveBeenCalledWith(0, "off");
-    expect(mocks.decideServer).toHaveBeenCalledWith(2, "off");
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(mocks.decide).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mocks.decideServer).not.toHaveBeenCalled();
   });
 
   it("does not flash the first-start dialog while loading a saved choice", async () => {
@@ -326,7 +347,9 @@ it("starts a reporting conversation without any report form or implicit submissi
     expect(mocks.openShellSurface).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "command-agent",
-        prompt: expect.stringContaining("help me prepare a report for my approval"),
+        prompt: expect.stringContaining(
+          "help me prepare a report for my approval",
+        ),
       }),
     ),
   );
@@ -334,5 +357,37 @@ it("starts a reporting conversation without any report form or implicit submissi
   expect(
     screen.queryByRole("button", { name: "Send this exact report" }),
   ).toBeNull();
+  expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it("shows one settings choice that changes device and server reporting together", async () => {
+  mocks.consent.mockResolvedValue({ ...decision, state: "on", revision: 3 });
+  mocks.serverConsent.mockResolvedValue({
+    ...decision,
+    state: "on",
+    revision: 7,
+  });
+  render(
+    <Theme>
+      <ProblemReportingSection />
+    </Theme>,
+  );
+  const checkbox = await screen.findByRole("checkbox", {
+    name: "Share improvement information",
+  });
+  await waitFor(() =>
+    expect(checkbox.getAttribute("aria-checked")).toBe("true"),
+  );
+  expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+  expect(screen.queryByText("Server reporting")).toBeNull();
+  expect(screen.queryByText("What is shared?")).toBeNull();
+  fireEvent.click(checkbox);
+  await waitFor(() =>
+    expect(mocks.decideServer).toHaveBeenCalledWith(7, "off"),
+  );
+  expect(mocks.decide).toHaveBeenCalledWith(3, "off");
+  await waitFor(() =>
+    expect(checkbox.getAttribute("aria-checked")).toBe("false"),
+  );
   expect(mocks.send).not.toHaveBeenCalled();
 });

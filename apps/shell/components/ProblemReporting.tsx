@@ -12,13 +12,10 @@ import { Button, Checkbox, Dialog, Flex, Text } from "@radix-ui/themes";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useShellEvent } from "../shell/useShellEvent";
-import {
-  reportDraftContent,
-  REPORT_POLICY,
-} from "@vibestudio/service-schemas/problemReportBundle";
+import { reportDraftContent } from "@vibestudio/service-schemas/problemReportBundle";
 
 const COPY =
-  "When enabled, improvement information includes automatic error reports and coarse usage counters: reporting-enabled runtime minutes, product surface opens, browser navigation counts, entities/contexts created, drafts, previews, and submissions. Automatic reports share product components, stable error codes, versions, known product source frames, occurrence counts, and a random installation pseudonym. Usage counters contain no identifiers. They exclude chat, code, console text, exception messages, screenshots, and agent narrative. Ordinary local diagnostics remain available when sharing is off. Manual reports always require your review.";
+  "Share automatic error reports and anonymous usage statistics to help improve Vibestudio. Reports use a random device identifier; chat, code, and screenshots are excluded, and you can turn sharing off anytime.";
 const ReportingReadyContext = createContext(true);
 export const useReportingReady = () => useContext(ReportingReadyContext);
 
@@ -56,7 +53,7 @@ export function useReportingSetup(
     setLoadedFor(reviewKey);
     setError(
       server.status === "rejected"
-        ? `Server choice unavailable: ${String(server.reason)}`
+        ? `Reporting preference unavailable: ${String(server.reason)}`
         : "",
     );
     if (!dirty.current) {
@@ -82,11 +79,13 @@ export function useReportingSetup(
     if (active && !pending && status === "connected") void reload();
   });
   const ready = !!decisions && loadedFor === reviewKey;
-  const firstUse = decisions?.device.state === "undecided";
+  const firstUse =
+    decisions?.device.state === "undecided" &&
+    (!decisions.server || decisions.server.state === "undecided");
   const required =
     active &&
     (!ready ||
-      firstUse ||
+      decisions.device.state === "undecided" ||
       decisions.server?.state === "undecided" ||
       dirty.current);
   const save = async (initialChoice?: "on" | "off") => {
@@ -117,26 +116,18 @@ export function useReportingSetup(
         );
         setDecisions((current) => current && { ...current, server });
       }
+      if (
+        initialChoice !== undefined ||
+        dirty.current ||
+        enabled !== "indeterminate"
+      )
+        setEnabled(state === "on");
       dirty.current = false;
     } catch (cause) {
       await reload();
       throw cause;
     }
   };
-  const details = (
-    <details>
-      <summary>What is shared?</summary>
-      <Text as="p" size="1">
-        {COPY}
-      </Text>
-      <Text as="p" size="1">
-        Reports go to {REPORT_POLICY.destination}. Bundles are retained for 90
-        days; active investigations can be pinned. Each machine signs reports
-        with a random public key that links its reports. The private key stays
-        in the host secret store. No reporting account or login is needed.
-      </Text>
-    </details>
-  );
   const status = (
     <>
       {!decisions && !error && (
@@ -173,16 +164,8 @@ export function useReportingSetup(
         </Flex>
       </Text>
       <Text as="p" size="1" color="gray">
-        Your previous choice is selected. Saved when you accept this review,
-        {decisions?.server
-          ? " for this device and your account on this server"
-          : " for this device"}
-        . This preference is shared across workspaces and can be changed in
-        Settings.
-        {enabled === "indeterminate" &&
-          " Device and server choices currently differ; leave this unchanged to preserve both."}
+        Your previous choice is selected. You can change it here or in Settings.
       </Text>
-      {details}
       {status}
     </section>
   );
@@ -192,8 +175,8 @@ export function useReportingSetup(
     content,
     ready,
     firstUse,
-    details,
     status,
+    enabled,
   };
 }
 
@@ -203,13 +186,32 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
   const setup = useReportingSetup(problemReports, true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const open = !!setup.firstUse || busy || !!error;
+  const [manualChoice, setManualChoice] = useState<"on" | "off" | null>(null);
+  const open = !!setup.firstUse || manualChoice !== null;
+  useEffect(() => {
+    if (
+      !setup.ready ||
+      !setup.required ||
+      setup.firstUse ||
+      busy ||
+      error ||
+      manualChoice !== null
+    )
+      return;
+    setBusy(true);
+    void setup
+      .save()
+      .catch((cause) => setError(String(cause)))
+      .finally(() => setBusy(false));
+  }, [setup.ready, setup.required, setup.firstUse, busy, error, manualChoice]);
   useShellOverlay(open);
   const choose = async (state: "on" | "off") => {
+    setManualChoice(state);
     setBusy(true);
     setError("");
     try {
       await setup.save(state);
+      setManualChoice(null);
     } catch (cause) {
       setError(String(cause));
     } finally {
@@ -217,10 +219,24 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
     }
   };
   return (
-    <ReportingReadyContext.Provider value={setup.ready && !open && !busy}>
+    <ReportingReadyContext.Provider
+      value={setup.ready && !setup.required && !open && !busy && !error}
+    >
       {!setup.ready && (
         <div data-shell-top-chrome="reporting-choice-status">
           {setup.status}
+        </div>
+      )}
+      {!open && error && (
+        <div data-shell-top-chrome="reporting-choice-status">
+          <Text role="alert">Could not save reporting preference.</Text>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => setError("")}
+          >
+            Retry
+          </Button>
         </div>
       )}
       <Dialog.Root open={open}>
@@ -229,13 +245,7 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
           onPointerDownOutside={(event) => event.preventDefault()}
         >
           <Dialog.Title>Help Vibestudio improve</Dialog.Title>
-          <Dialog.Description>
-            Share automatic error reports and coarse usage counters from this
-            device and your account on the connected server. Your choice is
-            remembered across workspaces. You can change it in Settings or a
-            workspace's unit audit.
-          </Dialog.Description>
-          {setup.details}
+          <Dialog.Description>{COPY}</Dialog.Description>
           {setup.status}
           <Flex gap="3" mt="4">
             <Button
@@ -263,95 +273,8 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
   );
 }
 
-function ConnectedServerReportingChoice() {
-  const { problemReports } = useShellWorkspaceClient();
-  const [decision, setDecision] =
-    useState<Awaited<ReturnType<typeof problemReports.serverConsent>>>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const reload = useCallback(async () => {
-    try {
-      setDecision(await problemReports.serverConsent());
-      setError("");
-    } catch (cause) {
-      setError(String(cause));
-    }
-  }, [problemReports]);
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-  useShellEvent("server-connection-changed", ({ status }) => {
-    if (status === "connected") void reload();
-  });
-  const choose = async (state: "on" | "off") => {
-    if (!decision) return;
-    setBusy(true);
-    try {
-      setDecision(await problemReports.decideServer(decision.revision, state));
-      setError("");
-    } catch (cause) {
-      setError(String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-  if (!decision && !error) return null;
-  const content = (
-    <>
-      <Text as="p">
-        Your account on the connected server has a separate sharing choice:{" "}
-        {decision?.state ?? "unavailable"}. It controls server-side errors and
-        coarse runtime counters, including agent operations. It applies across
-        your workspaces on this server. Changing it does not change this
-        device's choice or another user's choice.
-      </Text>
-      {decision && (
-        <Flex gap="3" mt="3">
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => void choose("on")}
-          >
-            Enable server reports
-          </Button>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => void choose("off")}
-          >
-            Keep server reports off
-          </Button>
-        </Flex>
-      )}
-      {error && (
-        <>
-          <Text role="alert">Server reporting choice unavailable: {error}</Text>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => void reload()}
-          >
-            Retry server reporting choice
-          </Button>
-        </>
-      )}
-    </>
-  );
-  return (
-    <section aria-label="Server improvement reporting">
-      <Text size="4" weight="bold">
-        Server reporting
-      </Text>
-      {content}
-    </section>
-  );
-}
-
 export function ProblemReportingSection() {
   const { problemReports, app } = useShellWorkspaceClient();
-  const [decision, setDecision] = useState<Awaited<
-    ReturnType<typeof problemReports.consent>
-  > | null>(null);
   const discuss = (context?: { reportId: string; revision: number }) =>
     app.openShellSurface({
       kind: "command-agent",
@@ -365,14 +288,12 @@ export function ProblemReportingSection() {
   const [busy, setBusy] = useState(false);
   const [discardReport, setDiscardReport] = useState<string | null>(null);
   const [discardAcknowledged, setDiscardAcknowledged] = useState(false);
+  const setup = useReportingSetup(problemReports, true, busy);
   const refresh = useCallback(async () => {
-    const [consent, rows, , observations] = await Promise.all([
-      problemReports.consent(),
+    const [rows, observations] = await Promise.all([
       problemReports.history(),
-      problemReports.availability(),
       problemReports.incidents(),
     ]);
-    setDecision(consent);
     setHistory(rows);
     setIncidents(observations);
   }, [problemReports]);
@@ -397,42 +318,19 @@ export function ProblemReportingSection() {
         Problem reporting
       </Text>
       <Text>{COPY}</Text>
-      <Text>
-        Capture installation choice: {decision?.state ?? "loading"}. Turning off
-        cancels queued automatic reports. Requests already accepted may finish.
+      <Text as="label" size="2">
+        <Flex gap="2" align="center">
+          <Checkbox
+            checked={setup.enabled}
+            disabled={busy || !setup.ready}
+            onCheckedChange={(value) =>
+              void run(() => setup.save(value === true ? "on" : "off"))
+            }
+          />
+          Share improvement information
+        </Flex>
       </Text>
-      <Flex gap="3">
-        <Button
-          disabled={busy || !decision}
-          onClick={() =>
-            void run(async () => {
-              setDecision(
-                await problemReports.decide(decision!.revision, "on"),
-              );
-            })
-          }
-        >
-          Enable automatic reports
-        </Button>
-        <Button
-          variant="outline"
-          disabled={busy || !decision}
-          onClick={() =>
-            void run(async () => {
-              setDecision(
-                await problemReports.decide(decision!.revision, "off"),
-              );
-            })
-          }
-        >
-          Keep automatic reports off
-        </Button>
-      </Flex>
-      <ConnectedServerReportingChoice />
-      <Text>
-        Talk with an agent about what went wrong. It will investigate, assemble
-        the report, and ask your approval before sharing it.
-      </Text>
+      {setup.status}
       <Button
         disabled={busy}
         onClick={() =>
