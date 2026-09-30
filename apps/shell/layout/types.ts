@@ -54,7 +54,7 @@ export type LayoutDropTarget =
   /** Take over this pane — swap with it when the drag came from another pane. */
   | { kind: "pane-center"; paneId: string };
 
-export const MIN_COLUMN_WIDTH = 460;
+export const MIN_COLUMN_WIDTH = 575;
 export const PREFERRED_COLUMN_WIDTH = 560;
 export const MIN_PANE_HEIGHT = 160;
 export const COLUMN_DIVIDER_WIDTH = 7;
