@@ -148,6 +148,8 @@ export function ActionSheetHost() {
             {
               backgroundColor: colors.surfaceRaised,
               paddingBottom: Math.max(insets.bottom, spacing.lg),
+              paddingLeft: insets.left,
+              paddingRight: insets.right,
               shadowColor: colors.shadow,
               transform: [{ translateY }],
             },

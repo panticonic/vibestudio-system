@@ -18,7 +18,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ReactNativeHapticFeedback from "react-native-haptic-feedback";
 import type {
   ApprovalDetailFormat,
@@ -261,6 +261,7 @@ export function ApprovalSheet({
 }: ApprovalSheetProps) {
   const workspaceVisible = useWorkspaceVisible();
   const colors = useAtomValue(themeColorsAtom);
+  const insets = useSafeAreaInsets();
   const { height: viewportHeight } = useWindowDimensions();
   const browseIndex = queue.index;
   const sourceWorkspaceId =
@@ -507,7 +508,7 @@ export function ApprovalSheet({
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.keyboardRoot}
         >
-          <SafeAreaView edges={["bottom"]} style={styles.safeArea}>
+          <View style={styles.safeArea}>
             <Animated.View
               accessible={false}
               accessibilityViewIsModal
@@ -534,7 +535,10 @@ export function ApprovalSheet({
                 accessibilityRole="button"
                 disabled={isBusy}
                 onPress={dismiss}
-                style={styles.dismissButton}
+                style={[
+                  styles.dismissButton,
+                  { right: Math.max(insets.right, spacing.md) },
+                ]}
                 testID="approval-dismiss"
               >
                 <X size={20} color={colors.textSecondary} />
@@ -547,7 +551,13 @@ export function ApprovalSheet({
 
               <ScrollView
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={styles.scrollContent}
+                contentContainerStyle={[
+                  styles.scrollContent,
+                  {
+                    paddingLeft: Math.max(insets.left, spacing.lg),
+                    paddingRight: Math.max(insets.right, spacing.lg),
+                  },
+                ]}
               >
                 {queue.status && (
                   <View style={{ paddingVertical: 8 }}>
@@ -780,6 +790,9 @@ export function ApprovalSheet({
                   {
                     borderTopColor: colors.borderSubtle,
                     backgroundColor: colors.surfaceRaised,
+                    paddingBottom: Math.max(insets.bottom, spacing.lg),
+                    paddingLeft: Math.max(insets.left, spacing.lg),
+                    paddingRight: Math.max(insets.right, spacing.lg),
                   },
                 ]}
               >
@@ -896,7 +909,7 @@ export function ApprovalSheet({
                 )}
               </View>
             </Animated.View>
-          </SafeAreaView>
+          </View>
         </KeyboardAvoidingView>
       </View>
     </AppModal>

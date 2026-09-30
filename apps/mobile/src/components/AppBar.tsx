@@ -238,8 +238,8 @@ export function AppBar({
           style={[
             styles.content,
             {
-              paddingLeft: spacing.xs,
-              paddingRight: spacing.xs,
+              paddingLeft: Math.max(spacing.xs, insets.left),
+              paddingRight: Math.max(spacing.xs, insets.right),
             },
           ]}
         >
@@ -358,8 +358,8 @@ export function AppBar({
           style={[
             styles.content,
             {
-              paddingLeft: spacing.xs,
-              paddingRight: spacing.xs,
+              paddingLeft: Math.max(spacing.xs, insets.left),
+              paddingRight: Math.max(spacing.xs, insets.right),
             },
           ]}
         >
@@ -446,8 +446,8 @@ export function AppBar({
               style={({ pressed }) => [
                 styles.suggestionRow,
                 {
-                  paddingLeft: spacing.lg,
-                  paddingRight: spacing.lg,
+                  paddingLeft: Math.max(spacing.lg, insets.left),
+                  paddingRight: Math.max(spacing.lg, insets.right),
                 },
                 pressed && { backgroundColor: colors.surfaceSunken },
               ]}

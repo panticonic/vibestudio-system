@@ -1,12 +1,6 @@
 import { AppModal } from "./ui/AppModal";
 import { useRef, useState } from "react";
-import {
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-  Pressable,
-} from "react-native";
+import { ScrollView, Text, TextInput, View, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAtomValue } from "jotai";
 import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
@@ -69,6 +63,8 @@ export function WorkspaceTransferSheet({
     borderColor: colors.border,
     color: colors.text,
     padding: spacing.md,
+    paddingLeft: Math.max(insets.left, spacing.md),
+    paddingRight: Math.max(insets.right, spacing.md),
   };
   const picker = (
     selected: string,
@@ -121,7 +117,6 @@ export function WorkspaceTransferSheet({
         style={{
           flex: 1,
           paddingTop: insets.top,
-          paddingBottom: insets.bottom,
           backgroundColor: colors.background,
         }}
       >
@@ -147,7 +142,13 @@ export function WorkspaceTransferSheet({
         </View>
         <ScrollView
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}
+          contentContainerStyle={{
+            padding: spacing.lg,
+            gap: spacing.md,
+            paddingLeft: Math.max(insets.left, spacing.lg),
+            paddingRight: Math.max(insets.right, spacing.lg),
+            paddingBottom: Math.max(insets.bottom, spacing.lg),
+          }}
         >
           {error && (
             <Text accessibilityRole="alert" style={{ color: colors.danger }}>

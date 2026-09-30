@@ -33,10 +33,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   commandSpecFromWire,
@@ -640,11 +637,7 @@ export function CommandSheet({
           style={styles.avoider}
           pointerEvents="box-none"
         >
-          <SafeAreaView
-            edges={["bottom"]}
-            style={styles.safeArea}
-            pointerEvents="box-none"
-          >
+          <View style={styles.safeArea} pointerEvents="box-none">
             <Animated.View
               testID="command-sheet"
               accessibilityViewIsModal
@@ -656,6 +649,8 @@ export function CommandSheet({
                   borderColor: colors.border,
                   shadowColor: colors.shadow,
                   paddingBottom: Math.max(insets.bottom, spacing.md),
+                  paddingLeft: insets.left,
+                  paddingRight: insets.right,
                   transform: [{ translateY }],
                 },
               ]}
@@ -907,7 +902,7 @@ export function CommandSheet({
                 />
               )}
             </Animated.View>
-          </SafeAreaView>
+          </View>
         </KeyboardAvoidingView>
       </View>
     </AppModal>

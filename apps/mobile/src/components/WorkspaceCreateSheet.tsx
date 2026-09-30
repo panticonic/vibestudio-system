@@ -202,6 +202,8 @@ export function WorkspaceCreateSheet({
           contentContainerStyle={{
             padding: spacing.lg,
             paddingBottom: Math.max(insets.bottom, spacing.lg),
+            paddingLeft: Math.max(insets.left, spacing.lg),
+            paddingRight: Math.max(insets.right, spacing.lg),
             gap: spacing.md,
           }}
         >

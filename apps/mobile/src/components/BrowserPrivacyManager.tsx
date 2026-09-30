@@ -1,3 +1,4 @@
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppModal } from "./ui/AppModal";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -49,6 +50,7 @@ export function BrowserPrivacyManager({
 }: BrowserPrivacyManagerProps) {
   const workspaceVisible = useWorkspaceVisible();
   const colors = useAtomValue(themeColorsAtom);
+  const insets = useSafeAreaInsets();
   const [section, setSection] =
     useState<MobileBrowserPrivacySection>(initialSection);
   const [busy, setBusy] = useState(false);
@@ -297,7 +299,15 @@ export function BrowserPrivacyManager({
     >
       <View style={[styles.root, { backgroundColor: colors.background }]}>
         <View
-          style={[styles.header, { borderBottomColor: colors.borderSubtle }]}
+          style={[
+            styles.header,
+            {
+              borderBottomColor: colors.borderSubtle,
+              paddingTop: Math.max(insets.top, 16),
+              paddingLeft: Math.max(insets.left, 16),
+              paddingRight: Math.max(insets.right, 16),
+            },
+          ]}
         >
           <View style={styles.headerCopy}>
             <Text
@@ -315,7 +325,13 @@ export function BrowserPrivacyManager({
         <ScrollView
           horizontal
           style={styles.tabs}
-          contentContainerStyle={styles.tabsContent}
+          contentContainerStyle={[
+            styles.tabsContent,
+            {
+              paddingLeft: Math.max(insets.left, 16),
+              paddingRight: Math.max(insets.right, 16),
+            },
+          ]}
           showsHorizontalScrollIndicator={false}
         >
           {SECTIONS.map((entry) => (
@@ -336,9 +352,7 @@ export function BrowserPrivacyManager({
               <Text
                 style={{
                   color:
-                    section === entry.id
-                      ? colors.accent
-                      : colors.textSecondary,
+                    section === entry.id ? colors.accent : colors.textSecondary,
                 }}
               >
                 {entry.label}
@@ -347,7 +361,14 @@ export function BrowserPrivacyManager({
           ))}
         </ScrollView>
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingLeft: Math.max(insets.left, 16),
+              paddingRight: Math.max(insets.right, 16),
+              paddingBottom: Math.max(insets.bottom, 16),
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
           {section === "credentials" ? (
