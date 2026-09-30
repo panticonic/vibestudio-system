@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { useShellEvent } from "../shell/useShellEvent";
 import { usePanelTree, useRootPanels } from "../shell/hooks/PanelTreeContext";
 import {
   applyLayoutAction,
   computeViewport,
   findPane,
-  paneForPanel,
   validateRestoredLayout,
   type LayoutAction,
   type LayoutEnv,
@@ -21,7 +21,6 @@ import { mintColumnId, mintPaneId, PANE_VERTICAL_CHROME_HEIGHT } from "./types";
 import type { PanelLayout, PersistedLayout } from "./types";
 
 const PERSIST_DEBOUNCE_MS = 500;
-const DELETED_PANEL_DEBOUNCE_MS = 50;
 const MAX_SEEN_INTENTS = 256;
 
 const EMPTY_LAYOUT: PanelLayout = { columns: [], focusedPaneId: null };
@@ -249,57 +248,41 @@ export function usePanelLayout(
     [layout]
   );
 
-  // Tree reconcile (§4.5/§7.4): when visible panels disappear from the tree,
-  // wait out the creation-race debounce, then dispatch ONE atomic action whose
-  // fallback candidates come from the topology as it was before the update.
-  const reconcileTimerRef = useRef<number | null>(null);
+  // A committed close is authoritative even while bounded tree queries refresh.
+  // Reconcile the whole subtree in one action using the preceding topology.
+  useShellEvent("panel-tree-invalidated", (event) => {
+    if (event.removedSlotIds.length === 0) return;
+    const removedIds = new Set(event.removedSlotIds);
+    const maps = reconcileMapsRef.current;
+    dispatch({
+      type: "tree-reconcile",
+      removed: event.removedSlotIds.map((panelId) => ({
+        panelId,
+        fallbackCandidates: fallbackCandidatesFor(maps, panelId).filter(
+          (candidateId) => !removedIds.has(candidateId)
+        ),
+      })),
+    });
+  });
+
+  // Reconcile coherent projections after startup/reconnection too. A panel
+  // created before its query page arrives must not be mistaken for a deletion.
   useEffect(() => {
-    if (!restored || refreshing) {
-      if (reconcileTimerRef.current !== null) {
-        window.clearTimeout(reconcileTimerRef.current);
-        reconcileTimerRef.current = null;
-      }
-      return;
-    }
+    if (!restored || refreshing) return;
     const previousMaps = reconcileMapsRef.current;
-    // Presentation and query-first discovery are independent streams. A
-    // panel-created event can place a durable slot before this client's
-    // bounded tree projection has observed it; absence is only evidence of
-    // deletion when the panel was present in the preceding projection.
     const casualties = observedPanelDeletions(visiblePanelIds, previousMaps, { panelMap });
     reconcileMapsRef.current = { panelMap, parentMap };
     if (casualties.length === 0) return;
-    const removed = casualties.map((panelId) => ({
-      panelId,
-      fallbackCandidates: fallbackCandidatesFor(previousMaps, panelId),
-    }));
-    if (reconcileTimerRef.current !== null) window.clearTimeout(reconcileTimerRef.current);
-    reconcileTimerRef.current = window.setTimeout(() => {
-      reconcileTimerRef.current = null;
-      // Re-check against the *latest* tree: a creation race may have re-added.
-      const stillGone = removed.filter(
-        (entry) =>
-          !reconcileMapsRef.current.panelMap.has(entry.panelId) &&
-          paneForPanel(layoutRef.current, entry.panelId) !== null
-      );
-      if (stillGone.length === 0) return;
-      dispatch({
-        type: "tree-reconcile",
-        removed: stillGone.map((entry) => ({
-          panelId: entry.panelId,
-          fallbackCandidates: entry.fallbackCandidates.filter((candidateId) =>
-            reconcileMapsRef.current.panelMap.has(candidateId)
-          ),
-        })),
-      });
-    }, DELETED_PANEL_DEBOUNCE_MS);
+    dispatch({
+      type: "tree-reconcile",
+      removed: casualties.map((panelId) => ({
+        panelId,
+        fallbackCandidates: fallbackCandidatesFor(previousMaps, panelId).filter(
+          (candidateId) => panelMap.has(candidateId)
+        ),
+      })),
+    });
   }, [restored, refreshing, visiblePanelIds, panelMap, parentMap, dispatch]);
-  useEffect(
-    () => () => {
-      if (reconcileTimerRef.current !== null) window.clearTimeout(reconcileTimerRef.current);
-    },
-    []
-  );
 
   const viewport = useMemo(() => computeViewport(layout, env), [layout, env]);
 
