@@ -270,6 +270,10 @@ function desktopRuns(client: ShellWorkspaceClient): Record<string, SlateRun> {
     },
 
     // ---- Application ---------------------------------------------------------
+    "app.report-problem": async () => {
+      await app.openShellSurface({ kind: "problem-report" });
+      return { close: true };
+    },
     "app.shortcuts": async () => {
       await panel.createAboutPanel("keyboard-shortcuts");
       return { close: true };

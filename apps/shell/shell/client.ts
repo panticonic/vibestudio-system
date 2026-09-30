@@ -93,6 +93,7 @@ export const startupWorkspaceClient = createShellWorkspaceClient(rpc, {
 });
 /** The startup workspace client; never rebound when focus changes. */
 export const {
+  problemReports,
   unitIcons,
   websiteConnections,
   hostLaunch,

@@ -1,3 +1,4 @@
+import { problemReportsMethods } from "@vibestudio/service-schemas/problemReports";
 import {
   MODEL_SETTINGS_SERVICE_PROTOCOL,
   type ModelSettingsSnapshot,
@@ -342,6 +343,11 @@ export function createShellWorkspaceClient(
     },
     data: browserDataClient,
   });
+  const problemReports = createTypedServiceClient(
+    "problemReports",
+    problemReportsMethods,
+    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
+  );
   const workspaceClient = createTypedServiceClient(
     "workspace",
     workspaceMethods,
@@ -1392,6 +1398,7 @@ export function createShellWorkspaceClient(
     });
   }
   return {
+    problemReports,
     unitIcons: createWorkspaceIcons(rpc),
     websiteConnections,
     hostLaunch,

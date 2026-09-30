@@ -26,6 +26,7 @@ services:
         - host
         - user
         - code
+        - website
         - session
         - mission
     description: Generate durable image assets, manage art direction, and read retained image content.

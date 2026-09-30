@@ -1,3 +1,4 @@
+import { ProblemReportingSection } from "./ProblemReporting";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -41,12 +42,14 @@ type LiveConnection = {
 interface Props {
   section: SettingsSection | null;
   workspaceId?: string;
+  preparedReport?: { reportId: string; revision: number; digest: string };
   onSectionChange: (section: SettingsSection | null) => void;
 }
 
 export function ConnectionSettingsDialog({
   section,
   workspaceId,
+  preparedReport,
   onSectionChange,
 }: Props) {
   const { app, incomingPairLink, remoteCred } = useShellWorkspaceClient();
@@ -239,6 +242,9 @@ export function ConnectionSettingsDialog({
           </Tabs.Trigger>
           <Tabs.Trigger value="hosts" aria-label="Host apps">
             Host apps
+          </Tabs.Trigger>
+          <Tabs.Trigger value="problem-reporting">
+            Problem reporting
           </Tabs.Trigger>
           <Tabs.Trigger value="templates" aria-label="Templates">
             Templates
@@ -502,6 +508,9 @@ export function ConnectionSettingsDialog({
           </Box>
         </Tabs.Content>
 
+        <Tabs.Content value="problem-reporting">
+          <ProblemReportingSection prepared={preparedReport} />
+        </Tabs.Content>
         <Tabs.Content value="templates">
           <Box pt="4">
             <TemplatesSection

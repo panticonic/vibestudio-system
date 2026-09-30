@@ -8,12 +8,10 @@ import {
   workspaceChooserDialogOpenAtom,
   workspaceChooserTemplateAtom,
   workspaceCreationSourceUrlAtom,
-  shellOverlayActiveAtom,
 } from "../state/appModeAtoms";
 
 import { useShellEvent } from "../shell/useShellEvent";
 import { useShellOverlay } from "../shell/useShellOverlay";
-import { useSyncShellOverlay } from "../shell/useSyncShellOverlay";
 import { ConnectionSettingsDialog } from "./ConnectionSettingsDialog";
 import {
   ApprovalPresentationContext,
@@ -38,7 +36,6 @@ export default function MainMode() {
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
   const settingsTarget = useAtomValue(settingsDialogAtom);
   const setSettingsTarget = useSetAtom(settingsDialogAtom);
-  const shellOverlayActive = useAtomValue(shellOverlayActiveAtom);
 
   // Mounted here, not next to the badge that opens it: the badge lives in the
   // panel tree, which breadcrumb mode unmounts, but this event arrives in both.
@@ -49,8 +46,6 @@ export default function MainMode() {
 
   // Register shell overlays — hides panel views so dialogs aren't obscured
   useShellOverlay(workspaceChooserOpen);
-
-  useSyncShellOverlay(shellOverlayActive);
 
   useEffect(() => {
     const bridge = (
@@ -119,6 +114,7 @@ export default function MainMode() {
       <ConnectionSettingsDialog
         section={settingsTarget?.section ?? null}
         workspaceId={settingsTarget?.workspaceId}
+        preparedReport={settingsTarget?.preparedReport}
         onSectionChange={(section) =>
           setSettingsTarget(section ? { ...settingsTarget, section } : null)
         }

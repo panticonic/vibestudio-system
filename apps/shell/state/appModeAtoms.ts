@@ -49,6 +49,7 @@ export const workspaceChooserTemplateAtom = atom<
 export const settingsDialogAtom = atom<{
   section: SettingsSection;
   workspaceId?: string;
+  preparedReport?: { reportId: string; revision: number; digest: string };
 } | null>(null);
 
 /** Local invalidation after this window changes the hub workspace catalog. */

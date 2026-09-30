@@ -1,6 +1,35 @@
-import { Component, type ReactNode, type ErrorInfo } from "react";
-import { Flex, Text, Button } from "@radix-ui/themes";
+import { Component, type ReactNode, type ErrorInfo, useState } from "react";
+import { Flex, Text, Button, Dialog } from "@radix-ui/themes";
+import { ProblemReportingSection } from "./ProblemReporting";
+import { useShellOverlay } from "../shell/useShellOverlay";
 import { Surface, Stack } from "@workspace/ui/layout";
+
+function ReportShellFailure({ error }: { error: Error }) {
+  const [open, setOpen] = useState(false);
+  useShellOverlay(open);
+  return (
+    <>
+      <Button variant="outline" onClick={() => setOpen(true)}>
+        Report this problem
+      </Button>
+      <Dialog.Root open={open} onOpenChange={setOpen}>
+        <Dialog.Content style={{ maxWidth: 900 }}>
+          <Dialog.Title>Report a problem</Dialog.Title>
+          <Dialog.Description>
+            Review the shell failure and choose what to send to help improve
+            Vibestudio.
+          </Dialog.Description>
+          <ProblemReportingSection
+            initialSymptom={`The Vibestudio shell failed to load: ${error.message}`}
+          />
+          <Dialog.Close>
+            <Button variant="outline">Close</Button>
+          </Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Root>
+    </>
+  );
+}
 
 interface Props {
   children: ReactNode;
@@ -28,7 +57,11 @@ export class ChunkErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("[ChunkErrorBoundary] Failed to load chunk:", error, info.componentStack);
+    console.error(
+      "[ChunkErrorBoundary] Failed to load chunk:",
+      error,
+      info.componentStack,
+    );
   }
 
   handleRetry = () => {
@@ -56,15 +89,24 @@ export class ChunkErrorBoundary extends Component<Props, State> {
             style={{ maxWidth: 420, width: "100%" }}
           >
             <Stack gap="3" align="center">
-              <Text size="3" weight="medium" style={{ color: "var(--intent-error)" }}>
+              <Text
+                size="3"
+                weight="medium"
+                style={{ color: "var(--intent-error)" }}
+              >
                 Failed to load application
               </Text>
               <Text size="2" color="gray" align="center">
                 {this.state.error.message}
               </Text>
-              <Button variant="soft" className="app-touch-target" onClick={this.handleRetry}>
+              <Button
+                variant="soft"
+                className="app-touch-target"
+                onClick={this.handleRetry}
+              >
                 Retry
               </Button>
+              <ReportShellFailure error={this.state.error} />
             </Stack>
           </Surface>
         </Flex>

@@ -1,3 +1,4 @@
+import { ReportingFirstUse } from "./ProblemReporting";
 import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useEffect, useCallback } from "react";
@@ -5,6 +6,7 @@ import { useSetAtom } from "jotai";
 import { Theme } from "@radix-ui/themes";
 
 import {
+  shellOverlayActiveAtom,
   workspaceChooserDialogOpenAtom,
   workspaceChooserTemplateAtom,
   workspaceCreationSourceUrlAtom,
@@ -17,6 +19,7 @@ import {
   loadThemeConfigAtom,
 } from "../state/themeAtoms";
 import { useAtomValue } from "jotai";
+import { useSyncShellOverlay } from "../shell/useSyncShellOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
 
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
@@ -29,13 +32,16 @@ export function App() {
   const { unitIcons, app, shellNetwork, connectNativePanelAdapter } =
     useShellWorkspaceClient();
 
+  useSyncShellOverlay(useAtomValue(shellOverlayActiveAtom));
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
   const themeMode = useAtomValue(themeModeAtom);
   const themeConfig = useAtomValue(themeConfigAtom);
   const loadThemePreference = useSetAtom(loadThemePreferenceAtom);
   const loadThemeConfig = useSetAtom(loadThemeConfigAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
-  const setWorkspaceCreationSourceUrl = useSetAtom(workspaceCreationSourceUrlAtom);
+  const setWorkspaceCreationSourceUrl = useSetAtom(
+    workspaceCreationSourceUrlAtom,
+  );
   const setWorkspaceChooserTemplate = useSetAtom(workspaceChooserTemplateAtom);
   // Hand the window to the hosted shell immediately. MainMode belongs to the
   // normal startup surface and is bundled with it; optional heavyweight
@@ -85,7 +91,11 @@ export function App() {
       setWorkspaceCreationSourceUrl(input?.sourceUrl ?? null);
       setWorkspaceChooserOpen(true);
     },
-    [setWorkspaceChooserOpen, setWorkspaceChooserTemplate, setWorkspaceCreationSourceUrl],
+    [
+      setWorkspaceChooserOpen,
+      setWorkspaceChooserTemplate,
+      setWorkspaceCreationSourceUrl,
+    ],
   );
   useShellEvent("open-workspace-switcher", handleOpenWorkspaceSwitcher);
 
@@ -99,6 +109,7 @@ export function App() {
       className="app-shell-theme"
     >
       <WorkspaceIconsContext.Provider value={unitIcons}>
+        <ReportingFirstUse />
         <ChunkErrorBoundary>
           <MainMode />
         </ChunkErrorBoundary>
