@@ -1,3 +1,11 @@
+import {
+  useSafeAreaFrame,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import {
+  panelViewportGeometry,
+  panelViewportGeometryScript,
+} from "../services/panelViewportGeometry";
 import { findNodeHandle } from "react-native";
 import { UIManager } from "react-native";
 import type { NativeWebsiteRequest } from "../services/websiteDocumentHost";
@@ -741,6 +749,11 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       }
     }, [url]);
     const webViewRef = useRef<WebView>(null);
+    const viewportRef = useRef<View>(null);
+    const safeWindowFrame = useSafeAreaFrame();
+    const safeWindowInsets = useSafeAreaInsets();
+    const viewportMeasurementEpoch = useRef(0);
+    const viewportGeometryScript = useRef("");
     const [hasError, setHasError] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState("");
@@ -780,6 +793,45 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       () => currentDocumentOwnerRef.current === documentOwner,
       [documentOwner],
     );
+    const publishViewportGeometry = useCallback(
+      (force = false) => {
+        const epoch = ++viewportMeasurementEpoch.current;
+        viewportRef.current?.measureInWindow((x, y, width, height) => {
+          if (
+            !ownsCurrentDocument() ||
+            epoch !== viewportMeasurementEpoch.current ||
+            width <= 0 ||
+            height <= 0
+          )
+            return;
+          const script = panelViewportGeometryScript(
+            panelViewportGeometry(
+              { x, y, width, height },
+              safeWindowFrame,
+              safeWindowInsets,
+            ),
+          );
+          if (force || script !== viewportGeometryScript.current) {
+            viewportGeometryScript.current = script;
+            webViewRef.current?.injectJavaScript(script);
+          }
+        });
+      },
+      [
+        ownsCurrentDocument,
+        safeWindowFrame.x,
+        safeWindowFrame.y,
+        safeWindowFrame.width,
+        safeWindowFrame.height,
+        safeWindowInsets.top,
+        safeWindowInsets.right,
+        safeWindowInsets.bottom,
+        safeWindowInsets.left,
+      ],
+    );
+    useLayoutEffect(() => {
+      publishViewportGeometry();
+    }, [publishViewportGeometry]);
     const loadStartedAtRef = useRef<number>(Date.now());
     const lastLoadProgressAtRef = useRef<number>(Date.now());
     const lastLoadProgressRef = useRef(0);
@@ -1348,6 +1400,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
     }, [reloadPanel]);
 
     const handleLoadEnd = useCallback(() => {
+      publishViewportGeometry(true);
       const loadedUrl = currentUrlRef.current;
       logDiagnostic("load end", { url: loadedUrl });
       if (loadedUrl !== "about:blank") {
@@ -1396,6 +1449,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       logDiagnostic,
       managed,
       panelId,
+      publishViewportGeometry,
     ]);
 
     const handleLoadStart = useCallback(
@@ -1563,7 +1617,11 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
     }
 
     return (
-      <View style={containerStyle}>
+      <View
+        ref={viewportRef}
+        style={containerStyle}
+        onLayout={() => publishViewportGeometry()}
+      >
         {isLoading && (
           <View
             style={[
@@ -1634,7 +1692,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
                 }
               : undefined
           }
-          injectedJavaScriptBeforeContentLoaded={`${buildWorkspaceWebsiteNotificationScript(initialWebsiteNotificationOrigin, initialWebsiteNotificationPermission)}\n${
+          injectedJavaScriptBeforeContentLoaded={`${viewportGeometryScript.current}\n${buildWorkspaceWebsiteNotificationScript(initialWebsiteNotificationOrigin, initialWebsiteNotificationPermission)}\n${
             managed
               ? buildBridgeBootstrapScript(
                   panelInit,
