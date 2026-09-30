@@ -1,5 +1,6 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
+import { Dimensions } from "react-native";
 import { SvgUri } from "react-native-svg";
 import { AppBar } from "./AppBar";
 import type { AddressAutocompleteItem } from "@workspace/omnibox-core";
@@ -50,6 +51,33 @@ const suggestion: AddressAutocompleteItem = {
 };
 
 describe("AppBar address UX", () => {
+  it("keeps panel controls available while short windows omit the workspace caption", () => {
+    const original = Dimensions.get("window");
+    act(() =>
+      Dimensions.set({
+        window: { width: 874, height: 402, scale: 3, fontScale: 1 },
+      }),
+    );
+    const store = createStore();
+    store.set(shellClientAtom, { workspaceName: "System" } as never);
+    const content = (
+      <Provider store={store}>
+        <AppBar title="Agentic Chat" onMenuPress={jest.fn()} />
+      </Provider>
+    );
+    const view = render(content);
+    expect(view.queryByLabelText("Workspace: System")).toBeNull();
+    expect(view.getByLabelText("Create new panel")).toBeTruthy();
+    act(() =>
+      Dimensions.set({
+        window: { width: 402, height: 874, scale: 3, fontScale: 1 },
+      }),
+    );
+    view.rerender(content);
+    expect(view.getByLabelText("Workspace: System")).toBeTruthy();
+    act(() => Dimensions.set({ window: original }));
+  });
+
   it("opens the New Panel launcher directly from the create button", async () => {
     const store = createStore();
     const createAboutPanel = jest.fn(async () => ({
