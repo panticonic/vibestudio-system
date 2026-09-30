@@ -213,7 +213,7 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
   const setup = useReportingSetup(problemReports, true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const open = !setup.ready || !!setup.firstUse || busy || !!error;
+  const open = !!setup.firstUse || busy || !!error;
   useShellOverlay(open);
   const choose = async (state: "on" | "off") => {
     setBusy(true);
@@ -227,7 +227,12 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
     }
   };
   return (
-    <ReportingReadyContext.Provider value={!open && !busy}>
+    <ReportingReadyContext.Provider value={setup.ready && !open && !busy}>
+      {!setup.ready && (
+        <div data-shell-top-chrome="reporting-choice-status">
+          {setup.status}
+        </div>
+      )}
       <Dialog.Root open={open}>
         <Dialog.Content
           onEscapeKeyDown={(event) => event.preventDefault()}

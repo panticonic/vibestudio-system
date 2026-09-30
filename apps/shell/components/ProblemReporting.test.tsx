@@ -228,6 +228,40 @@ describe("one separate first-start prompt followed by the unit audit", () => {
     expect(mocks.decideServer).toHaveBeenCalledOnce();
     expect(mocks.send).not.toHaveBeenCalled();
   });
+  it("does not flash the first-start dialog while loading a saved choice", async () => {
+    let finish!: (value: typeof decision) => void;
+    mocks.consent.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    mocks.consent.mockResolvedValue({ ...decision, state: "on", revision: 1 });
+    mocks.serverConsent.mockResolvedValue({
+      ...decision,
+      state: "on",
+      revision: 1,
+    });
+    render(
+      <Theme>
+        <ReportingFirstUse>
+          <GatedAudit />
+        </ReportingFirstUse>
+      </Theme>,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    await act(async () => {
+      finish({ ...decision, state: "on", revision: 1 });
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe(
+        "true",
+      ),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("does not create a second prompt for an undecided server after the device decision is saved", async () => {
     mocks.consent.mockResolvedValue({ ...decision, state: "on", revision: 1 });
     mocks.serverConsent.mockResolvedValue(decision);
