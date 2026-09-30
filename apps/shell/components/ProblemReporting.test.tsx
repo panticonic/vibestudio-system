@@ -17,13 +17,18 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   shellEvent: vi.fn(),
   accept: vi.fn(),
+  history: vi.fn(async () => []),
+  incidents: vi.fn(async () => []),
+  availability: vi.fn(async () => ({})),
+  openShellSurface: vi.fn(async () => {}),
 }));
 vi.mock("../shell/workspaceContext", () => ({
-  useShellWorkspaceClient: () => ({ problemReports: mocks }),
+  useShellWorkspaceClient: () => ({ problemReports: mocks, app: mocks }),
 }));
 vi.mock("../shell/useShellOverlay", () => ({ useShellOverlay: vi.fn() }));
 vi.mock("../shell/useShellEvent", () => ({ useShellEvent: mocks.shellEvent }));
 import {
+  ProblemReportingSection,
   useReportingSetup,
   ReportingFirstUse,
   useReportingReady,
@@ -306,4 +311,28 @@ describe("one separate first-start prompt followed by the unit audit", () => {
     expect(mocks.decide).not.toHaveBeenCalled();
     expect(mocks.decideServer).toHaveBeenCalledWith(0, "on");
   });
+});
+
+it("starts a reporting conversation without any report form or implicit submission", async () => {
+  render(
+    <Theme>
+      <ProblemReportingSection />
+    </Theme>,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Report a problem" }),
+  );
+  await waitFor(() =>
+    expect(mocks.openShellSurface).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "command-agent",
+        prompt: expect.stringContaining("problemReports.send"),
+      }),
+    ),
+  );
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Send this exact report" }),
+  ).toBeNull();
+  expect(mocks.send).not.toHaveBeenCalled();
 });

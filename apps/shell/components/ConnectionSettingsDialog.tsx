@@ -42,14 +42,12 @@ type LiveConnection = {
 interface Props {
   section: SettingsSection | null;
   workspaceId?: string;
-  preparedReport?: { reportId: string; revision: number; digest: string };
   onSectionChange: (section: SettingsSection | null) => void;
 }
 
 export function ConnectionSettingsDialog({
   section,
   workspaceId,
-  preparedReport,
   onSectionChange,
 }: Props) {
   const { app, incomingPairLink, remoteCred } = useShellWorkspaceClient();
@@ -509,7 +507,7 @@ export function ConnectionSettingsDialog({
         </Tabs.Content>
 
         <Tabs.Content value="problem-reporting">
-          <ProblemReportingSection prepared={preparedReport} />
+          <ProblemReportingSection />
         </Tabs.Content>
         <Tabs.Content value="templates">
           <Box pt="4">

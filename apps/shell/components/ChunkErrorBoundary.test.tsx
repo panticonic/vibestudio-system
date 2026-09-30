@@ -2,42 +2,35 @@
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { afterEach, expect, it, vi } from "vitest";
-const reporting = vi.hoisted(() => ({
-  consent: vi.fn(async () => ({ state: "off", revision: 1 })),
-  serverConsent: vi.fn(async () => null),
-  history: vi.fn(async () => []),
-  incidents: vi.fn(async () => []),
-  availability: vi.fn(async () => ({ submissionAccess: "anonymous" })),
-  send: vi.fn(),
-}));
-vi.mock("../shell/workspaceContext", () => ({
-  useShellWorkspaceClient: () => ({ problemReports: reporting, app: {} }),
-}));
-vi.mock("../shell/useShellOverlay", () => ({ useShellOverlay: vi.fn() }));
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-it("keeps reporting reachable when the main application cannot render, prefills the selected failure, and never sends implicitly", async () => {
+it("offers retry when the shell cannot mount and directs reporting to the agent after recovery", () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  const Broken = () => {
-    throw new Error("Main desktop chunk unavailable");
+  let broken = true;
+  const Application = () => {
+    if (broken) throw new Error("Main desktop chunk unavailable");
+    return <p>Recovered application</p>;
   };
   render(
     <Theme>
-      <ChunkErrorBoundary>
-        <Broken />
+      <ChunkErrorBoundary
+        onRetry={() => {
+          broken = false;
+        }}
+      >
+        <Application />
       </ChunkErrorBoundary>
     </Theme>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Report this problem" }));
   expect(
-    await screen.findByRole("textbox", { name: "What happened?" }),
-  ).toHaveProperty(
-    "value",
-    "The Vibestudio shell failed to load: Main desktop chunk unavailable",
-  );
-  expect(screen.getByRole("dialog")).toBeTruthy();
-  expect(reporting.send).not.toHaveBeenCalled();
+    screen.getByText(
+      "After retrying, ask an agent to help report this problem.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("textbox")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(screen.getByText("Recovered application")).toBeTruthy();
 });

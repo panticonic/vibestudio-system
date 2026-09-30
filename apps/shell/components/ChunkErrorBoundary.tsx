@@ -1,35 +1,6 @@
-import { Component, type ReactNode, type ErrorInfo, useState } from "react";
-import { Flex, Text, Button, Dialog } from "@radix-ui/themes";
-import { ProblemReportingSection } from "./ProblemReporting";
-import { useShellOverlay } from "../shell/useShellOverlay";
+import { Component, type ReactNode, type ErrorInfo } from "react";
+import { Flex, Text, Button } from "@radix-ui/themes";
 import { Surface, Stack } from "@workspace/ui/layout";
-
-function ReportShellFailure({ error }: { error: Error }) {
-  const [open, setOpen] = useState(false);
-  useShellOverlay(open);
-  return (
-    <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        Report this problem
-      </Button>
-      <Dialog.Root open={open} onOpenChange={setOpen}>
-        <Dialog.Content style={{ maxWidth: 900 }}>
-          <Dialog.Title>Report a problem</Dialog.Title>
-          <Dialog.Description>
-            Review the shell failure and choose what to send to help improve
-            Vibestudio.
-          </Dialog.Description>
-          <ProblemReportingSection
-            initialSymptom={`The Vibestudio shell failed to load: ${error.message}`}
-          />
-          <Dialog.Close>
-            <Button variant="outline">Close</Button>
-          </Dialog.Close>
-        </Dialog.Content>
-      </Dialog.Root>
-    </>
-  );
-}
 
 interface Props {
   children: ReactNode;
@@ -106,7 +77,9 @@ export class ChunkErrorBoundary extends Component<Props, State> {
               >
                 Retry
               </Button>
-              <ReportShellFailure error={this.state.error} />
+              <Text size="2" color="gray" align="center">
+                After retrying, ask an agent to help report this problem.
+              </Text>
             </Stack>
           </Surface>
         </Flex>

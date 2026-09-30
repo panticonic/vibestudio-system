@@ -114,7 +114,6 @@ export default function MainMode() {
       <ConnectionSettingsDialog
         section={settingsTarget?.section ?? null}
         workspaceId={settingsTarget?.workspaceId}
-        preparedReport={settingsTarget?.preparedReport}
         onSectionChange={(section) =>
           setSettingsTarget(section ? { ...settingsTarget, section } : null)
         }
