@@ -107,10 +107,11 @@ export function App() {
       className="app-shell-theme"
     >
       <WorkspaceIconsContext.Provider value={unitIcons}>
-        <ReportingFirstUse />
-        <ChunkErrorBoundary>
-          <MainMode />
-        </ChunkErrorBoundary>
+        <ReportingFirstUse>
+          <ChunkErrorBoundary>
+            <MainMode />
+          </ChunkErrorBoundary>
+        </ReportingFirstUse>
       </WorkspaceIconsContext.Provider>
     </Theme>
   );

@@ -33,6 +33,16 @@ type GetTreePageFn = () => Promise<{
   nextCursor: string | null;
 }>;
 const shellClient = vi.hoisted(() => ({
+  consent: vi.fn(async () => ({
+    state: "off",
+    revision: 1,
+    policy: "problem-reporting.v2",
+    decidedAt: 1,
+    pseudonym: null,
+  })),
+  serverConsent: vi.fn<() => Promise<unknown>>(async () => null),
+  decide: vi.fn(),
+  decideServer: vi.fn(),
   loadIcon: vi.fn(async () => "blob:owning-workspace-icon"),
   heartbeat: vi.fn(() => Promise.resolve()),
   listPending: vi.fn<ListPendingFn>(() => Promise.resolve([])),
@@ -87,6 +97,12 @@ const overlay = vi.hoisted(() => ({
 }));
 
 vi.mock("../shell/client", () => ({
+  problemReports: {
+    consent: shellClient.consent,
+    serverConsent: shellClient.serverConsent,
+    decide: shellClient.decide,
+    decideServer: shellClient.decideServer,
+  },
   unitIcons: { load: shellClient.loadIcon },
   shellApproval: {
     listPending: shellClient.listPending,
@@ -172,6 +188,7 @@ vi.mock("./ApprovalFullSurface", () => ({
     onClose: () => void;
     presentationKey: string;
     emit: (intent: unknown) => void;
+    onboardingOptions?: React.ReactNode;
   }) => {
     fullSurface.props = {
       ...props,
@@ -186,6 +203,7 @@ vi.mock("./ApprovalFullSurface", () => ({
       "div",
       { "data-testid": "full-surface" },
       props.approval.approvalId,
+      props.onboardingOptions,
     );
   },
 }));
@@ -591,6 +609,16 @@ describe("ConsentApprovalBar coordinator", () => {
     overlay.options = null;
     overlay.onIntent = null;
     for (const fn of Object.values(shellClient)) fn.mockClear();
+    shellClient.consent.mockReset().mockResolvedValue({
+      state: "off",
+      revision: 1,
+      policy: "problem-reporting.v2",
+      decidedAt: 1,
+      pseudonym: null,
+    });
+    shellClient.serverConsent.mockReset().mockResolvedValue(null);
+    shellClient.decide.mockReset();
+    shellClient.decideServer.mockReset();
     shellClient.listPending.mockResolvedValue([]);
     shellClient.resolve.mockImplementation(() => Promise.resolve());
     shellClient.getText.mockResolvedValue("blob-text");
@@ -1147,6 +1175,157 @@ describe("ConsentApprovalBar coordinator", () => {
     ).toBeTruthy();
     expect(screen.queryByTestId("full-surface")).toBeNull();
     expect(shellClient.resolve).not.toHaveBeenCalled();
+  });
+
+  it("shows the previous reporting choice in the unit audit and saves an explicit change before accepting units", async () => {
+    const saved = {
+      state: "on",
+      revision: 2,
+      policy: "problem-reporting.v2",
+      decidedAt: 1,
+      pseudonym: null,
+    };
+    shellClient.consent.mockResolvedValueOnce(saved);
+    shellClient.serverConsent.mockResolvedValueOnce(saved);
+    shellClient.decide.mockResolvedValueOnce({
+      ...saved,
+      state: "off",
+      revision: 3,
+    });
+    shellClient.decideServer.mockResolvedValueOnce({
+      ...saved,
+      state: "off",
+      revision: 3,
+    });
+    shellClient.listPending.mockResolvedValueOnce([
+      installReviewApproval("reporting-audit"),
+    ]);
+    mountBar();
+    await screen.findByTestId("full-surface");
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(checkbox);
+    await act(async () => {
+      fullSurface.props!.emit!({
+        type: "resolve-install-review",
+        approvalId: "reporting-audit",
+        resolution: { decision: "install", allowNow: [] },
+      });
+    });
+    expect(shellClient.decide).toHaveBeenCalledWith(2, "off");
+    expect(shellClient.decideServer).toHaveBeenCalledWith(2, "off");
+    expect(shellClient.resolveInstallReview).toHaveBeenCalledWith(
+      "reporting-audit",
+      { decision: "install", allowNow: [] },
+    );
+    expect(shellClient.decideServer.mock.invocationCallOrder[0]).toBeLessThan(
+      shellClient.resolveInstallReview.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("keeps the unit audit pending after a sharing write fails and retries only the unsaved scope", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const review = installReviewApproval("retry-sharing");
+    let device = {
+      state: "on",
+      revision: 2,
+      policy: "problem-reporting.v2",
+      decidedAt: 1,
+      pseudonym: null,
+    };
+    shellClient.consent.mockImplementation(async () => device);
+    shellClient.serverConsent.mockResolvedValue(device);
+    shellClient.decide.mockImplementation(
+      async (_revision, state) => (device = { ...device, state, revision: 3 }),
+    );
+    shellClient.decideServer
+      .mockRejectedValueOnce(new Error("Sharing write disconnected"))
+      .mockResolvedValueOnce({ ...device, state: "off", revision: 3 });
+    shellClient.listPending.mockResolvedValue([review]);
+    mountBar();
+    await screen.findByTestId("full-surface");
+    fireEvent.click(screen.getByRole("checkbox"));
+    const accept = () =>
+      fullSurface.props!.emit!({
+        type: "resolve-install-review",
+        approvalId: "retry-sharing",
+        resolution: { decision: "install", allowNow: [] },
+      });
+    try {
+      await act(async () => {
+        accept();
+      });
+      await waitFor(() =>
+        expect(fullSurface.props?.decisionError).toContain(
+          "Sharing write disconnected",
+        ),
+      );
+      expect(screen.getByTestId("full-surface")).toBeTruthy();
+      expect(shellClient.resolveInstallReview).not.toHaveBeenCalled();
+      await act(async () => {
+        accept();
+      });
+      await waitFor(() =>
+        expect(shellClient.resolveInstallReview).toHaveBeenCalledOnce(),
+      );
+      expect(shellClient.decide).toHaveBeenCalledOnce();
+      expect(shellClient.decideServer).toHaveBeenCalledTimes(2);
+      expect(shellClient.decideServer).toHaveBeenLastCalledWith(2, "off");
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("does not save an edited reporting preference when unit audit is cancelled", async () => {
+    shellClient.listPending.mockResolvedValueOnce([
+      installReviewApproval("cancel-reporting-audit"),
+    ]);
+    mountBar();
+    await screen.findByTestId("full-surface");
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => {
+      fullSurface.props!.emit!({
+        type: "resolve-install-review",
+        approvalId: "cancel-reporting-audit",
+        resolution: { decision: "cancel" },
+      });
+    });
+    expect(shellClient.decide).not.toHaveBeenCalled();
+    expect(shellClient.decideServer).not.toHaveBeenCalled();
+    expect(shellClient.resolveInstallReview).toHaveBeenCalledWith(
+      "cancel-reporting-audit",
+      { decision: "cancel" },
+    );
+  });
+
+  it("loads the saved default for the next audit instead of carrying an unaccepted edit forward", async () => {
+    shellClient.listPending.mockResolvedValueOnce([
+      installReviewApproval("first-audit"),
+      installReviewApproval("next-audit"),
+    ]);
+    mountBar();
+    await screen.findByTestId("full-surface");
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    await act(async () => {
+      fullSurface.props!.emit!({
+        type: "resolve-install-review",
+        approvalId: "first-audit",
+        resolution: { decision: "cancel" },
+      });
+    });
+    await waitFor(() =>
+      expect(fullSurface.props?.approval?.approvalId).toBe("next-audit"),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe(
+        "false",
+      ),
+    );
+    expect(shellClient.decide).not.toHaveBeenCalled();
+    expect(shellClient.decideServer).not.toHaveBeenCalled();
   });
 
   it("resolves the review the surface's own actions decide", async () => {

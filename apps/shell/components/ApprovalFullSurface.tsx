@@ -25,14 +25,18 @@
  * layout. Same header, same queue navigator, same `Enter`/`D` shortcuts, same
  * intents to the same coordinator: only the host and the arrangement differ.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Dialog } from "@radix-ui/themes";
 import { OVERLAY_Z } from "@workspace/ui/overlay";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { getApprovalCopy } from "@vibestudio/shared/approvalCopy";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { ApprovalCard } from "./ApprovalCard";
-import type { ApprovalCardIntent, ApprovalQueueInfo, CallerInfo } from "./approvalCardModel";
+import type {
+  ApprovalCardIntent,
+  ApprovalQueueInfo,
+  CallerInfo,
+} from "./approvalCardModel";
 
 /** §7.2: prefer 1100×720, and never wider or taller than the window. */
 const PREFERRED_WIDTH = 1100;
@@ -42,6 +46,7 @@ const WINDOW_MARGIN = 32;
 
 export interface ApprovalFullSurfaceProps {
   workspaceLabel?: string;
+  onboardingOptions?: ReactNode;
   presentationKey?: string;
   approval: PendingApproval;
   caller: CallerInfo;
@@ -72,7 +77,7 @@ export interface ApprovalFullSurfaceProps {
  */
 export function useReturnFocus(): void {
   const origin = useRef<Element | null>(
-    typeof document === "undefined" ? null : document.activeElement
+    typeof document === "undefined" ? null : document.activeElement,
   );
   useEffect(() => {
     const opener = origin.current;
@@ -85,6 +90,7 @@ export function useReturnFocus(): void {
 }
 
 export function ApprovalFullSurface({
+  onboardingOptions,
   workspaceLabel,
   presentationKey,
   approval,
@@ -94,7 +100,7 @@ export function ApprovalFullSurface({
   actionPending,
   appearance,
   emit,
-  onClose
+  onClose,
 }: ApprovalFullSurfaceProps) {
   // Hide the native panel views while this is up. Without it the dialog renders
   // correctly and is covered by whatever panel happens to be on screen.
@@ -120,7 +126,7 @@ export function ApprovalFullSurface({
           padding: 0,
           overflow: "hidden",
           zIndex: OVERLAY_Z.dialog as unknown as number,
-          boxShadow: "var(--elevation-overlay)"
+          boxShadow: "var(--elevation-overlay)",
         }}
       >
         {/*
@@ -130,9 +136,12 @@ export function ApprovalFullSurface({
           for anyone who arrives by screen reader without duplicating it for
           anyone who arrives by eye.
         */}
-        <Dialog.Title className="approval-full-surface-name">{copy.title}</Dialog.Title>
+        <Dialog.Title className="approval-full-surface-name">
+          {copy.title}
+        </Dialog.Title>
         <ApprovalCard
           key={approval.approvalId}
+          onboardingOptions={onboardingOptions}
           workspaceLabel={workspaceLabel}
           presentationKey={presentationKey}
           approval={approval}

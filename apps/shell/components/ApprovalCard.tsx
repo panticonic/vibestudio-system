@@ -102,6 +102,7 @@ import {
 
 export interface ApprovalCardProps {
   workspaceLabel?: string;
+  onboardingOptions?: ReactNode;
   presentationKey?: string;
   approval: PendingApproval;
   caller: CallerInfo;
@@ -131,6 +132,7 @@ export interface ApprovalCardProps {
 export type ApprovalCardLayout = "card" | "dialog";
 
 export function ApprovalCard({
+  onboardingOptions,
   workspaceLabel,
   presentationKey,
   approval,
@@ -801,6 +803,7 @@ export function ApprovalCard({
               </Box>
             ) : null}
 
+            {onboardingOptions}
             {/* The install review IS the card: parts, rows, selection, and its
                 own two actions. It is not a disclosure under a request summary,
                 because the list of parts is the decision. */}

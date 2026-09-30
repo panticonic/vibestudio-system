@@ -1,3 +1,4 @@
+import { useReportingSetup, useReportingReady } from "./ProblemReporting";
 import {
   isRpcConnectionLost,
   rpcDestinationKey,
@@ -320,6 +321,14 @@ export function ConsentApprovalBar({
   currentApprovalIdRef.current = current?.approvalId ?? null;
   // Preparation is progress, not a decision yet. Every actionable approval is
   // visible in app; `attention` only controls out-of-app notification policy.
+  const reportingReady = useReportingReady();
+  const reportingSetup = useReportingSetup(
+    workspaceClient.problemReports,
+    reportingReady && current?.kind === "unit-install-review",
+    !!current && submittingApprovalIds.has(current.approvalId),
+    current ? `${ownerKey}:${current.approvalId}` : "none",
+  );
+
   const minimized =
     current != null &&
     (!presentation.state.open || current.lifecycle?.state === "preparing");
@@ -536,17 +545,22 @@ export function ConsentApprovalBar({
     if (current?.kind !== "unit-install-review") return;
     const approval = current;
     setInstallResult(null);
-    // Answering is the end of the review, not the beginning of a loading
+    // Persist the explicit reporting edit before answering; a failed sharing
+    // write leaves the audit available to retry. Answering is then the end of
+    // the review, not the beginning of a loading
     // screen. The server deliberately keeps this RPC open after recording the
     // decision so it can return the later landing receipt; leaving the decided
     // approval in local state for that whole interval made startup reconciliation
     // look like a very slow save. Retire it immediately, exactly as the standard
     // approval path does, and restore the same snapshot only if the decision
     // itself fails.
-    setPendingAccess((items) =>
-      items.filter((item) => item.approvalId !== approval.approvalId),
-    );
     runApprovalAction(approval, async () => {
+      if (resolution.decision !== "cancel" && reportingSetup.required) {
+        await reportingSetup.save();
+      }
+      setPendingAccess((items) =>
+        items.filter((item) => item.approvalId !== approval.approvalId),
+      );
       const outcome = await shellApproval.resolveInstallReview(
         approval.approvalId,
         resolution,
@@ -853,7 +867,11 @@ export function ConsentApprovalBar({
    */
   const fullSurface = current != null && approvalOpensFullSurface(current);
   const overlayOpen =
-    current != null && !minimized && !fullSurface && anchorBounds != null;
+    reportingReady &&
+    current != null &&
+    !minimized &&
+    !fullSurface &&
+    anchorBounds != null;
   const overlayOptions: Parameters<typeof useShellContentOverlay>[0] =
     overlayOpen && current && anchorBounds
       ? {
@@ -956,7 +974,11 @@ export function ConsentApprovalBar({
         )
       : null;
 
-  if (!current || !currentCaller) return present(resultNotice);
+  if (!reportingReady || !current || !currentCaller)
+    return present(resultNotice);
+  // Bind the audit default to canonical consent before its actions appear.
+  if (current.kind === "unit-install-review" && !reportingSetup.ready)
+    return present(reportingSetup.status);
 
   // The full surface is chrome, not overlay: it renders here, in this document,
   // so it can be a real dialog with the shell's focus behaviour. Closing it
@@ -968,6 +990,7 @@ export function ConsentApprovalBar({
         {resultNotice}
         <ApprovalFullSurface
           workspaceLabel={approvalWorkspaceLabel}
+          onboardingOptions={reportingSetup.content}
           presentationKey={presentationKey ?? undefined}
           approval={current}
           caller={currentCaller}
