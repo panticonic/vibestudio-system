@@ -5,6 +5,7 @@
  * its host, which performs the actual `shellApproval.*` calls. Secret-input
  * values stay local and are only emitted on submit.
  */
+import { browserPermissionDecisions } from "@vibestudio/shared/approvals";
 import { useEffect, useState } from "react";
 import type {
   ComponentProps,
@@ -633,12 +634,7 @@ export function ApprovalCard({
                     aria-hidden
                     style={{ animation: "app-tree-spin 0.7s linear infinite" }}
                   />
-                  <Text
-                    size="1"
-                    color="gray"
-                    role="status"
-                    aria-live="polite"
-                  >
+                  <Text size="1" color="gray" role="status" aria-live="polite">
                     {`${approval.lifecycle?.progress?.label ?? "Checking builds, schemas, and authority"}${
                       approval.lifecycle?.progress?.total !== undefined
                         ? ` (${approval.lifecycle.progress.completed ?? 0} of ${approval.lifecycle.progress.total})`
@@ -1175,12 +1171,13 @@ function StandardApprovalActions({
 }
 
 function BrowserPermissionActions({
-  approval: _approval,
+  approval,
   decide,
 }: {
   approval: PendingBrowserPermissionApproval;
   decide: (decision: ApprovalDecision) => void;
 }) {
+  const decisions = browserPermissionDecisions(approval.capabilities);
   const copy = HOST_APPROVAL_COPY.actions.browserPermission;
   return (
     <Flex align="center" className="approval-actions" gap="2" wrap="wrap">
@@ -1191,20 +1188,24 @@ function BrowserPermissionActions({
         variant="solid"
         onClick={() => decide("once")}
       />
-      <DecisionButton
-        decision="session"
-        label={copy.session.label}
-        description={copy.session.description}
-        variant="surface"
-        onClick={() => decide("session")}
-      />
-      <DecisionButton
-        decision="always"
-        label={copy.always.label}
-        description={copy.always.description}
-        variant="surface"
-        onClick={() => decide("always")}
-      />
+      {decisions.includes("session") && (
+        <DecisionButton
+          decision="session"
+          label={copy.session.label}
+          description={copy.session.description}
+          variant="surface"
+          onClick={() => decide("session")}
+        />
+      )}
+      {decisions.includes("always") && (
+        <DecisionButton
+          decision="always"
+          label={copy.always.label}
+          description={copy.always.description}
+          variant="surface"
+          onClick={() => decide("always")}
+        />
+      )}
       <DecisionButton
         decision="block"
         label={copy.block.label}

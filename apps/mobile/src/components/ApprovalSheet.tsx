@@ -1,3 +1,4 @@
+import { browserPermissionDecisions } from "@vibestudio/shared/approvals";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -872,6 +873,7 @@ export function ApprovalSheet({
                   />
                 ) : current.kind === "browser-permission" ? (
                   <BrowserPermissionActions
+                    approval={current}
                     busy={isBusy}
                     pendingAction={pendingAction}
                     onChoose={(decision) =>
@@ -3288,10 +3290,12 @@ function StandardActions({
 }
 
 function BrowserPermissionActions({
+  approval,
   busy,
   pendingAction,
   onChoose,
 }: {
+  approval: PendingBrowserPermissionApproval;
   busy: boolean;
   pendingAction: PendingAction | null;
   onChoose: (decision: ApprovalDecision) => void;
@@ -3319,24 +3323,29 @@ function BrowserPermissionActions({
       variant: "outline",
     },
   ];
+  const offered = actions.filter((action) =>
+    browserPermissionDecisions(approval.capabilities).includes(action.decision),
+  );
   return (
     <View style={styles.actionGroups}>
-      {[actions.slice(0, 1), actions.slice(1, 3)].map((row, index) => (
-        <View key={index} style={styles.actionRow}>
-          {row.map((action) => (
-            <DecisionButton
-              key={action.decision}
-              label={action.label}
-              description={action.description}
-              variant={action.variant}
-              disabled={busy}
-              loading={pendingAction === action.decision}
-              onPress={() => onChoose(action.decision)}
-              testID={`approval-action-${action.decision}`}
-            />
-          ))}
-        </View>
-      ))}
+      {[offered.slice(0, 1), offered.slice(1, 3)]
+        .filter((row) => row.length > 0)
+        .map((row, index) => (
+          <View key={index} style={styles.actionRow}>
+            {row.map((action) => (
+              <DecisionButton
+                key={action.decision}
+                label={action.label}
+                description={action.description}
+                variant={action.variant}
+                disabled={busy}
+                loading={pendingAction === action.decision}
+                onPress={() => onChoose(action.decision)}
+                testID={`approval-action-${action.decision}`}
+              />
+            ))}
+          </View>
+        ))}
       <View style={styles.actionRow}>
         <DecisionButton
           label={copy.block.label}
