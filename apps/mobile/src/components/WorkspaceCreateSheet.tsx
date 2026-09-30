@@ -1,3 +1,4 @@
+import { AppModal } from "./ui/AppModal";
 import { useEffect, useRef, useState } from "react";
 import {
   pendingReviewNotice,
@@ -11,7 +12,6 @@ import { sameWorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types"
 import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -167,7 +167,7 @@ export function WorkspaceCreateSheet({
     }
   };
   return (
-    <Modal
+    <AppModal
       transparent
       animationType="slide"
       onRequestClose={() => {
@@ -494,6 +494,6 @@ export function WorkspaceCreateSheet({
           />
         </ScrollView>
       </KeyboardAvoidingView>
-    </Modal>
+    </AppModal>
   );
 }

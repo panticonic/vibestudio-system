@@ -1,3 +1,4 @@
+import { AppModal } from "./ui/AppModal";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 /**
  * CommandSheet — the mobile command palette (quickfire-overlay-spec §7.1).
@@ -23,7 +24,6 @@ import {
   Animated,
   Easing,
   KeyboardAvoidingView,
-  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -613,7 +613,7 @@ export function CommandSheet({
   if (!request) return null;
 
   return (
-    <Modal
+    <AppModal
       transparent
       visible={workspaceVisible}
       statusBarTranslucent
@@ -910,7 +910,7 @@ export function CommandSheet({
           </SafeAreaView>
         </KeyboardAvoidingView>
       </View>
-    </Modal>
+    </AppModal>
   );
 }
 

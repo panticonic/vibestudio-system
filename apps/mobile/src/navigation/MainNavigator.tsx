@@ -1,3 +1,4 @@
+import { AppModal } from "../components/ui/AppModal";
 import { workspaceName as displayWorkspaceName } from "../services/workspaceName";
 import { WorkspaceCreateSheet } from "../components/WorkspaceCreateSheet";
 import { WorkspaceApprovalSurface } from "../components/WorkspaceApprovalSurface";
@@ -7,7 +8,6 @@ import { WorkspaceSessionEffects } from "../components/WorkspaceSessionEffects";
 import {
   View,
   Text,
-  Modal,
   ActivityIndicator,
   useWindowDimensions,
 } from "react-native";
@@ -181,7 +181,7 @@ function RetainedWorkspaceScreens({
           />
         ))}
       {directory.approvalOwnerErrors.length > 0 && !approvalOwner && (
-        <Modal transparent visible animationType="fade">
+        <AppModal transparent visible animationType="fade">
           <View
             style={{
               flex: 1,
@@ -214,13 +214,13 @@ function RetainedWorkspaceScreens({
               />
             </View>
           </View>
-        </Modal>
+        </AppModal>
       )}
       {directory.approvalWorkspaceId &&
         (!approvalSession ||
           approvalSession.state !== "ready" ||
           approvalSession.approvals === null) && (
-          <Modal
+          <AppModal
             transparent
             visible
             animationType="fade"
@@ -282,7 +282,7 @@ function RetainedWorkspaceScreens({
                 />
               </View>
             </View>
-          </Modal>
+          </AppModal>
         )}
       {!ready && (
         <View

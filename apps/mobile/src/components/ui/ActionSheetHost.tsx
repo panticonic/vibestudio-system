@@ -7,11 +7,11 @@
  * colors, safe-area padding. Tap backdrop / drag down / Cancel to dismiss.
  */
 
+import { AppModal } from "./AppModal";
 import { useCallback, useEffect, useRef } from "react";
 import {
   Animated,
   Easing,
-  Modal,
   PanResponder,
   Pressable,
   ScrollView,
@@ -121,7 +121,7 @@ export function ActionSheetHost() {
   if (!config) return null;
 
   return (
-    <Modal
+    <AppModal
       transparent
       visible
       statusBarTranslucent
@@ -253,7 +253,7 @@ export function ActionSheetHost() {
           </Pressable>
         </Animated.View>
       </View>
-    </Modal>
+    </AppModal>
   );
 }
 

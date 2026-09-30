@@ -1,3 +1,4 @@
+import { AppModal } from "./ui/AppModal";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 /**
  * QuickfireSheet — the panel-scoped agent conversation on mobile
@@ -28,7 +29,6 @@ import {
   Animated,
   Easing,
   KeyboardAvoidingView,
-  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -405,7 +405,7 @@ export function QuickfireSheet({
   const composeDisabledReason = view.error ?? null;
 
   return (
-    <Modal
+    <AppModal
       transparent
       visible={workspaceVisible}
       statusBarTranslucent
@@ -614,7 +614,7 @@ export function QuickfireSheet({
           </KeyboardAvoidingView>
         </View>
       </QuickfireSkinProvider>
-    </Modal>
+    </AppModal>
   );
 }
 

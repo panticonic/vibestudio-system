@@ -1,3 +1,4 @@
+import { AppModal } from "./ui/AppModal";
 import { browserPermissionDecisions } from "@vibestudio/shared/approvals";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,7 +8,6 @@ import {
   Animated,
   Easing,
   KeyboardAvoidingView,
-  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -481,7 +481,7 @@ export function ApprovalSheet({
   }
 
   return (
-    <Modal
+    <AppModal
       visible={visible ?? workspaceVisible}
       onRequestClose={onClose}
       transparent
@@ -899,7 +899,7 @@ export function ApprovalSheet({
           </SafeAreaView>
         </KeyboardAvoidingView>
       </View>
-    </Modal>
+    </AppModal>
   );
 }
 

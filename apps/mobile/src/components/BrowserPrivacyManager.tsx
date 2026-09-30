@@ -1,9 +1,9 @@
+import { AppModal } from "./ui/AppModal";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -288,7 +288,7 @@ export function BrowserPrivacyManager({
   );
 
   return (
-    <Modal
+    <AppModal
       visible={workspaceVisible}
       animationType="slide"
       presentationStyle="fullScreen"
@@ -515,7 +515,7 @@ export function BrowserPrivacyManager({
           </Text>
         </ScrollView>
       </View>
-    </Modal>
+    </AppModal>
   );
 }
 

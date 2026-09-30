@@ -1,6 +1,6 @@
+import { AppModal } from "./ui/AppModal";
 import { useRef, useState } from "react";
 import {
-  Modal,
   ScrollView,
   Text,
   TextInput,
@@ -110,7 +110,7 @@ export function WorkspaceTransferSheet({
     </View>
   );
   return (
-    <Modal
+    <AppModal
       visible
       animationType="slide"
       onRequestClose={() => {
@@ -419,6 +419,6 @@ export function WorkspaceTransferSheet({
           )}
         </ScrollView>
       </View>
-    </Modal>
+    </AppModal>
   );
 }
