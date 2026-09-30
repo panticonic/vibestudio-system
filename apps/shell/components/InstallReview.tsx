@@ -30,11 +30,26 @@
  * same decision: only the arrangement differs.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type {
+  Dispatch,
+  KeyboardEvent as ReactKeyboardEvent,
+  SetStateAction,
+} from "react";
 import { Badge, Button, Checkbox, Flex, Text, Tooltip } from "@radix-ui/themes";
 import { PanelIcon } from "./PanelIcon";
-import { ChevronDownIcon, InfoCircledIcon, LockClosedIcon } from "@radix-ui/react-icons";
+import {
+  ChevronDownIcon,
+  InfoCircledIcon,
+  LockClosedIcon,
+} from "@radix-ui/react-icons";
 import type { PendingUnitInstallReviewApproval } from "@vibestudio/shared/approvals";
 // The resolution is the *answer* to a review, so it lives with the method that
 // returns it (shellApproval), not with the review snapshot in shared.
@@ -82,21 +97,32 @@ function changeSummary(approval: PendingUnitInstallReviewApproval): string {
   return [
     added.length > 0 ? COPY.adds(summarizeParts(added)) : null,
     changed.length > 0 ? COPY.updates(summarizeParts(changed)) : null,
-    removed.length > 0 ? COPY.removes(summarizeParts(removed, { includeRemoved: true })) : null,
+    removed.length > 0
+      ? COPY.removes(summarizeParts(removed, { includeRemoved: true }))
+      : null,
   ]
     .filter((line): line is string => line !== null)
     .join(" · ");
 }
 
-function foldedGroupSummary(group: InstallPartGroup, differential: boolean): string {
+function foldedGroupSummary(
+  group: InstallPartGroup,
+  differential: boolean,
+): string {
   const shown = group.parts.slice(0, 2).map((part) => {
-    const summary = differential ? differentialLine(part) : partNotableLine(part);
+    const summary = differential
+      ? differentialLine(part)
+      : partNotableLine(part);
     const fragment =
-      summary.length === 0 ? summary : `${summary[0]?.toLowerCase() ?? ""}${summary.slice(1)}`;
+      summary.length === 0
+        ? summary
+        : `${summary[0]?.toLowerCase() ?? ""}${summary.slice(1)}`;
     return `${part.title}: ${fragment}`;
   });
   const remaining = group.parts.length - shown.length;
-  return [...shown, ...(remaining > 0 ? [`${remaining} more`] : [])].join(" · ");
+  return [...shown, ...(remaining > 0 ? [`${remaining} more`] : [])].join(
+    " · ",
+  );
 }
 
 /**
@@ -129,7 +155,9 @@ export interface InstallReviewProps {
 export type InstallSelection = Map<string, Set<string>>;
 
 /** One click adds the complete slate: every part, every row offered by default. */
-export function defaultInstallSelection(parts: readonly InstallReviewPart[]): InstallSelection {
+export function defaultInstallSelection(
+  parts: readonly InstallReviewPart[],
+): InstallSelection {
   return new Map(
     parts
       .filter((part) => part.change !== "removed")
@@ -138,9 +166,9 @@ export function defaultInstallSelection(parts: readonly InstallReviewPart[]): In
         new Set(
           clearableRows(part)
             .filter((row) => row.selectedByDefault)
-            .map((row) => row.key)
+            .map((row) => row.key),
         ),
-      ])
+      ]),
   );
 }
 
@@ -149,13 +177,15 @@ export function defaultInstallSelection(parts: readonly InstallReviewPart[]): In
  * on screen. A refreshed snapshot that changes either of those has changed what
  * a selection can legally name, which is what the card watches.
  */
-export function installSelectionSignature(parts: readonly InstallReviewPart[]): string {
+export function installSelectionSignature(
+  parts: readonly InstallReviewPart[],
+): string {
   return parts
     .map(
       (part) =>
         `${part.identityKey}:${clearableRows(part)
           .map((row) => row.key)
-          .join(",")}`
+          .join(",")}`,
     )
     .join("|");
 }
@@ -172,14 +202,17 @@ export function installSelectionSignature(parts: readonly InstallReviewPart[]): 
  */
 export function syncInstallSelection(
   parts: readonly InstallReviewPart[],
-  previous: InstallSelection
+  previous: InstallSelection,
 ): InstallSelection {
   const next = defaultInstallSelection(parts);
   for (const part of parts) {
     const prior = previous.get(part.identityKey);
     if (!prior || !next.has(part.identityKey)) continue;
     const offered = new Set(clearableRows(part).map((row) => row.key));
-    next.set(part.identityKey, new Set([...prior].filter((key) => offered.has(key))));
+    next.set(
+      part.identityKey,
+      new Set([...prior].filter((key) => offered.has(key))),
+    );
   }
   return next;
 }
@@ -193,19 +226,24 @@ export function syncInstallSelection(
  * diff. An install and a first adoption have nothing to diff against, so they
  * are never differential no matter what marks ride along.
  */
-export function isDifferentialReview(approval: PendingUnitInstallReviewApproval): boolean {
-  if (approval.mode === "install" || approval.mode === "adopt-root") return false;
+export function isDifferentialReview(
+  approval: PendingUnitInstallReviewApproval,
+): boolean {
+  if (approval.mode === "install" || approval.mode === "adopt-root")
+    return false;
   return approval.parts.some(
     (part) =>
       part.change === "changed" ||
       part.change === "removed" ||
-      [...part.notableRows, ...part.everydayRows].some((row) => row.change !== undefined)
+      [...part.notableRows, ...part.everydayRows].some(
+        (row) => row.change !== undefined,
+      ),
   );
 }
 
 export function installAcceptanceFrom(
   approval: PendingUnitInstallReviewApproval,
-  selection: InstallSelection
+  selection: InstallSelection,
 ): TemplateAcceptance {
   return {
     decision:
@@ -235,7 +273,12 @@ function useTwoPane(active: boolean): boolean {
   const query = `(min-width: ${TWO_PANE_MIN_WIDTH}px)`;
   const [wide, setWide] = useState(() => matchesQuery(query));
   useEffect(() => {
-    if (!active || typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    if (
+      !active ||
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    )
+      return;
     const media = window.matchMedia(query);
     const update = () => setWide(media.matches);
     update();
@@ -246,7 +289,8 @@ function useTwoPane(active: boolean): boolean {
 }
 
 function matchesQuery(query: string): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function")
+    return false;
   return window.matchMedia(query).matches;
 }
 
@@ -259,7 +303,9 @@ export function InstallReview({
   const [openPart, setOpenPart] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<string>("");
-  const [groupExpansion, setGroupExpansion] = useState<Map<string, boolean>>(() => new Map());
+  const [groupExpansion, setGroupExpansion] = useState<Map<string, boolean>>(
+    () => new Map(),
+  );
   const twoPane = useTwoPane(layout === "dialog");
   const listRef = useRef<HTMLDivElement>(null);
   const detailPaneId = `${useId()}-detail-pane`;
@@ -271,18 +317,26 @@ export function InstallReview({
   const differential = isDifferentialReview(approval);
   const parts = useMemo(
     () =>
-      [...approval.parts].sort((left, right) => compareInstallParts(approval.mode, left, right)),
-    [approval.parts, approval.mode]
+      [...approval.parts].sort((left, right) =>
+        compareInstallParts(approval.mode, left, right),
+      ),
+    [approval.parts, approval.mode],
   );
-  const templateParts = useMemo(() => parts.filter((part) => part.section === "template"), [parts]);
-  const repairParts = useMemo(() => parts.filter((part) => part.section === "repair"), [parts]);
+  const templateParts = useMemo(
+    () => parts.filter((part) => part.section === "template"),
+    [parts],
+  );
+  const repairParts = useMemo(
+    () => parts.filter((part) => part.section === "repair"),
+    [parts],
+  );
   // Search and the kind filter share one threshold, because they answer the same
   // question — "where is the one I care about" — and neither is worth its row of
   // chrome on a short list.
   const filtersShown = templateParts.length > SEARCH_THRESHOLD;
   const kinds = useMemo(
     () => [...new Set(templateParts.map((part) => part.label))].sort(),
-    [templateParts]
+    [templateParts],
   );
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -292,13 +346,13 @@ export function InstallReview({
         (kindFilter === "" || part.label === kindFilter) &&
         (needle === "" ||
           part.title.toLowerCase().includes(needle) ||
-          part.purpose.toLowerCase().includes(needle))
+          part.purpose.toLowerCase().includes(needle)),
     );
   }, [templateParts, query, kindFilter, filtersShown]);
   const groups = useMemo(() => groupInstallParts(visible), [visible]);
   const anythingNotable = useMemo(
     () => templateParts.some((part) => part.notableRows.length > 0),
-    [templateParts]
+    [templateParts],
   );
   const filtering = filtersShown && (query.trim() !== "" || kindFilter !== "");
   const groupIsOpen = useCallback(
@@ -311,18 +365,20 @@ export function InstallReview({
       // collapsing every category would replace the workspace with headings.
       return !(anythingNotable && !group.hasNotablePart);
     },
-    [anythingNotable, filtering, groupExpansion]
+    [anythingNotable, filtering, groupExpansion],
   );
   const displayedParts = useMemo(
     () => groups.flatMap((group) => (groupIsOpen(group) ? group.parts : [])),
-    [groupIsOpen, groups]
+    [groupIsOpen, groups],
   );
 
   // Filtering changes what is on screen and nothing else. The hidden parts are
   // still being added and still carrying whatever grants they had, so the list
   // says how many, and how many of them are still allowed now.
   const hidden = templateParts.filter((part) => !visible.includes(part));
-  const hiddenAllowed = hidden.filter((part) => (selection.get(part.identityKey)?.size ?? 0) > 0);
+  const hiddenAllowed = hidden.filter(
+    (part) => (selection.get(part.identityKey)?.size ?? 0) > 0,
+  );
 
   // In two-pane mode the detail column always shows something, so the first part
   // in the sorted list — the one with the most to say — is open on arrival. When
@@ -331,7 +387,9 @@ export function InstallReview({
   const openedPart = openPart
     ? displayedParts.find((part) => part.identityKey === openPart)
     : undefined;
-  const detailPart = twoPane ? (openedPart ?? displayedParts[0] ?? repairParts[0]) : openedPart;
+  const detailPart = twoPane
+    ? (openedPart ?? displayedParts[0] ?? repairParts[0])
+    : openedPart;
 
   const togglePart = (part: InstallReviewPart, checked: boolean) => {
     onSelectionChange((previous) => {
@@ -340,7 +398,10 @@ export function InstallReview({
       if (!checked) {
         // Deselecting a part deselects its permissions — and remembers them, so
         // that changing your mind twice costs nothing.
-        rememberedRows.current.set(part.identityKey, new Set(previous.get(part.identityKey) ?? []));
+        rememberedRows.current.set(
+          part.identityKey,
+          new Set(previous.get(part.identityKey) ?? []),
+        );
         next.set(part.identityKey, new Set());
         return next;
       }
@@ -354,7 +415,11 @@ export function InstallReview({
     });
   };
 
-  const toggleRow = (part: InstallReviewPart, rowKey: string, checked: boolean) => {
+  const toggleRow = (
+    part: InstallReviewPart,
+    rowKey: string,
+    checked: boolean,
+  ) => {
     onSelectionChange((previous) => {
       const next = new Map(previous);
       const rows = new Set(next.get(part.identityKey) ?? []);
@@ -374,33 +439,39 @@ export function InstallReview({
    * anyone with more than one approval waiting. Tab is the way into the detail
    * pane, which is why only the selected row is a tab stop in this layout.
    */
-  const handleListKeys = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
-    if (!keys.includes(event.key)) return;
-    const list = listRef.current;
-    if (!list) return;
-    const rows = [...list.querySelectorAll<HTMLButtonElement>("button[data-part-row]")];
-    if (rows.length === 0) return;
-    const active = document.activeElement;
-    const current = rows.findIndex((row) => row === active);
-    if (current < 0) return;
-    const index =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? rows.length - 1
-          : event.key === "ArrowDown"
-            ? Math.min(rows.length - 1, current + 1)
-            : Math.max(0, current - 1);
-    event.preventDefault();
-    rows[index]?.focus();
-    rows[index]?.click();
-  }, []);
+  const handleListKeys = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+      if (!keys.includes(event.key)) return;
+      const list = listRef.current;
+      if (!list) return;
+      const rows = [
+        ...list.querySelectorAll<HTMLButtonElement>("button[data-part-row]"),
+      ];
+      if (rows.length === 0) return;
+      const active = document.activeElement;
+      const current = rows.findIndex((row) => row === active);
+      if (current < 0) return;
+      const index =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? rows.length - 1
+            : event.key === "ArrowDown"
+              ? Math.min(rows.length - 1, current + 1)
+              : Math.max(0, current - 1);
+      event.preventDefault();
+      rows[index]?.focus();
+      rows[index]?.click();
+    },
+    [],
+  );
 
   // An upgrade that changes no declared authority anywhere is one line and two
   // actions — never a per-part list (§5.4). The card header carries the line and
   // its footer carries the actions, so there is nothing left to render here.
-  if (approval.parts.length === 0 && approval.unchangedPartCount > 0) return null;
+  if (approval.parts.length === 0 && approval.unchangedPartCount > 0)
+    return null;
 
   const renderPart = (part: InstallReviewPart) => (
     <PartRow
@@ -416,7 +487,7 @@ export function InstallReview({
         setOpenPart((current) =>
           // In two-pane mode the pane never empties: clicking the open part again
           // would blank the column for no reason a person asked for.
-          current === part.identityKey && !twoPane ? null : part.identityKey
+          current === part.identityKey && !twoPane ? null : part.identityKey,
         )
       }
       onTogglePart={(checked) => togglePart(part, checked)}
@@ -425,7 +496,12 @@ export function InstallReview({
   );
 
   const list = (
-    <Flex direction="column" gap="3" className="install-review-column" minWidth="0">
+    <Flex
+      direction="column"
+      gap="3"
+      className="install-review-column"
+      minWidth="0"
+    >
       <Text size="1" color="gray">
         {changeSummary(approval)}
       </Text>
@@ -466,7 +542,11 @@ export function InstallReview({
             {COPY.sections.noMatches}
           </Text>
         ) : (
-          <div className="install-review-groups" ref={listRef} onKeyDown={handleListKeys}>
+          <div
+            className="install-review-groups"
+            ref={listRef}
+            onKeyDown={handleListKeys}
+          >
             {groups.map((group) => {
               const open = groupIsOpen(group);
               const groupId = `${detailPaneId}-${group.key}`;
@@ -502,7 +582,11 @@ export function InstallReview({
                         </Badge>
                       </span>
                       <ChevronDownIcon
-                        className={open ? "install-review-chevron open" : "install-review-chevron"}
+                        className={
+                          open
+                            ? "install-review-chevron open"
+                            : "install-review-chevron"
+                        }
                         width={14}
                         height={14}
                         aria-hidden="true"
@@ -515,7 +599,11 @@ export function InstallReview({
                     ) : null}
                   </button>
                   {open ? (
-                    <ul className="install-review-list" role="list" id={groupId}>
+                    <ul
+                      className="install-review-list"
+                      role="list"
+                      id={groupId}
+                    >
                       {group.parts.map(renderPart)}
                     </ul>
                   ) : null}
@@ -540,7 +628,12 @@ export function InstallReview({
       </div>
 
       {hidden.length > 0 ? (
-        <Text size="1" color="gray" aria-live="polite" className="install-review-hidden-note">
+        <Text
+          size="1"
+          color="gray"
+          aria-live="polite"
+          className="install-review-hidden-note"
+        >
           {COPY.filters.hidden(hidden.length, hiddenAllowed.length)}
         </Text>
       ) : null}
@@ -550,13 +643,17 @@ export function InstallReview({
           {COPY.summary.unchangedParts(approval.unchangedPartCount)}
         </Text>
       ) : null}
-
     </Flex>
   );
 
   if (!twoPane) {
     return (
-      <Flex direction="column" gap="3" className="install-review" data-layout={layout}>
+      <Flex
+        direction="column"
+        gap="3"
+        className="install-review"
+        data-layout={layout}
+      >
         {list}
       </Flex>
     );
@@ -594,7 +691,9 @@ export function InstallReview({
               part={detailPart}
               parts={approval.parts}
               selected={selection.get(detailPart.identityKey) ?? new Set()}
-              onToggleRow={(rowKey, checked) => toggleRow(detailPart, rowKey, checked)}
+              onToggleRow={(rowKey, checked) =>
+                toggleRow(detailPart, rowKey, checked)
+              }
             />
           </>
         ) : (
@@ -638,7 +737,10 @@ export function InstallReviewActions({
   const singlePart = arriving.length === 1 ? arriving[0] : null;
   const visibleStatusLine =
     statusLine && singlePart
-      ? statusLine.replace(/^1 part/u, `${singlePart.title} · ${singlePart.label}`)
+      ? statusLine.replace(
+          /^1 part/u,
+          `${singlePart.title} · ${singlePart.label}`,
+        )
       : statusLine;
 
   return (
@@ -703,10 +805,12 @@ function PartRow({
   onToggleRow: (rowKey: string, checked: boolean) => void;
 }) {
   const clearable = clearableRows(part);
-  const allSelected = clearable.length > 0 && clearable.every((row) => selected.has(row.key));
+  const allSelected =
+    clearable.length > 0 && clearable.every((row) => selected.has(row.key));
   const noneSelected = clearable.every((row) => !selected.has(row.key));
   const removed = part.change === "removed";
-  const askingHint = noneSelected && clearable.length > 0 ? COPY.willAsk : undefined;
+  const askingHint =
+    noneSelected && clearable.length > 0 ? COPY.willAsk : undefined;
   const rowId = useId();
   const detailId = `${rowId}-detail`;
   const toggleId = `${rowId}-toggle`;
@@ -720,7 +824,9 @@ function PartRow({
           // part's purpose is already on the row and says nothing about that.
           <Tooltip content={askingHint ?? COPY.willAllow}>
             <Checkbox
-              checked={allSelected ? true : noneSelected ? false : "indeterminate"}
+              checked={
+                allSelected ? true : noneSelected ? false : "indeterminate"
+              }
               onCheckedChange={(checked) => onTogglePart(checked === true)}
               aria-label={`Allow ${part.title} now`}
             />
@@ -760,6 +866,7 @@ function PartRow({
               <PanelIcon
                 icon={part.icon}
                 source={part.repoPath}
+                iconState={part.iconState}
                 size={18}
                 fallback={part.kind === "panel" ? "panel" : part.kind}
               />
@@ -782,7 +889,11 @@ function PartRow({
                 {part.label}
               </Text>
               <ChevronDownIcon
-                className={active ? "install-review-chevron open" : "install-review-chevron"}
+                className={
+                  active
+                    ? "install-review-chevron open"
+                    : "install-review-chevron"
+                }
                 width={13}
                 height={13}
                 aria-hidden="true"
@@ -790,7 +901,12 @@ function PartRow({
             </span>
           </span>
           {part.purpose ? (
-            <Text as="span" size="1" color="gray" className="install-review-purpose">
+            <Text
+              as="span"
+              size="1"
+              color="gray"
+              className="install-review-purpose"
+            >
               {part.purpose}
             </Text>
           ) : null}
@@ -828,11 +944,16 @@ function PartRow({
  * is counted out loud and lives in full one keypress away, in the detail.
  */
 function differentialLine(part: InstallReviewPart): string {
-  const changed = [...part.notableRows, ...part.everydayRows].filter((row) => row.change);
+  const changed = [...part.notableRows, ...part.everydayRows].filter(
+    (row) => row.change,
+  );
   if (changed.length === 0) return COPY.noNewPermissions;
   const shown = changed
     .slice(0, DIFFERENTIAL_LINE_LIMIT)
-    .map((row) => `${row.change === "removed" ? "−" : "+"} ${installRowHeadline(row)}`);
+    .map(
+      (row) =>
+        `${row.change === "removed" ? "−" : "+"} ${installRowHeadline(row)}`,
+    );
   const rest = changed.length - shown.length;
   return [...shown, ...(rest > 0 ? [COPY.moreChanges(rest)] : [])].join(" · ");
 }
@@ -860,14 +981,22 @@ function PartDetail({
   // because that is the one a person must not miss.
   const notable = part.notableRows;
   const hasCritical = notable.some((row) => row.timing === "asks-every-time");
-  const collapsed = notable.length > NOTABLE_COLLAPSE_THRESHOLD && !showAllNotable && !hasCritical;
-  const shownNotable = collapsed ? notable.slice(0, NOTABLE_COLLAPSE_THRESHOLD) : notable;
-  const everydayGroups = useMemo(() => groupRowsByDomain(part.everydayRows), [part.everydayRows]);
+  const collapsed =
+    notable.length > NOTABLE_COLLAPSE_THRESHOLD &&
+    !showAllNotable &&
+    !hasCritical;
+  const shownNotable = collapsed
+    ? notable.slice(0, NOTABLE_COLLAPSE_THRESHOLD)
+    : notable;
+  const everydayGroups = useMemo(
+    () => groupRowsByDomain(part.everydayRows),
+    [part.everydayRows],
+  );
 
   // Dependencies are unit names, which is machinery. Where the same operation is
   // landing the part it needs, say the name the user just read in the list.
   const requires = part.requiredUnitKeys.map(
-    (key) => parts.find((candidate) => candidate.name === key)?.title ?? key
+    (key) => parts.find((candidate) => candidate.name === key)?.title ?? key,
   );
 
   return (
@@ -952,7 +1081,11 @@ function PartDetail({
               <OriginText text={part.origin.url} origin={part.origin} />
             </>
           ) : part.origin.originStatus === "multiple-template-contributors" ? (
-            <> · Multiple template contributions; inspect file history for exact sources</>
+            <>
+              {" "}
+              · Multiple template contributions; inspect file history for exact
+              sources
+            </>
           ) : (
             ""
           )}
@@ -999,10 +1132,13 @@ function ReviewRow({
 }) {
   const headline = installRowHeadline(row);
   const detail =
-    row.kind === "behavior" ? INSTALL_BEHAVIOR_COPY[row.fact].detail : row.row.resource;
+    row.kind === "behavior"
+      ? INSTALL_BEHAVIOR_COPY[row.fact].detail
+      : row.row.resource;
   const binding = row.kind === "permission" ? row.binding : undefined;
   const timing = INSTALL_ROW_TIMING_COPY[row.timing];
-  const domainLabel = row.kind === "permission" ? AUTHORITY_DOMAINS[row.row.domain].label : null;
+  const domainLabel =
+    row.kind === "permission" ? AUTHORITY_DOMAINS[row.row.domain].label : null;
 
   return (
     <Flex align="start" gap="2" className="install-review-row">
@@ -1017,7 +1153,11 @@ function ReviewRow({
         // checkbox would promise something the server would refuse.
         <Tooltip content={timing ?? headline}>
           <span className="install-review-disclosure-marker" aria-hidden="true">
-            {row.timing === "asks-every-time" ? <LockClosedIcon /> : <InfoCircledIcon />}
+            {row.timing === "asks-every-time" ? (
+              <LockClosedIcon />
+            ) : (
+              <InfoCircledIcon />
+            )}
           </span>
         </Tooltip>
       )}
@@ -1025,14 +1165,24 @@ function ReviewRow({
         <Flex align="center" gap="2" wrap="wrap">
           {domainLabel ? (
             <Badge
-              color={row.change === "added" ? "green" : row.change === "removed" ? "gray" : "amber"}
+              color={
+                row.change === "added"
+                  ? "green"
+                  : row.change === "removed"
+                    ? "gray"
+                    : "amber"
+              }
               variant="soft"
             >
               {domainLabel}
             </Badge>
           ) : null}
           <Text size="1" weight="medium">
-            {row.change === "added" ? "+ " : row.change === "removed" ? "− " : ""}
+            {row.change === "added"
+              ? "+ "
+              : row.change === "removed"
+                ? "− "
+                : ""}
             {headline}
           </Text>
         </Flex>
@@ -1124,7 +1274,9 @@ export interface InstallOutcomeModel {
  * fact the outcome did not carry, and every branch that would claim more than
  * was observed falls back to the neutral one.
  */
-export function installOutcomeModel(outcome: InstallReviewOutcome): InstallOutcomeModel {
+export function installOutcomeModel(
+  outcome: InstallReviewOutcome,
+): InstallOutcomeModel {
   if (outcome.source === "refused") {
     return {
       tone: "failure",
@@ -1179,7 +1331,9 @@ export function InstallReviewOutcomeNotice({
   compact = false,
 }: {
   outcome: InstallReviewOutcome;
-  onOpenEntryPoint?: (entryPoint: NonNullable<InstallReviewResolution["entryPoint"]>) => void;
+  onOpenEntryPoint?: (
+    entryPoint: NonNullable<InstallReviewResolution["entryPoint"]>,
+  ) => void;
   onDismiss?: () => void;
   compact?: boolean;
 }) {
@@ -1225,7 +1379,12 @@ export function InstallReviewOutcomeNotice({
         </Text>
       ) : null}
       {model.entryPoint || onDismiss ? (
-        <Flex align="center" gap="2" mt="1" className="install-review-outcome-actions">
+        <Flex
+          align="center"
+          gap="2"
+          mt="1"
+          className="install-review-outcome-actions"
+        >
           {model.entryPoint && onOpenEntryPoint ? (
             <Button
               size="1"

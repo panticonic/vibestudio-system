@@ -19,7 +19,12 @@ export function WorkspaceApprovalSurface({
 }) {
   const items = directory.approvalItems;
   const selected = directory.selectedApproval;
-  if (!selected || directory.selectedApprovalOwner !== owner) return null;
+  if (
+    !directory.approvalPresentation.open ||
+    !selected ||
+    directory.selectedApprovalOwner !== owner
+  )
+    return null;
   const selectedKey = approvalPresentationKey(selected);
   const remaining = directory.unloadedApprovalWorkspaces;
   const loading = remaining

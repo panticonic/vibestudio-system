@@ -97,9 +97,9 @@ const GUIDE_COLOR_ACTIVE = "var(--gray-10)";
 // brighter, heavier title, not an accent tint. The accent is reserved for
 // transient drag feedback (the drop indicator), where it has to cut through.
 const COLORS = {
-  selected: "var(--gray-a4)",
-  selectedHover: "var(--gray-a5)",
-  hover: "var(--gray-a3)",
+  selected: "var(--app-chrome-selected)",
+  selectedHover: "var(--app-chrome-selected-hover)",
+  hover: "var(--app-chrome-hover)",
   dropIndicator: "var(--accent-9)",
 } as const;
 
@@ -546,7 +546,7 @@ const SortableTreeItem = memo(
                   width: CARET_SLOT,
                   height: CARET_SLOT,
                   margin: 0,
-                  color: isSelected ? "var(--gray-12)" : "var(--gray-9)",
+                  color: isSelected ? "var(--app-chrome-selected-text)" : "var(--gray-9)",
                   transition: "transform var(--motion-base) var(--ease-standard)",
                   transform: collapsed ? "rotate(0deg)" : "rotate(90deg)",
                 }}
@@ -576,7 +576,7 @@ const SortableTreeItem = memo(
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
-              color: isSelected ? "var(--gray-12)" : "var(--gray-11)",
+              color: isSelected ? "var(--app-chrome-selected-text)" : "var(--gray-11)",
             }}
           >
             {panel.title}

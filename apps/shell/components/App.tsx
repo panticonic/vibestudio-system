@@ -103,8 +103,6 @@ export function App() {
     <Theme
       appearance={effectiveTheme}
       {...themeConfig}
-      accentColor="gray"
-      grayColor="gray"
       panelBackground="solid"
       className="app-shell-theme"
     >

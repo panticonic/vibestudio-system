@@ -8,7 +8,9 @@ let mockSheet: ApprovalSheetProps;
 jest.mock("./ApprovalSheet", () => ({
   ApprovalSheet: (props: ApprovalSheetProps) => {
     mockSheet = props;
-    return null;
+    return require("react").createElement(require("react-native").View, {
+      testID: "visible-approval-sheet",
+    });
   },
 }));
 
@@ -181,4 +183,29 @@ it("resolves an account approval through its captured hub owner", async () => {
   expect(mockSheet.queue.status?.message).toContain(
     "Account: account queue unavailable",
   );
+});
+
+it("dismisses the selected review without resolving it and can reopen it", () => {
+  const { directory, system, rendered } = fixture();
+  const owner = directory.selectedApprovalOwner;
+  const selectedKey = directory.approvalPresentation.selectedKey;
+  const surface = () => (
+    <WorkspaceApprovalSurface
+      directory={directory as MobileWorkspaceDirectory}
+      owner={owner}
+      notify={jest.fn()}
+    />
+  );
+  directory.closeApprovals.mockImplementation(() => {
+    directory.approvalPresentation.open = false;
+  });
+  expect(rendered.getByTestId("visible-approval-sheet")).toBeTruthy();
+  mockSheet.onClose!();
+  rendered.rerender(surface());
+  expect(rendered.queryByTestId("visible-approval-sheet")).toBeNull();
+  expect(system.client.shellApproval.resolve).not.toHaveBeenCalled();
+  expect(directory.approvalPresentation.selectedKey).toBe(selectedKey);
+  directory.approvalPresentation.open = true;
+  rendered.rerender(surface());
+  expect(rendered.getByTestId("visible-approval-sheet")).toBeTruthy();
 });

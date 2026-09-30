@@ -85,6 +85,13 @@
   background: var(--gray-2);
   border-color: var(--gray-6);
 }
+/* Accent marks the selection where focus lives; a background workspace keeps
+   its remembered row in the neutral rung so only one row reads as active. */
+.workspace-section:not(.workspace-section-focused) {
+  --app-chrome-selected: var(--gray-a4);
+  --app-chrome-selected-hover: var(--gray-a5);
+  --app-chrome-selected-text: var(--gray-12);
+}
 .workspace-section-system {
   margin-top: var(--workspace-stack-gutter);
   border-top-color: var(--gray-5);

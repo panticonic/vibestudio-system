@@ -946,7 +946,7 @@ function DiffReviewSection({
             style={{ minWidth: 0 }}
           >
             <Flex align="center" gap="2" mb="1" wrap="wrap">
-              <Badge color="sky" variant="soft" radius="full">
+              <Badge variant="soft" radius="full">
                 {entry.repoPath}
               </Badge>
               <Text size="1" color="gray" style={{ marginLeft: "auto" }}>
@@ -1147,8 +1147,8 @@ function StandardApprovalActions({
                     ? "amber"
                     : isSevereCapability && action.decision === "version"
                       ? "red"
-                      : "sky"
-                  : undefined
+                      : undefined
+                  : "gray"
             }
             variant={recommended ? "solid" : "surface"}
             {...(action.decision === "deny"
@@ -1188,7 +1188,6 @@ function BrowserPermissionActions({
         decision="once"
         label={copy.once.label}
         description={copy.once.description}
-        color="sky"
         variant="solid"
         onClick={() => decide("once")}
       />
@@ -1256,7 +1255,6 @@ function ClientConfigActions({
         <Button
           size="1"
           variant="solid"
-          color="sky"
           disabled={missingRequired}
           onClick={onSubmit}
         >
@@ -1309,7 +1307,6 @@ function SecretInputActions({
         <Button
           size="1"
           variant="solid"
-          color="sky"
           disabled={missingRequired}
           onClick={onSubmit}
         >
@@ -1362,7 +1359,6 @@ function CredentialInputActions({
         <Button
           size="1"
           variant="solid"
-          color="sky"
           disabled={missingRequired}
           onClick={onSubmit}
         >
@@ -1400,7 +1396,7 @@ function DecisionButton({
   decision: ApprovalDecision;
   label: string;
   description: string;
-  color?: "amber" | "red" | "sky";
+  color?: "amber" | "red" | "gray";
   variant?: "solid" | "soft" | "surface" | "outline";
   icon?: ReactNode;
   style?: CSSProperties;

@@ -441,7 +441,7 @@ describe("ApprovalSheet", () => {
     ).toBeTruthy();
   });
 
-  it("presents one accessible modal summary that remains usable with long localized copy", () => {
+  it("keeps modal actions independently accessible with long localized copy", () => {
     const localized = {
       ...genericApproval,
       title:
@@ -449,13 +449,18 @@ describe("ApprovalSheet", () => {
       summary:
         "Cette demande particulièrement détaillée reste lisible même avec un agrandissement important du texte.",
     };
-    const { getByTestId } = renderSheet(localized);
+    const { getByTestId, getByRole } = renderSheet(localized);
     const sheet = getByTestId("approval-sheet");
 
-    expect(sheet.props.accessible).toBe(true);
+    expect(sheet.props.accessible).toBe(false);
     expect(sheet.props.accessibilityViewIsModal).toBe(true);
-    expect(sheet.props.accessibilityLabel).toContain(localized.title);
-    expect(sheet.props.accessibilityHint).toContain("choose an action");
+    expect(getByRole("header", { name: localized.title })).toBeTruthy();
+    expect(getByRole("button", { name: "Dismiss approval" })).toBeTruthy();
+    expect(
+      getByRole("button", {
+        name: getByTestId("approval-action-once").props.accessibilityLabel,
+      }),
+    ).toBeTruthy();
   });
 
   it.each([
