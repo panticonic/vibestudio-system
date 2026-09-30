@@ -5,6 +5,7 @@ import {
   fireEvent,
   cleanup,
   waitFor,
+  act,
 } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
@@ -16,11 +17,13 @@ const mocks = vi.hoisted(() => ({
   decide: vi.fn(),
   send: vi.fn(),
   overlay: vi.fn(),
+  shellEvent: vi.fn(),
 }));
 vi.mock("../shell/workspaceContext", () => ({
   useShellWorkspaceClient: () => ({ problemReports: mocks }),
 }));
 vi.mock("../shell/useShellOverlay", () => ({ useShellOverlay: mocks.overlay }));
+vi.mock("../shell/useShellEvent", () => ({ useShellEvent: mocks.shellEvent }));
 import { ReportingFirstUse } from "./ProblemReporting";
 const decision = {
   state: "undecided",
@@ -109,7 +112,7 @@ describe("mandatory first reporting choice", () => {
   });
 });
 
-it("requires an independent local-server choice after the device choice and never silently enables either", async () => {
+it("requires an independent connected-server choice after the device choice and never silently enables either", async () => {
   mocks.serverConsent.mockResolvedValue(decision);
   render(
     <Theme>
@@ -120,7 +123,7 @@ it("requires an independent local-server choice after the device choice and neve
     await screen.findByRole("button", { name: "Keep automatic reports off" }),
   );
   const serverEnable = await screen.findByRole("button", {
-    name: "Enable local server reports",
+    name: "Enable server reports",
   });
   expect(mocks.decideServer).not.toHaveBeenCalled();
   expect(screen.getByRole("dialog")).toBeTruthy();
@@ -129,4 +132,75 @@ it("requires an independent local-server choice after the device choice and neve
   expect(mocks.decide).toHaveBeenCalledWith(0, "off");
   expect(mocks.decideServer).toHaveBeenCalledWith(0, "on");
   expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it("prompts for a newly connected headless server even when the device already opted out", async () => {
+  mocks.consent.mockResolvedValue({ ...decision, state: "off", revision: 1 });
+  mocks.serverConsent.mockResolvedValue(decision);
+  render(
+    <Theme>
+      <ReportingFirstUse />
+    </Theme>,
+  );
+  const off = await screen.findByRole("button", {
+    name: "Keep server reports off",
+  });
+  expect(
+    screen.getByText(
+      "Sharing choice for your account on the connected server.",
+    ),
+  ).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  fireEvent.click(off);
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(mocks.decideServer).toHaveBeenCalledWith(0, "off");
+  expect(mocks.decide).not.toHaveBeenCalled();
+  expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it("does not repeat a saved server choice when opening another workspace", async () => {
+  mocks.consent.mockResolvedValue({ ...decision, state: "off", revision: 1 });
+  mocks.serverConsent.mockResolvedValue({
+    ...decision,
+    state: "on",
+    revision: 2,
+  });
+  const first = render(
+    <Theme>
+      <ReportingFirstUse />
+    </Theme>,
+  );
+  await waitFor(() => expect(mocks.serverConsent).toHaveBeenCalledTimes(1));
+  first.unmount();
+  render(
+    <Theme>
+      <ReportingFirstUse />
+    </Theme>,
+  );
+  await waitFor(() => expect(mocks.serverConsent).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(mocks.decideServer).not.toHaveBeenCalled();
+});
+
+it("loads the mandatory server choice after an initially unavailable headless server reconnects", async () => {
+  mocks.consent.mockResolvedValue({ ...decision, state: "off", revision: 1 });
+  mocks.serverConsent.mockRejectedValueOnce(new Error("Disconnected"));
+  mocks.serverConsent.mockResolvedValue(decision);
+  render(
+    <Theme>
+      <ReportingFirstUse />
+    </Theme>,
+  );
+  await screen.findByText(
+    "Server reporting choice unavailable: Error: Disconnected",
+  );
+  const connectionChanged = mocks.shellEvent.mock.calls.at(-1)![1];
+  await act(async () =>
+    connectionChanged({ status: "connected", isRemote: true }),
+  );
+  await screen.findByRole("button", { name: "Keep server reports off" });
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(mocks.serverConsent).toHaveBeenCalledTimes(2);
+  expect(mocks.decideServer).not.toHaveBeenCalled();
 });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Dialog, Flex, Text, TextArea } from "@radix-ui/themes";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { useShellEvent } from "../shell/useShellEvent";
 import type { ProblemReportBundle } from "@vibestudio/service-schemas/problemReportBundle";
 import {
   reportDraftContent,
@@ -120,13 +121,13 @@ export function ReportingFirstUse() {
         </Dialog.Content>
       </Dialog.Root>
       {decision && decision.state !== "undecided" && !error && (
-        <OwnedServerReportingChoice firstUse />
+        <ConnectedServerReportingChoice firstUse />
       )}
     </>
   );
 }
 
-function OwnedServerReportingChoice({
+function ConnectedServerReportingChoice({
   firstUse = false,
 }: {
   firstUse?: boolean;
@@ -147,6 +148,9 @@ function OwnedServerReportingChoice({
   useEffect(() => {
     void reload();
   }, [reload]);
+  useShellEvent("server-connection-changed", ({ status }) => {
+    if (status === "connected") void reload();
+  });
   const choose = async (state: "on" | "off") => {
     if (!decision) return;
     setBusy(true);
@@ -165,10 +169,11 @@ function OwnedServerReportingChoice({
   const content = (
     <>
       <Text as="p">
-        Your local server has a separate sharing choice:{" "}
+        Your account on the connected server has a separate sharing choice:{" "}
         {decision?.state ?? "unavailable"}. It controls server-side errors and
-        coarse runtime counters, including agent operations. Changing the device
-        choice does not change this server choice.
+        coarse runtime counters, including agent operations. It applies across
+        your workspaces on this server. Changing it does not change this
+        device's choice or another user's choice.
       </Text>
       {firstUse && <Text as="p">{COPY}</Text>}
       {decision && (
@@ -178,22 +183,20 @@ function OwnedServerReportingChoice({
             disabled={busy}
             onClick={() => void choose("on")}
           >
-            Enable local server reports
+            Enable server reports
           </Button>
           <Button
             variant="outline"
             disabled={busy}
             onClick={() => void choose("off")}
           >
-            Keep local server reports off
+            Keep server reports off
           </Button>
         </Flex>
       )}
       {error && (
         <>
-          <Text role="alert">
-            Local server reporting choice unavailable: {error}
-          </Text>
+          <Text role="alert">Server reporting choice unavailable: {error}</Text>
           <Button
             variant="outline"
             disabled={busy}
@@ -215,7 +218,7 @@ function OwnedServerReportingChoice({
         >
           <Dialog.Title>Help Vibestudio improve</Dialog.Title>
           <Dialog.Description>
-            Sharing choice for the local server owned by this desktop.
+            Sharing choice for your account on the connected server.
           </Dialog.Description>
           {content}
         </Dialog.Content>
@@ -223,9 +226,9 @@ function OwnedServerReportingChoice({
     );
   }
   return (
-    <section aria-label="Local server improvement reporting">
+    <section aria-label="Server improvement reporting">
       <Text size="4" weight="bold">
-        Local server reporting
+        Server reporting
       </Text>
       {content}
     </section>
@@ -423,7 +426,7 @@ export function ProblemReportingSection({
           Keep automatic reports off
         </Button>
       </Flex>
-      <OwnedServerReportingChoice />
+      <ConnectedServerReportingChoice />
       <Text size="4" weight="bold">
         Report a problem
       </Text>
