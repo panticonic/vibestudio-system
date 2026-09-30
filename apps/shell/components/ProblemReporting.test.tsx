@@ -228,6 +228,29 @@ describe("one separate first-start prompt followed by the unit audit", () => {
     expect(mocks.decideServer).toHaveBeenCalledOnce();
     expect(mocks.send).not.toHaveBeenCalled();
   });
+  it("applies the explicit combined first-start decision to an existing server preference too", async () => {
+    mocks.serverConsent.mockResolvedValue({
+      ...decision,
+      state: "on",
+      revision: 2,
+    });
+    render(
+      <Theme>
+        <ReportingFirstUse>
+          <span>Workspace</span>
+        </ReportingFirstUse>
+      </Theme>,
+    );
+    const off = await screen.findByRole("button", {
+      name: "Keep automatic reports off",
+    });
+    await waitFor(() => expect(off.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(off);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(mocks.decide).toHaveBeenCalledWith(0, "off");
+    expect(mocks.decideServer).toHaveBeenCalledWith(2, "off");
+  });
+
   it("does not flash the first-start dialog while loading a saved choice", async () => {
     let finish!: (value: typeof decision) => void;
     mocks.consent.mockImplementationOnce(

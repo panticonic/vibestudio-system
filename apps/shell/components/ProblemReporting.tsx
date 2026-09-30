@@ -104,8 +104,7 @@ export function useReportingSetup(
     try {
       if (
         decisions.device.state === "undecided" ||
-        (initialChoice === undefined &&
-          dirty.current &&
+        ((initialChoice !== undefined || dirty.current) &&
           decisions.device.state !== state)
       ) {
         const device = await problemReports.decide(
@@ -117,8 +116,7 @@ export function useReportingSetup(
       if (
         decisions.server &&
         (decisions.server.state === "undecided" ||
-          (initialChoice === undefined &&
-            dirty.current &&
+          ((initialChoice !== undefined || dirty.current) &&
             decisions.server.state !== state))
       ) {
         const server = await problemReports.decideServer(
