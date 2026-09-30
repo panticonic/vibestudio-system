@@ -25,6 +25,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -128,6 +129,7 @@ export function AppBar({
   onOpenGoTo,
 }: AppBarProps) {
   const insets = useSafeAreaInsets();
+  const compactHeight = useWindowDimensions().height < 500;
   const colors = useAtomValue(themeColorsAtom);
   const shellClient = useAtomValue(shellClientAtom);
   const activePanelId = useAtomValue(activePanelIdAtom);
@@ -219,24 +221,27 @@ export function AppBar({
         },
       ]}
     >
-      <Text
-        numberOfLines={1}
-        style={[
-          type.micro,
-          {
-            color: colors.textSecondary,
-            paddingHorizontal: spacing.lg,
-            paddingTop: spacing.xs,
-          },
-        ]}
-        accessibilityLabel={`Workspace: ${shellClient?.workspaceName ?? "Workspace"}`}
-      >
-        {shellClient?.workspaceName ?? "Workspace"}
-      </Text>
+      {!compactHeight && (
+        <Text
+          numberOfLines={1}
+          style={[
+            type.micro,
+            {
+              color: colors.textSecondary,
+              paddingHorizontal: spacing.lg,
+              paddingTop: spacing.xs,
+            },
+          ]}
+          accessibilityLabel={`Workspace: ${shellClient?.workspaceName ?? "Workspace"}`}
+        >
+          {shellClient?.workspaceName ?? "Workspace"}
+        </Text>
+      )}
       {!addressBarVisible ? (
         <View
           style={[
             styles.content,
+            compactHeight && { height: 44 },
             {
               paddingLeft: Math.max(spacing.xs, insets.left),
               paddingRight: Math.max(spacing.xs, insets.right),
