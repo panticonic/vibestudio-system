@@ -326,7 +326,7 @@ it("starts a reporting conversation without any report form or implicit submissi
     expect(mocks.openShellSurface).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "command-agent",
-        prompt: expect.stringContaining("problemReports.send"),
+        prompt: expect.stringContaining("help me prepare a report for my approval"),
       }),
     ),
   );
