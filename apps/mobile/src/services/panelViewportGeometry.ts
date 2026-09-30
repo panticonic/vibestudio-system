@@ -12,6 +12,10 @@ export interface ViewportInsets {
 }
 export interface PanelViewportGeometry extends ViewportInsets {
   cornerRadiusHint: number;
+  cornerRadiusTopLeftHint: number;
+  cornerRadiusTopRightHint: number;
+  cornerRadiusBottomLeftHint: number;
+  cornerRadiusBottomRightHint: number;
 }
 
 /** Intersect the panel's actual native frame with the window's safe rectangle.
@@ -23,6 +27,14 @@ export function panelViewportGeometry(
 ): PanelViewportGeometry {
   const clamp = (value: number, size: number) =>
     Math.min(Math.max(value, 0), size);
+  const radius = Math.round(
+    Math.min(56, Math.max(24, Math.min(window.width, window.height) * 0.12)),
+  );
+  const left = Math.abs(panel.x - window.x) < 0.5;
+  const right = Math.abs(panel.x + panel.width - window.x - window.width) < 0.5;
+  const top = Math.abs(panel.y - window.y) < 0.5;
+  const bottom =
+    Math.abs(panel.y + panel.height - window.y - window.height) < 0.5;
   return {
     top: clamp(window.y + insets.top - panel.y, panel.height),
     left: clamp(window.x + insets.left - panel.x, panel.width),
@@ -36,9 +48,11 @@ export function panelViewportGeometry(
     ),
     // Public iOS APIs do not expose display corner radii. This is an optional
     // appearance hint based on the window's short side, never a clipping mask.
-    cornerRadiusHint: Math.round(
-      Math.min(56, Math.max(24, Math.min(window.width, window.height) * 0.12)),
-    ),
+    cornerRadiusHint: radius,
+    cornerRadiusTopLeftHint: top && left ? radius : 0,
+    cornerRadiusTopRightHint: top && right ? radius : 0,
+    cornerRadiusBottomLeftHint: bottom && left ? radius : 0,
+    cornerRadiusBottomRightHint: bottom && right ? radius : 0,
   };
 }
 
@@ -47,8 +61,8 @@ export function panelViewportGeometryScript(
   geometry: PanelViewportGeometry,
 ): string {
   const properties = Object.entries(geometry).map(([edge, value]) => [
-    edge === "cornerRadiusHint"
-      ? "--vibestudio-viewport-corner-radius-hint"
+    edge.startsWith("cornerRadius")
+      ? `--vibestudio-viewport-${edge.replace(/[A-Z]/g, (letter) => "-" + letter.toLowerCase())}`
       : `--vibestudio-safe-area-inset-${edge}`,
     `${value}px`,
   ]);
