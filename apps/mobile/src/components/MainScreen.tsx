@@ -1,3 +1,4 @@
+import { WorkspaceViewport } from "./ui/WorkspaceViewport";
 import type { NativeWebsiteRequest } from "../services/websiteDocumentHost";
 import { observeWebsiteConnections } from "@vibestudio/shell-core/websiteConnections";
 import { websiteConnectionSnapshotAtom } from "../state/shellClientAtom";
@@ -20,7 +21,6 @@ import {
 import {
   View,
   Text,
-  KeyboardAvoidingView,
   StyleSheet,
   BackHandler,
   Platform,
@@ -2558,9 +2558,8 @@ export function MainScreen({
     });
   }, [pushToast, shellClient, showActionSheet, userNotifications]);
   return (
-    <KeyboardAvoidingView
+    <WorkspaceViewport
       style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "height" : undefined}
     >
       <ConnectionBar onRepair={handleRepair} />
       <AppBar
@@ -2788,7 +2787,7 @@ export function MainScreen({
           openLink={(href) => handleNavigateAddress(href, "child")}
         />
       ) : null}
-    </KeyboardAvoidingView>
+    </WorkspaceViewport>
   );
 }
 function canonicalHistoryKey(url: string): string {

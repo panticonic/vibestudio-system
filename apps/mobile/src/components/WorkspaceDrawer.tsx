@@ -49,7 +49,12 @@ export function WorkspaceDrawer({
     <View
       style={[
         styles.container,
-        { backgroundColor: colors.background, paddingTop: insets.top },
+        {
+          backgroundColor: colors.background,
+          paddingTop: insets.top,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
       ]}
     >
       <View style={styles.brand}>
