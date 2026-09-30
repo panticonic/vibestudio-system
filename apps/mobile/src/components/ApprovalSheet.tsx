@@ -508,11 +508,7 @@ export function ApprovalSheet({
         >
           <SafeAreaView edges={["bottom"]} style={styles.safeArea}>
             <Animated.View
-              accessible
-              accessibilityRole="summary"
-              accessibilityLabel={`${copy.title}. Requested by ${callerInfo.label}. ${copy.summary}`}
-              accessibilityHint="Review the details, then choose an action at the bottom of the sheet."
-              accessibilityState={{ busy: isBusy }}
+              accessible={false}
               accessibilityViewIsModal
               style={[
                 styles.sheet,
@@ -638,7 +634,10 @@ export function ApprovalSheet({
                     </Text>
                   </View>
                 ) : null}
-                <Text style={[styles.title, { color: colors.text }]}>
+                <Text
+                  accessibilityRole="header"
+                  style={[styles.title, { color: colors.text }]}
+                >
                   {copy.title}
                 </Text>
                 {callerInfo.kind !== "system" || attribution?.target ? (
