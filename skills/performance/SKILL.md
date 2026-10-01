@@ -175,6 +175,35 @@ restart, or stop another person's instance.
 Inspect the supervisor log if isolated bootstrap fails before reporting a
 blocker.
 
+## Profiling data ownership
+
+Instance shutdown retires its instance root, but does not own derived/npm cache
+overrides or review worktrees allocated by the investigator. Those paths need
+the same explicit ownership and cleanup as the workloads using them.
+
+Before allocating bulky profiling data, inspect the backing filesystem (on
+Linux, `findmnt -T PATH`, using an existing parent if necessary). `/tmp`,
+`/run/user`, and `/dev/shm` can be RAM-backed: files left there consume memory
+even after every process exits. Use a private disk-backed directory, such as
+`${XDG_CACHE_HOME:-~/.cache}/vibestudio-performance`, after checking its backing
+filesystem. Keep review worktrees and installed toolchains there too.
+
+Separate retained evidence from regenerable scratch. Create unique, initially
+empty derived and npm caches for each cold experiment; record their paths and
+the workload that owns them. In a `finally`-equivalent cleanup path, close
+inspectors and stop and join that experiment's exact workloads before removing
+its caches and temporary checkpoints. An immediate warm comparison can reuse
+the same caches within that lifetime; retire them before the next cold sample.
+Remove an owned review worktree once its changes are integrated. Never delete
+an inherited/shared cache or another operation's worktree.
+
+If workload or scratch retirement fails, preserve bounded diagnostic evidence
+on disk and repair that failure before creating another experiment. Check both
+live process owners and remaining owned scratch paths before reporting cleanup
+complete. Retain profiles, logs, and receipts, rather than entire dependency
+trees or build caches. Observe memory and scratch usage between samples; elapsed
+time alone never authorizes cleanup of an active workload.
+
 ## Performance by construction
 
 - Publish usable readiness before optional history, suggestions, indexing, or
