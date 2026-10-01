@@ -12,6 +12,7 @@ import {
   type LayoutEnv,
 } from "./placementEngine";
 import {
+  COLUMN_DIVIDER_WIDTH,
   MIN_COLUMN_WIDTH,
   MIN_PANE_HEIGHT,
   PREFERRED_COLUMN_WIDTH,
@@ -933,7 +934,10 @@ describe("computeViewport (§3.1 / D10)", () => {
   it("shows two columns whenever their actual minimum widths fit", () => {
     const layout = layoutOf(["A"], ["B"]);
     layout.focusedPaneId = "pane-1-0";
-    const vp = computeViewport(layout, makeEnv({ viewportWidth: 939 }));
+    const vp = computeViewport(
+      layout,
+      makeEnv({ viewportWidth: MIN_COLUMN_WIDTH * 2 + COLUMN_DIVIDER_WIDTH })
+    );
     expect(vp).toEqual({
       residentColumnIds: ["col-0", "col-1"],
       parkedLeft: [],
@@ -944,7 +948,10 @@ describe("computeViewport (§3.1 / D10)", () => {
   it("keeps a focused child beside its preceding parent when another column is parked", () => {
     const layout = layoutOf(["A"], ["B"], ["C"]);
     layout.focusedPaneId = "pane-1-0";
-    const vp = computeViewport(layout, makeEnv({ viewportWidth: 967 }));
+    const vp = computeViewport(
+      layout,
+      makeEnv({ viewportWidth: MIN_COLUMN_WIDTH * 2 + COLUMN_DIVIDER_WIDTH })
+    );
     expect(vp).toEqual({
       residentColumnIds: ["col-0", "col-1"],
       parkedLeft: [],

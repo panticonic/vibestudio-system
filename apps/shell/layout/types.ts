@@ -55,7 +55,8 @@ export type LayoutDropTarget =
   | { kind: "pane-center"; paneId: string };
 
 export const MIN_COLUMN_WIDTH = 575;
-export const PREFERRED_COLUMN_WIDTH = 560;
+// The default preferred size must satisfy the default readability minimum.
+export const PREFERRED_COLUMN_WIDTH = MIN_COLUMN_WIDTH;
 export const MIN_PANE_HEIGHT = 160;
 export const COLUMN_DIVIDER_WIDTH = 7;
 /**
@@ -69,7 +70,8 @@ export const PANE_RAIL_EXPANDED_HEIGHT = 22;
 /** A horizontal pane divider uses the same hit-target thickness as column dividers. */
 export const PANE_DIVIDER_HEIGHT = COLUMN_DIVIDER_WIDTH;
 /** Per-pane vertical overhead used by the placement engine's fit calculation. */
-export const PANE_VERTICAL_CHROME_HEIGHT = PANE_RAIL_REST_HEIGHT + PANE_DIVIDER_HEIGHT;
+export const PANE_VERTICAL_CHROME_HEIGHT =
+  PANE_RAIL_REST_HEIGHT + PANE_DIVIDER_HEIGHT;
 
 function mintId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;

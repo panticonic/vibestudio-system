@@ -86,6 +86,18 @@ class TestNotifyWorker extends SystemAgentWorker {
     return tool;
   }
 
+  protected override conversationAddresseeContext(
+    _channelId: string,
+  ): ResolveAddresseeContext {
+    return {
+      channelId: "ch-home",
+      roster: ROSTER,
+      ...(this.parent ? { parent: this.parent } : {}),
+      runs: this.runs,
+      ...(this.ownerUserId ? { ownerUserId: this.ownerUserId } : {}),
+    };
+  }
+
   protected override async addresseeContext(
     _channelId: string,
   ): Promise<ResolveAddresseeContext> {
@@ -641,7 +653,6 @@ describe("discovery", () => {
       "@gabriel",
       "parent",
       "run:run-abc",
-      "agent:gmail@ch-mail",
     ]);
   });
 

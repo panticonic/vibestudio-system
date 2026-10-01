@@ -136,7 +136,9 @@ import { rpc, workers } from "@workspace/runtime";
 const store = await workers.resolveService("example.todos.v1", "project-123");
 if (store.kind !== "durable-object") throw new Error("Expected DO service");
 
-await rpc.call(store.targetId, "upsertTodo", [{ title: "Review mobile pairing" }]);
+await rpc.call(store.targetId, "upsertTodo", [
+  { title: "Review mobile pairing" },
+]);
 const todos = await rpc.call(store.targetId, "listTodos", []);
 ```
 
@@ -224,9 +226,12 @@ Do not treat a panel's loopback HTTP asset URL as its durable address. Use
 `buildPanelLink()` for an in-app link, `buildPanelDeepLink()` for an installed
 app link, or `buildPanelShareLink()` for an HTTPS App/Universal Link. All three
 preserve `ref`, `contextId`, `stateArgs`, `name`, `focus`, and placement
-(`current`, `child`, or `root`). See
-[`../../../docs/panel-locations.md`](../../../docs/panel-locations.md) for the
-contract and security constraints.
+(`current`, `child`, or `root`). Omitting `workspace` stays in the current
+workspace; account settings must select their owner with
+`workspace: { role: "system" }` or `workspace: { role: "personal" }`.
+The installed [runtime contract](../../packages/runtime/src/core/panelLinks.ts)
+is authoritative. Asset-serving URLs must never select a different workspace,
+context, or revision by implication.
 
 ## Hosting panel-contributed commands
 

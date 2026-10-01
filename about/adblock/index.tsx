@@ -4,7 +4,7 @@
  * This is a shell panel with full access to shell services.
  * It provides UI for configuring ad blocking, filter lists, and whitelists.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Flex,
   Text,
@@ -48,7 +48,10 @@ interface AdBlockStats {
   blockedElements: number;
 }
 
-const LIST_LABELS: Record<keyof AdBlockListConfig, { label: string; description: string }> = {
+const LIST_LABELS: Record<
+  keyof AdBlockListConfig,
+  { label: string; description: string }
+> = {
   ads: {
     label: "EasyList (Ads)",
     description: "Block advertisements from common ad networks",
@@ -151,7 +154,14 @@ function RemovableRow({
       <Text size="2" style={{ wordBreak: "break-all", flex: 1 }}>
         {value}
       </Text>
-      <IconButton variant="ghost" color="red" size="1" onClick={onRemove} disabled={disabled}>
+      <IconButton
+        aria-label={`Remove ${value}`}
+        variant="ghost"
+        color="red"
+        size="1"
+        onClick={onRemove}
+        disabled={disabled}
+      >
         <Cross2Icon />
       </IconButton>
     </Flex>
@@ -171,6 +181,16 @@ function AdBlockSettingsPage() {
   const [newDomain, setNewDomain] = useState("");
   // New custom list URL input
   const [newListUrl, setNewListUrl] = useState("");
+  const domainInput = useRef<HTMLInputElement>(null);
+  const listInput = useRef<HTMLInputElement>(null);
+  const [focusAfterRemoval, setFocusAfterRemoval] = useState<
+    "domain" | "list" | null
+  >(null);
+  useEffect(() => {
+    if (isSaving || !focusAfterRemoval) return;
+    (focusAfterRemoval === "domain" ? domainInput : listInput).current?.focus();
+    setFocusAfterRemoval(null);
+  }, [isSaving, focusAfterRemoval]);
 
   const loadData = async () => {
     try {
@@ -191,11 +211,15 @@ function AdBlockSettingsPage() {
 
   const refreshStats = async () => {
     try {
-      const statsData = await rpc.call<AdBlockStats>("main", "adblock.getStats", []);
+      const statsData = await rpc.call<AdBlockStats>(
+        "main",
+        "adblock.getStats",
+        [],
+      );
       setStats(statsData);
     } catch (err) {
       setMutationError(
-        `Couldn't refresh blocking statistics: ${err instanceof Error ? err.message : String(err)}`
+        `Couldn't refresh blocking statistics: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   };
@@ -207,7 +231,9 @@ function AdBlockSettingsPage() {
 
   const reportMutationError = (action: string, err: unknown) => {
     setSuccessMessage(null);
-    setMutationError(`${action}: ${err instanceof Error ? err.message : String(err)}`);
+    setMutationError(
+      `${action}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   };
 
   useEffect(() => {
@@ -231,12 +257,18 @@ function AdBlockSettingsPage() {
     }
   };
 
-  const handleToggleList = async (list: keyof AdBlockListConfig, enabled: boolean) => {
+  const handleToggleList = async (
+    list: keyof AdBlockListConfig,
+    enabled: boolean,
+  ) => {
     if (!config) return;
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.setListEnabled", [list, enabled]);
+      await rpc.call<unknown>("main", "adblock.setListEnabled", [
+        list,
+        enabled,
+      ]);
       setConfig({
         ...config,
         lists: { ...config.lists, [list]: enabled },
@@ -254,7 +286,9 @@ function AdBlockSettingsPage() {
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.addToWhitelist", [newDomain.trim()]);
+      await rpc.call<unknown>("main", "adblock.addToWhitelist", [
+        newDomain.trim(),
+      ]);
       setConfig({
         ...config,
         whitelist: [...config.whitelist, newDomain.trim()],
@@ -277,8 +311,12 @@ function AdBlockSettingsPage() {
         ...config,
         whitelist: config.whitelist.filter((d) => d !== domain),
       });
+      setFocusAfterRemoval("domain");
     } catch (err) {
-      reportMutationError("Couldn't remove that domain from the whitelist", err);
+      reportMutationError(
+        "Couldn't remove that domain from the whitelist",
+        err,
+      );
     } finally {
       setIsSaving(false);
     }
@@ -289,7 +327,9 @@ function AdBlockSettingsPage() {
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.addCustomList", [newListUrl.trim()]);
+      await rpc.call<unknown>("main", "adblock.addCustomList", [
+        newListUrl.trim(),
+      ]);
       setConfig({
         ...config,
         customLists: [...config.customLists, newListUrl.trim()],
@@ -314,6 +354,7 @@ function AdBlockSettingsPage() {
         customLists: config.customLists.filter((u) => u !== url),
         lastUpdated: Date.now(),
       });
+      setFocusAfterRemoval("list");
     } catch (err) {
       reportMutationError("Couldn't remove that filter list", err);
     } finally {
@@ -328,7 +369,9 @@ function AdBlockSettingsPage() {
     try {
       await rpc.call<unknown>("main", "adblock.rebuildEngine", []);
       await refreshConfig();
-      setSuccessMessage("Filter lists were downloaded and the blocking engine was refreshed.");
+      setSuccessMessage(
+        "Filter lists were downloaded and the blocking engine was refreshed.",
+      );
     } catch (err) {
       reportMutationError("Couldn't refresh the filter lists", err);
     } finally {
@@ -354,7 +397,13 @@ function AdBlockSettingsPage() {
 
   if (error) {
     return (
-      <Flex align="center" justify="center" direction="column" gap="3" style={{ height: "100dvh" }}>
+      <Flex
+        align="center"
+        justify="center"
+        direction="column"
+        gap="3"
+        style={{ height: "100dvh" }}
+      >
         <Text color="red">Error: {error}</Text>
         <Button onClick={loadData}>Retry</Button>
       </Flex>
@@ -368,7 +417,11 @@ function AdBlockSettingsPage() {
       subtitle={`Filter lists updated: ${formatLastUpdated(config?.lastUpdated)}`}
       maxWidth={640}
       actions={
-        <Badge color={config?.enabled ? "green" : "gray"} size="2" variant="soft">
+        <Badge
+          color={config?.enabled ? "green" : "gray"}
+          size="2"
+          variant="soft"
+        >
           {config?.enabled ? "Active" : "Disabled"}
         </Badge>
       }
@@ -400,8 +453,14 @@ function AdBlockSettingsPage() {
         />
         <Separator size="4" my="3" />
         <Flex gap="3" direction={isMobile ? "column" : "row"}>
-          <StatBlock value={stats?.blockedRequests ?? 0} label="Requests blocked this session" />
-          <StatBlock value={stats?.blockedElements ?? 0} label="Elements hidden this session" />
+          <StatBlock
+            value={stats?.blockedRequests ?? 0}
+            label="Requests blocked this session"
+          />
+          <StatBlock
+            value={stats?.blockedElements ?? 0}
+            label="Elements hidden this session"
+          />
         </Flex>
       </Section>
 
@@ -411,19 +470,25 @@ function AdBlockSettingsPage() {
         description="Choose which filter lists to use. Toggling a list rebuilds the engine automatically."
       >
         <Flex direction="column" gap="3">
-          {(Object.keys(LIST_LABELS) as Array<keyof AdBlockListConfig>).map((list) => (
-            <ToggleRow
-              key={list}
-              label={LIST_LABELS[list].label}
-              description={LIST_LABELS[list].description}
-              checked={config?.lists[list] ?? false}
-              onCheckedChange={(checked) => handleToggleList(list, checked)}
-              disabled={isSaving || !config?.enabled}
-            />
-          ))}
+          {(Object.keys(LIST_LABELS) as Array<keyof AdBlockListConfig>).map(
+            (list) => (
+              <ToggleRow
+                key={list}
+                label={LIST_LABELS[list].label}
+                description={LIST_LABELS[list].description}
+                checked={config?.lists[list] ?? false}
+                onCheckedChange={(checked) => handleToggleList(list, checked)}
+                disabled={isSaving || !config?.enabled}
+              />
+            ),
+          )}
         </Flex>
         <Box mt="4">
-          <Button variant="soft" onClick={handleRebuild} disabled={isSaving || !config?.enabled}>
+          <Button
+            variant="soft"
+            onClick={handleRebuild}
+            disabled={isSaving || !config?.enabled}
+          >
             {isSaving ? <Spinner /> : "Re-download Filter Lists"}
           </Button>
         </Box>
@@ -446,8 +511,13 @@ function AdBlockSettingsPage() {
             ))}
           </Flex>
         )}
+        <Text as="label" htmlFor="filter-list-url" size="2">
+          Filter list URL
+        </Text>
         <Flex gap="2" direction={isMobile ? "column" : "row"}>
           <TextField.Root
+            id="filter-list-url"
+            ref={listInput}
             placeholder="https://example.com/filters.txt"
             value={newListUrl}
             onChange={(e) => setNewListUrl(e.target.value)}
@@ -457,9 +527,10 @@ function AdBlockSettingsPage() {
               }
             }}
             style={{ flex: 1 }}
-            disabled={isSaving || !config?.enabled}
+            disabled={isSaving}
           />
           <IconButton
+            aria-label="Add filter list"
             onClick={handleAddCustomList}
             disabled={isSaving || !newListUrl.trim() || !config?.enabled}
           >
@@ -488,8 +559,13 @@ function AdBlockSettingsPage() {
             </Text>
           )}
         </Flex>
+        <Text as="label" htmlFor="whitelisted-domain" size="2">
+          Domain to whitelist
+        </Text>
         <Flex gap="2" direction={isMobile ? "column" : "row"}>
           <TextField.Root
+            id="whitelisted-domain"
+            ref={domainInput}
             placeholder="example.com or *.example.com"
             value={newDomain}
             onChange={(e) => setNewDomain(e.target.value)}
@@ -501,7 +577,11 @@ function AdBlockSettingsPage() {
             style={{ flex: 1 }}
             disabled={isSaving}
           />
-          <IconButton onClick={handleAddWhitelist} disabled={isSaving || !newDomain.trim()}>
+          <IconButton
+            aria-label="Add whitelisted domain"
+            onClick={handleAddWhitelist}
+            disabled={isSaving || !newDomain.trim()}
+          >
             <PlusIcon />
           </IconButton>
         </Flex>

@@ -84,7 +84,7 @@ under `apps:` in `meta/vibestudio.yml`. Use live generated docs and manifest
 schema for exact fields.
 
 Run the smallest target-specific checks from [TESTING.md](TESTING.md). Use
-[system testing](../system-testing/SKILL.md) when a change crosses startup,
+the `skills/system-testing/SKILL.md` skill from the optional System Testing template when a change crosses startup,
 pairing, shell UI, mobile bootstrap, or client-auth boundaries.
 
 Use [workspace development](../workspace-dev/SKILL.md) for panels and workers,

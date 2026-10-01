@@ -57,7 +57,14 @@ async function workspace(workspaceId: string) {
       if (result.kind === "host-read") {
         const request = result.request;
         if (request["kind"] === "read-semantic-blob") {
-          const { kind: _kind, state: _state, ...file } = request;
+          const {
+            kind: _kind,
+            state: _state,
+            contentKind: _contentKind,
+            byteLength: _byteLength,
+            coordinateExtent: _coordinateExtent,
+            ...file
+          } = request;
           return {
             ...file,
             content: {
