@@ -158,7 +158,9 @@ describe("reporting inside initial workspace review", () => {
   it("recovers an unavailable server inside the review on reconnect", async () => {
     mocks.serverConsent.mockRejectedValueOnce(new Error("Disconnected"));
     render(<Review />);
-    await screen.findByRole("alert");
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Disconnected",
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
     const handler = mocks.shellEvent.mock.calls.find(
       ([name]) => name === "server-connection-changed",
@@ -268,7 +270,9 @@ describe("one separate first-start prompt followed by the unit audit", () => {
         </ReportingFirstUse>
       </Theme>,
     );
-    await screen.findByRole("alert");
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Temporarily unavailable",
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(mocks.decide).toHaveBeenCalledTimes(2));

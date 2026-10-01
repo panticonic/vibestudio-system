@@ -229,7 +229,7 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
       )}
       {!open && error && (
         <div data-shell-top-chrome="reporting-choice-status">
-          <Text role="alert">Could not save reporting preference.</Text>
+          <Text role="alert">Could not save reporting preference. {error}</Text>
           <Button
             variant="outline"
             disabled={busy}
