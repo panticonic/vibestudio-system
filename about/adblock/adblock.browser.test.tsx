@@ -1,12 +1,6 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 const mock = vi.hoisted(() => ({ call: vi.fn() }));
 vi.mock("@workspace/react/theme", () => ({
   usePanelTheme: () => "light",
@@ -56,7 +50,7 @@ it.each([320, 390, 1280])(
       name: "Remove https://example.test/filters.txt",
     });
     remove.focus();
-    fireEvent.click(remove);
+    await userEvent.keyboard("{Enter}");
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByLabelText("Filter list URL"),
@@ -66,7 +60,7 @@ it.each([320, 390, 1280])(
       name: "Remove example.test",
     });
     removeDomain.focus();
-    fireEvent.click(removeDomain);
+    await userEvent.keyboard("{Enter}");
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByLabelText("Domain to whitelist"),
