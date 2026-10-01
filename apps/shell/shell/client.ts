@@ -5,6 +5,7 @@ import {
 /** Stable startup client and exports used by shell entry points. */
 import {
   createRpcClient,
+  RpcBoundaryError,
   rpcDestinationMatchesCaller,
   type RpcDestination,
   bridgeStreamSurfaceOf,
@@ -169,7 +170,7 @@ function createOwnerRpc(destination: RpcDestination) {
         ? {
             stream: ((envelope, signal, body) => {
               if (closed)
-                return Promise.reject(new Error("Workspace UI is closed"));
+                return Promise.reject(new RpcBoundaryError("Workspace UI is closed", "transport", "CONNECTION_LOST"));
               return transport.stream!(
                 {
                   ...envelope,
@@ -185,7 +186,7 @@ function createOwnerRpc(destination: RpcDestination) {
         ? {
             streamBody: ((envelope, signal, body) => {
               if (closed)
-                return Promise.reject(new Error("Workspace UI is closed"));
+                return Promise.reject(new RpcBoundaryError("Workspace UI is closed", "transport", "CONNECTION_LOST"));
               return transport.streamBody!(
                 {
                   ...envelope,
@@ -198,7 +199,7 @@ function createOwnerRpc(destination: RpcDestination) {
           }
         : {}),
       send: (envelope) => {
-        if (closed) return Promise.reject(new Error("Workspace UI is closed"));
+        if (closed) return Promise.reject(new RpcBoundaryError("Workspace UI is closed", "transport", "CONNECTION_LOST"));
         return transport.send({
           ...envelope,
           destination,
@@ -219,7 +220,7 @@ function createOwnerRpc(destination: RpcDestination) {
       },
       status: () => (closed ? "disconnected" : connection.status()),
       ready: async () => {
-        if (closed) throw new Error("Workspace UI is closed");
+        if (closed) throw new RpcBoundaryError("Workspace UI is closed", "transport", "CONNECTION_LOST");
         await connection.ready();
       },
       onStatusChange: (handler) => {
@@ -283,6 +284,8 @@ export async function createWorkspaceShellClient(workspaceId: string) {
   return {
     client,
     close() {
+      // The compositor publishes synchronization failures to its observed state.
+      void scoped.view.close().catch(() => undefined);
       scoped.unitIcons.close();
       owner.close();
     },

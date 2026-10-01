@@ -82,6 +82,7 @@ export function WorkspaceStack({
           return (
             <section
               key={workspace.workspaceId}
+              data-workspace-id={workspace.workspaceId}
               className={`workspace-section${focused ? " workspace-section-focused" : ""}${workspace.privateRole === "system" ? " workspace-section-system" : ""}`}
               aria-label={`${workspaceLabel(workspace)} workspace`}
             >

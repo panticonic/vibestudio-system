@@ -1,3 +1,4 @@
+import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { observeWebsiteConnections, type WebsiteConnectionEntry } from "@vibestudio/shell-core/websiteConnections";
 import { useShellWorkspaceClient } from "../workspaceContext";
@@ -13,7 +14,10 @@ export function WebsiteConnectionsProvider({ children }: { children: ReactNode }
     subscribe: () => client.events.subscribe("website:connection-changed"),
     unsubscribe: () => client.events.unsubscribe("website:connection-changed"),
     changed: entries => setSnapshot({ owner: client, entries }),
-    error: error => console.warn("[WebsiteConnections] Failed to read workspace connection state", error),
+    error: error => {
+      if (!isRpcConnectionLost(error))
+        console.warn("[WebsiteConnections] Failed to read workspace connection state", error);
+    },
   }), [client]);
   return <Connections.Provider value={snapshot.owner === client ? snapshot.entries : new Map()}>{children}</Connections.Provider>;
 }

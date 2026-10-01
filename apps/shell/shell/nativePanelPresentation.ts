@@ -1,3 +1,4 @@
+import { RpcBoundaryError } from "@vibestudio/rpc";
 import {
   NATIVE_PANEL_SURFACE_PROTOCOL_VERSION,
   type NativePanelAdapterHello,
@@ -7,6 +8,7 @@ import {
 } from "@vibestudio/service-schemas/view";
 import type { NativePanelSlotBounds } from "./workspaceClient";
 type DesiredNativePanelSlot = {
+  owner: object;
   nativeSlotId: string;
   bindingId: string;
   panelId: string;
@@ -146,7 +148,40 @@ export function createNativePanelPresentation(bridge: NativePanelBridge) {
       desiredNativePanelSlots.clear();
     },
     forWorkspace(workspaceId: string | Promise<string>) {
+      const owner = {};
+      let retired = false;
+      const assertActive = () => {
+        if (retired || closed)
+          throw new RpcBoundaryError(
+            "Workspace panel presentation is closed",
+            "transport",
+            "CONNECTION_LOST",
+          );
+      };
       return {
+        close() {
+          if (retired) return Promise.resolve();
+          retired = true;
+          const withdrawn = new Set<string>();
+          for (const [id, slot] of desiredNativePanelSlots) {
+            if (slot.owner === owner) {
+              withdrawn.add(slot.workspaceId);
+              desiredNativePanelSlots.delete(id);
+            }
+          }
+          if (
+            focusedWorkspaceId &&
+            withdrawn.has(focusedWorkspaceId) &&
+            ![...desiredNativePanelSlots.values()].some(
+              (slot) => slot.workspaceId === focusedWorkspaceId,
+            )
+          ) {
+            focusedWorkspaceId = null;
+          }
+          return withdrawn.size
+            ? syncDesiredNativePanelSlots()
+            : Promise.resolve();
+        },
         bindNativePanelSlot: async (request: {
           nativeSlotId: string;
           bindingId: string;
@@ -155,11 +190,13 @@ export function createNativePanelPresentation(bridge: NativePanelBridge) {
           focused?: boolean;
         }) => {
           const ownerWorkspaceId = await workspaceId;
+          assertActive();
           const surfaceId = JSON.stringify([
             ownerWorkspaceId,
             request.nativeSlotId,
           ]);
           desiredNativePanelSlots.set(surfaceId, {
+            owner,
             nativeSlotId: surfaceId,
             workspaceId: ownerWorkspaceId,
             bindingId: request.bindingId,
@@ -187,8 +224,13 @@ export function createNativePanelPresentation(bridge: NativePanelBridge) {
             await workspaceId,
             request.nativeSlotId,
           ]);
+          assertActive();
           const current = desiredNativePanelSlots.get(surfaceId);
-          if (!current || current.bindingId !== request.bindingId) {
+          if (
+            !current ||
+            current.owner !== owner ||
+            current.bindingId !== request.bindingId
+          ) {
             return {
               status: "missing" as const,
               reason: `unknown native panel slot: ${request.nativeSlotId}`,
@@ -220,7 +262,10 @@ export function createNativePanelPresentation(bridge: NativePanelBridge) {
             request.nativeSlotId,
           ]);
           const current = desiredNativePanelSlots.get(surfaceId);
-          if (current?.bindingId === request.bindingId) {
+          if (
+            current?.owner === owner &&
+            current.bindingId === request.bindingId
+          ) {
             desiredNativePanelSlots.delete(surfaceId);
             await syncDesiredNativePanelSlots();
           }

@@ -426,8 +426,8 @@ export class MobileRpcClient implements Pick<
       this.connectionToken === token &&
       connection !== undefined &&
       this.connection === connection;
-    const recover = (kind: RecoveryKind) => {
-      if (current()) this.emitRecovery(kind);
+    const recover = async (kind: RecoveryKind): Promise<void> => {
+      if (current()) await this.emitRecovery(kind);
     };
     try {
       connection = this.config.connectWorkspace
@@ -495,7 +495,7 @@ export class MobileRpcClient implements Pick<
   }
 
   private async restoreBootstrapSession(
-    onRecovery: (kind: RecoveryKind) => void,
+    onRecovery: (kind: RecoveryKind) => void | Promise<void>,
     token: object,
   ): Promise<IrohConnection> {
     const stored = await loadShellCredential();
@@ -716,9 +716,12 @@ export class MobileRpcClient implements Pick<
    * changed) / the session was dirty — so ShellClient's cold-recover listener
    * actually fires instead of only ever running the lighter resubscribe.
    */
-  private emitRecovery(kind: RecoveryKind): void {
-    for (const listener of this.recoveryListeners.get(kind) ?? [])
-      void listener();
+  private async emitRecovery(kind: RecoveryKind): Promise<void> {
+    const results = await Promise.allSettled(
+      [...(this.recoveryListeners.get(kind) ?? [])].map(async (listener) => listener()),
+    );
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
   }
 }
 
