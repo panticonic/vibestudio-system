@@ -96,6 +96,7 @@ import {
   materializeLatestMobilePanel,
   mobilePanelMaterializationState,
   PanelMaterializationTasks,
+  type PanelMaterializationLifetime,
   materializationCoordinate,
 } from "../services/panelMaterializer";
 import { recoverCurrentPanels } from "./panelRecovery";
@@ -814,16 +815,16 @@ export function MainScreen({
         return;
       const panel = getRetainedPanel(panelId);
       if (!panel) return;
-      let operationSignal: AbortSignal | undefined;
+      let operationLifetime: PanelMaterializationLifetime | undefined;
       const task = panelMaterializations.start(
         panelId,
         () => materializationCoordinate(getRetainedPanel(panelId) ?? panel),
         leaseMode,
-        async (signal) => {
-          operationSignal = signal;
+        async (lifetime) => {
+          operationLifetime = lifetime;
           const materialized = await materializeLatestMobilePanel({
             panelId,
-            signal,
+            lifetime,
             hostConfig,
             getPanel: () => getRetainedPanel(panelId),
             getPanelInit: (id) => shellClient.panels.getPanelInit(id),
@@ -833,7 +834,7 @@ export function MainScreen({
               shellClient.panels.takeOverLease(id, entityId),
             leaseMode,
           });
-          if (signal.aborted) return;
+          lifetime.assertActive();
           syncRetainedRuntimeOwners();
           const currentEntry = webViewStackRef.current.find(
             (candidate) => candidate.panelId === panelId,
@@ -895,7 +896,7 @@ export function MainScreen({
       setLoadingPanelId(panelId);
       const lifetime = retentionLifetime.current.signal;
       void task.catch((error: unknown) => {
-        if (lifetime.aborted || operationSignal?.aborted) return;
+        if (lifetime.aborted || operationLifetime?.retired) return;
         const retained = webViewStackRef.current.find(
           (entry) => entry.panelId === panelId,
         );

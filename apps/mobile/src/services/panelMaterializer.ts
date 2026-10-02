@@ -19,9 +19,26 @@ export interface MobileMaterializedPanel {
   panelInit: unknown;
 }
 
+/** The materialization owner retains its terminal cause until work has joined. */
+export class PanelMaterializationLifetime {
+  private retirement: Error | null = null;
+
+  get retired(): boolean {
+    return this.retirement !== null;
+  }
+
+  retire(cause: Error): void {
+    this.retirement ??= cause;
+  }
+
+  assertActive(): void {
+    if (this.retirement) throw this.retirement;
+  }
+}
+
 export interface MobilePanelMaterializationDeps {
   panelId: string;
-  signal?: AbortSignal;
+  lifetime: PanelMaterializationLifetime;
   hostConfig: HostConfig;
   getPanelInit(panelId: string): Promise<unknown>;
   acquireLease(
@@ -82,8 +99,7 @@ export async function materializeMobilePanel(
   opts: MobilePanelMaterializationDeps & { panel: Panel },
 ): Promise<MobileMaterializedPanel> {
   const checkActive = () => {
-    if (opts.signal?.aborted)
-      throw opts.signal.reason ?? new Error("Panel materialization canceled");
+    opts.lifetime.assertActive();
   };
   checkActive();
   const snapshot = getCurrentSnapshot(opts.panel);
@@ -203,8 +219,7 @@ export async function materializeLatestMobilePanel(
   opts: MobilePanelMaterializationDeps & { getPanel(): Panel | null },
 ): Promise<MobileMaterializedPanel> {
   while (true) {
-    if (opts.signal?.aborted)
-      throw opts.signal.reason ?? new Error("Panel materialization canceled");
+    opts.lifetime.assertActive();
     const panel = opts.getPanel();
     if (!panel) throw new Error(`Panel ${opts.panelId} no longer exists`);
     const expectedCoordinate = materializationCoordinate(panel);
@@ -213,7 +228,7 @@ export async function materializeLatestMobilePanel(
     try {
       materialized = await materializeMobilePanel({ ...opts, panel });
     } catch (error) {
-      if (opts.signal?.aborted) throw error;
+      if (opts.lifetime.retired) throw error;
       const current = opts.getPanel();
       if (current && materializationCoordinate(current) !== expectedCoordinate)
         continue;
@@ -235,7 +250,7 @@ export async function materializeLatestMobilePanel(
 interface PanelMaterializationTask {
   coordinate: string;
   mode: "acquire" | "takeOver";
-  cancellation: AbortController;
+  lifetime: PanelMaterializationLifetime;
   completion: Promise<void>;
   running: boolean;
   failed: boolean;
@@ -260,7 +275,7 @@ export class PanelMaterializationTasks {
     panelId: string,
     currentCoordinate: () => string,
     mode: "acquire" | "takeOver",
-    work: (signal: AbortSignal) => Promise<void>,
+    work: (lifetime: PanelMaterializationLifetime) => Promise<void>,
   ): Promise<void> | null {
     const previous = this.tasks.get(panelId);
     if (previous?.running) return null;
@@ -269,14 +284,14 @@ export class PanelMaterializationTasks {
     const task: PanelMaterializationTask = {
       coordinate,
       mode,
-      cancellation: new AbortController(),
+      lifetime: new PanelMaterializationLifetime(),
       completion: Promise.resolve(),
       running: true,
       failed: false,
     };
     this.tasks.set(panelId, task);
     task.completion = Promise.resolve()
-      .then(() => work(task.cancellation.signal))
+      .then(() => work(task.lifetime))
       .catch((error: unknown) => {
         task.coordinate = currentCoordinate();
         task.failed = true;
@@ -284,7 +299,7 @@ export class PanelMaterializationTasks {
       })
       .finally(() => {
         task.running = false;
-        if (!task.failed || task.cancellation.signal.aborted)
+        if (!task.failed || task.lifetime.retired)
           this.tasks.delete(panelId);
         this.settled();
       });
@@ -300,7 +315,7 @@ export class PanelMaterializationTasks {
   retainOnly(panelIds: ReadonlySet<string>): void {
     for (const [panelId, task] of this.tasks) {
       if (panelIds.has(panelId)) continue;
-      task.cancellation.abort(
+      task.lifetime.retire(
         new Error(`Panel ${panelId} is no longer retained`),
       );
       if (!task.running) this.tasks.delete(panelId);

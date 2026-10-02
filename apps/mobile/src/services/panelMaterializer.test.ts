@@ -10,6 +10,7 @@ import {
   mobilePanelMaterializationState,
   needsMobilePanelMaterialization,
   PanelMaterializationTasks,
+  PanelMaterializationLifetime,
 } from "./panelMaterializer";
 
 const hostConfig = {
@@ -58,6 +59,7 @@ function makeDeps(overrides?: {
   acquireResult?: PanelRuntimeAcquireResult;
 }) {
   return {
+    lifetime: new PanelMaterializationLifetime(),
     getPanelInit: jest.fn(
       async () => overrides?.panelInit ?? { entityId: "panel:nav-1" },
     ),
@@ -186,18 +188,19 @@ describe("materializeMobilePanel", () => {
           finish = resolve;
         }),
     );
-    const controller = new AbortController();
+    const lifetime = deps.lifetime;
     const pending = materializeMobilePanel({
       panelId: "panel-1",
       panel: makePanel("panels/editor"),
       hostConfig,
       ...deps,
       leaseMode: "acquire",
-      signal: controller.signal,
+      lifetime,
     });
     const cause = new Error("Panel presentation retired");
     const rejected = expect(pending).rejects.toBe(cause);
-    controller.abort(cause);
+    lifetime.retire(cause);
+    lifetime.retire(new Error("A later retirement must not replace the cause"));
     finish({ entityId: "panel:nav-1" });
     await rejected;
     expect(deps.acquireLease).not.toHaveBeenCalled();
@@ -430,14 +433,14 @@ describe("PanelMaterializationTasks", () => {
 
   it("cancels a retired slot and joins it before permitting its replacement", async () => {
     let complete!: () => void;
-    let signal!: AbortSignal;
+    let lifetime!: PanelMaterializationLifetime;
     const tasks = new PanelMaterializationTasks(jest.fn());
     const pending = tasks.start(
       "panel-1",
       () => "runtime-1",
       "takeOver",
-      (ownedSignal) => {
-        signal = ownedSignal;
+      (ownedLifetime) => {
+        lifetime = ownedLifetime;
         return new Promise<void>((resolve) => {
           complete = resolve;
         });
@@ -448,7 +451,8 @@ describe("PanelMaterializationTasks", () => {
     const joined = jest.fn();
     const stopped = tasks.stop().then(joined);
     await Promise.resolve();
-    expect(signal.aborted).toBe(true);
+    expect(lifetime.retired).toBe(true);
+    expect(() => lifetime.assertActive()).toThrow("Panel panel-1 is no longer retained");
     expect(joined).not.toHaveBeenCalled();
     expect(tasks.has("panel-1")).toBe(true);
     expect(

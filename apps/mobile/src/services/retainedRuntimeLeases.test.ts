@@ -1,5 +1,8 @@
 import type { Panel } from "@vibestudio/shared/types";
-import { materializeMobilePanel } from "./panelMaterializer";
+import {
+  materializeMobilePanel,
+  PanelMaterializationLifetime,
+} from "./panelMaterializer";
 import { asPanelEntityId, asPanelSlotId } from "@vibestudio/shared/panel/ids";
 import type {
   PanelRuntimeAcquireResult,
@@ -69,7 +72,7 @@ const tick = async () => {
 it("keeps the retained connection through canceled bootstrap and reverse response order", async () => {
   const h = harness();
   h.owners.retain(PANEL, A);
-  const abandonedBootstrap = new AbortController();
+  const abandonedBootstrap = new PanelMaterializationLifetime();
   const panel: Panel = {
     id: PANEL,
     title: "Browser",
@@ -85,7 +88,7 @@ it("keeps the retained connection through canceled bootstrap and reverse respons
   const first = materializeMobilePanel({
     panelId: PANEL,
     panel,
-    signal: abandonedBootstrap.signal,
+    lifetime: abandonedBootstrap,
     hostConfig: {
       protocol: "https",
       host: "example.com",
@@ -102,7 +105,7 @@ it("keeps the retained connection through canceled bootstrap and reverse respons
   const cause = new Error("Document bootstrap canceled");
   const firstRejected = expect(first).rejects.toBe(cause);
   await tick();
-  abandonedBootstrap.abort(cause);
+  abandonedBootstrap.retire(cause);
   const retry = h.owners.acquire(PANEL, A, "acquire");
   await tick();
   expect(h.calls.map((call) => call.connectionId)).toEqual([
