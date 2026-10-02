@@ -82,7 +82,8 @@ export async function materializeMobilePanel(
   opts: MobilePanelMaterializationDeps & { panel: Panel },
 ): Promise<MobileMaterializedPanel> {
   const checkActive = () => {
-    if (opts.signal?.aborted) throw new Error("Panel materialization canceled");
+    if (opts.signal?.aborted)
+      throw opts.signal.reason ?? new Error("Panel materialization canceled");
   };
   checkActive();
   const snapshot = getCurrentSnapshot(opts.panel);
@@ -180,7 +181,7 @@ export async function materializeMobilePanel(
   };
 }
 
-function materializationCoordinate(panel: Panel): string {
+export function materializationCoordinate(panel: Panel): string {
   const snapshot = getCurrentSnapshot(panel);
   return JSON.stringify({
     runtimeEntityId: panel.runtimeEntityId ?? null,
@@ -202,7 +203,8 @@ export async function materializeLatestMobilePanel(
   opts: MobilePanelMaterializationDeps & { getPanel(): Panel | null },
 ): Promise<MobileMaterializedPanel> {
   while (true) {
-    if (opts.signal?.aborted) throw new Error("Panel materialization canceled");
+    if (opts.signal?.aborted)
+      throw opts.signal.reason ?? new Error("Panel materialization canceled");
     const panel = opts.getPanel();
     if (!panel) throw new Error(`Panel ${opts.panelId} no longer exists`);
     const expectedCoordinate = materializationCoordinate(panel);
@@ -230,58 +232,85 @@ export async function materializeLatestMobilePanel(
   }
 }
 
-export class PanelMaterializationRetryQueue {
-  private readonly retries = new Map<
-    string,
-    { attempt: number; timer: ReturnType<typeof setTimeout> | null }
-  >();
-  private stopped = false;
+interface PanelMaterializationTask {
+  coordinate: string;
+  mode: "acquire" | "takeOver";
+  cancellation: AbortController;
+  completion: Promise<void>;
+  running: boolean;
+  failed: boolean;
+}
 
-  constructor(
-    private readonly onRetry: () => void,
-    private readonly initialDelayMs = 1_000,
-    private readonly maxDelayMs = 30_000,
-  ) {}
+/** One retained slot owns one operation until its actual work has joined. */
+export class PanelMaterializationTasks {
+  private readonly tasks = new Map<string, PanelMaterializationTask>();
 
-  cancel(panelId: string, options: { resetAttempts: boolean }): void {
-    const retry = this.retries.get(panelId);
-    if (retry?.timer) clearTimeout(retry.timer);
-    if (options.resetAttempts) {
-      this.retries.delete(panelId);
-    } else if (retry) {
-      this.retries.set(panelId, { ...retry, timer: null });
-    }
+  constructor(private readonly settled: () => void) {}
+
+  has(panelId: string): boolean {
+    return this.tasks.get(panelId)?.running ?? false;
   }
 
-  schedule(panelId: string): void {
-    if (this.stopped) return;
-    const previous = this.retries.get(panelId);
-    if (previous?.timer) return;
-    const attempt = (previous?.attempt ?? 0) + 1;
-    const delayMs = Math.min(
-      this.maxDelayMs,
-      this.initialDelayMs * 2 ** Math.min(attempt - 1, 10),
-    );
-    const timer = setTimeout(() => {
-      const current = this.retries.get(panelId);
-      if (!current || current.timer !== timer) return;
-      this.retries.set(panelId, { attempt, timer: null });
-      this.onRetry();
-    }, delayMs);
-    this.retries.set(panelId, { attempt, timer });
+  isTakingOver(panelId: string): boolean {
+    const task = this.tasks.get(panelId);
+    return !!task?.running && task.mode === "takeOver";
+  }
+
+  start(
+    panelId: string,
+    currentCoordinate: () => string,
+    mode: "acquire" | "takeOver",
+    work: (signal: AbortSignal) => Promise<void>,
+  ): Promise<void> | null {
+    const previous = this.tasks.get(panelId);
+    if (previous?.running) return null;
+    const coordinate = currentCoordinate();
+    if (previous?.failed && previous.coordinate === coordinate) return null;
+    const task: PanelMaterializationTask = {
+      coordinate,
+      mode,
+      cancellation: new AbortController(),
+      completion: Promise.resolve(),
+      running: true,
+      failed: false,
+    };
+    this.tasks.set(panelId, task);
+    task.completion = Promise.resolve()
+      .then(() => work(task.cancellation.signal))
+      .catch((error: unknown) => {
+        task.coordinate = currentCoordinate();
+        task.failed = true;
+        throw error;
+      })
+      .finally(() => {
+        task.running = false;
+        if (!task.failed || task.cancellation.signal.aborted)
+          this.tasks.delete(panelId);
+        this.settled();
+      });
+    // The caller presents the original failure; retirement also owns completion.
+    void task.completion.catch(() => {});
+    return task.completion;
+  }
+
+  retry(panelId: string): void {
+    if (!this.tasks.get(panelId)?.running) this.tasks.delete(panelId);
   }
 
   retainOnly(panelIds: ReadonlySet<string>): void {
-    for (const panelId of this.retries.keys()) {
-      if (!panelIds.has(panelId)) this.cancel(panelId, { resetAttempts: true });
+    for (const [panelId, task] of this.tasks) {
+      if (panelIds.has(panelId)) continue;
+      task.cancellation.abort(
+        new Error(`Panel ${panelId} is no longer retained`),
+      );
+      if (!task.running) this.tasks.delete(panelId);
     }
   }
 
-  stop(): void {
-    this.stopped = true;
-    for (const retry of this.retries.values()) {
-      if (retry.timer) clearTimeout(retry.timer);
-    }
-    this.retries.clear();
+  async stop(): Promise<void> {
+    this.retainOnly(new Set());
+    await Promise.allSettled(
+      [...this.tasks.values()].map((task) => task.completion),
+    );
   }
 }

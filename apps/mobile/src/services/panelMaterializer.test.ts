@@ -9,7 +9,7 @@ import {
   materializeMobilePanel,
   mobilePanelMaterializationState,
   needsMobilePanelMaterialization,
-  PanelMaterializationRetryQueue,
+  PanelMaterializationTasks,
 } from "./panelMaterializer";
 
 const hostConfig = {
@@ -177,7 +177,7 @@ describe("needsMobilePanelMaterialization", () => {
 });
 
 describe("materializeMobilePanel", () => {
-  it("does not acquire a lease when a timed-out init eventually completes", async () => {
+  it("does not acquire a lease after retirement and preserves the cancellation cause", async () => {
     const deps = makeDeps();
     let finish!: (value: { entityId: string }) => void;
     deps.getPanelInit.mockImplementation(
@@ -195,9 +195,11 @@ describe("materializeMobilePanel", () => {
       leaseMode: "acquire",
       signal: controller.signal,
     });
-    controller.abort();
+    const cause = new Error("Panel presentation retired");
+    const rejected = expect(pending).rejects.toBe(cause);
+    controller.abort(cause);
     finish({ entityId: "panel:nav-1" });
-    await expect(pending).rejects.toThrow("canceled");
+    await rejected;
     expect(deps.acquireLease).not.toHaveBeenCalled();
   });
   it("leases a reserved panel and returns an immediate blank WebView without requesting a grant", async () => {
@@ -363,48 +365,139 @@ describe("materializeMobilePanel", () => {
   });
 });
 
-describe("PanelMaterializationRetryQueue", () => {
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => jest.useRealTimers());
-
-  it("retries failed convergence with bounded backoff and coalesces duplicates", () => {
-    const onRetry = jest.fn();
-    const retries = new PanelMaterializationRetryQueue(onRetry, 100, 1_000);
-
-    retries.schedule("panel-1");
-    retries.schedule("panel-1");
-    jest.advanceTimersByTime(99);
-    expect(onRetry).not.toHaveBeenCalled();
-    jest.advanceTimersByTime(1);
-    expect(onRetry).toHaveBeenCalledTimes(1);
-
-    retries.schedule("panel-1");
-    jest.advanceTimersByTime(199);
-    expect(onRetry).toHaveBeenCalledTimes(1);
-    jest.advanceTimersByTime(1);
-    expect(onRetry).toHaveBeenCalledTimes(2);
+describe("PanelMaterializationTasks", () => {
+  it("retains a slow operation without retries until the real work completes", async () => {
+    jest.useFakeTimers();
+    try {
+      let complete!: () => void;
+      const settled = jest.fn();
+      const tasks = new PanelMaterializationTasks(settled);
+      const work = jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            complete = resolve;
+          }),
+      );
+      const pending = tasks.start(
+        "panel-1",
+        () => "runtime-1",
+        "acquire",
+        work,
+      )!;
+      await Promise.resolve();
+      jest.advanceTimersByTime(180_000);
+      expect(tasks.has("panel-1")).toBe(true);
+      expect(
+        tasks.start("panel-1", () => "runtime-2", "takeOver", work),
+      ).toBeNull();
+      expect(work).toHaveBeenCalledTimes(1);
+      expect(settled).not.toHaveBeenCalled();
+      complete();
+      await pending;
+      expect(tasks.has("panel-1")).toBe(false);
+      expect(settled).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
-  it("cancels retries for WebViews that are no longer retained", () => {
-    const onRetry = jest.fn();
-    const retries = new PanelMaterializationRetryQueue(onRetry, 100, 1_000);
-
-    retries.schedule("panel-1");
-    retries.retainOnly(new Set());
-    jest.runAllTimers();
-
-    expect(onRetry).not.toHaveBeenCalled();
+  it("preserves the original failure and waits for an explicit retry or new incarnation", async () => {
+    const cause = new Error("Original connection grant failure");
+    const tasks = new PanelMaterializationTasks(jest.fn());
+    const work = jest.fn(async () => {
+      throw cause;
+    });
+    await expect(
+      tasks.start("panel-1", () => "runtime-1", "acquire", work),
+    ).rejects.toBe(cause);
+    expect(
+      tasks.start("panel-1", () => "runtime-1", "acquire", work),
+    ).toBeNull();
+    expect(work).toHaveBeenCalledTimes(1);
+    tasks.retry("panel-1");
+    await expect(
+      tasks.start("panel-1", () => "runtime-1", "acquire", work),
+    ).rejects.toBe(cause);
+    await expect(
+      tasks.start(
+        "panel-1",
+        () => "runtime-2",
+        "acquire",
+        async () => {},
+      ),
+    ).resolves.toBeUndefined();
   });
 
-  it("does not resurrect retries after shutdown", () => {
-    const onRetry = jest.fn();
-    const retries = new PanelMaterializationRetryQueue(onRetry, 100, 1_000);
+  it("cancels a retired slot and joins it before permitting its replacement", async () => {
+    let complete!: () => void;
+    let signal!: AbortSignal;
+    const tasks = new PanelMaterializationTasks(jest.fn());
+    const pending = tasks.start(
+      "panel-1",
+      () => "runtime-1",
+      "takeOver",
+      (ownedSignal) => {
+        signal = ownedSignal;
+        return new Promise<void>((resolve) => {
+          complete = resolve;
+        });
+      },
+    )!;
+    await Promise.resolve();
+    expect(tasks.isTakingOver("panel-1")).toBe(true);
+    const joined = jest.fn();
+    const stopped = tasks.stop().then(joined);
+    await Promise.resolve();
+    expect(signal.aborted).toBe(true);
+    expect(joined).not.toHaveBeenCalled();
+    expect(tasks.has("panel-1")).toBe(true);
+    expect(
+      tasks.start(
+        "panel-1",
+        () => "runtime-2",
+        "acquire",
+        async () => {},
+      ),
+    ).toBeNull();
+    complete();
+    await Promise.all([pending, stopped]);
+    expect(joined).toHaveBeenCalledTimes(1);
+    await expect(
+      tasks.start(
+        "panel-1",
+        () => "runtime-2",
+        "acquire",
+        async () => {},
+      ),
+    ).resolves.toBeUndefined();
+  });
 
-    retries.schedule("panel-1");
-    retries.stop();
-    retries.schedule("panel-1");
-    jest.runAllTimers();
-
-    expect(onRetry).not.toHaveBeenCalled();
+  it("records a failure against the incarnation reached during navigation", async () => {
+    let coordinate = "runtime-1";
+    let fail!: (cause: Error) => void;
+    const cause = new Error("New runtime grant failed");
+    const tasks = new PanelMaterializationTasks(jest.fn());
+    const pending = tasks.start(
+      "panel-1",
+      () => coordinate,
+      "acquire",
+      () =>
+        new Promise<void>((_, reject) => {
+          fail = reject;
+        }),
+    )!;
+    const rejected = expect(pending).rejects.toBe(cause);
+    await Promise.resolve();
+    coordinate = "runtime-2";
+    fail(cause);
+    await rejected;
+    expect(
+      tasks.start(
+        "panel-1",
+        () => coordinate,
+        "acquire",
+        async () => {},
+      ),
+    ).toBeNull();
   });
 });

@@ -66,7 +66,7 @@ const tick = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
 
-it("keeps the retained connection through timed-out bootstrap retries and reverse response order", async () => {
+it("keeps the retained connection through canceled bootstrap and reverse response order", async () => {
   const h = harness();
   h.owners.retain(PANEL, A);
   const abandonedBootstrap = new AbortController();
@@ -99,11 +99,10 @@ it("keeps the retained connection through timed-out bootstrap retries and revers
       h.owners.acquire(panelId, runtimeEntityId, "takeOver"),
     leaseMode: "acquire",
   });
-  const firstRejected = expect(first).rejects.toThrow(
-    "materialization canceled",
-  );
+  const cause = new Error("Document bootstrap canceled");
+  const firstRejected = expect(first).rejects.toBe(cause);
   await tick();
-  abandonedBootstrap.abort();
+  abandonedBootstrap.abort(cause);
   const retry = h.owners.acquire(PANEL, A, "acquire");
   await tick();
   expect(h.calls.map((call) => call.connectionId)).toEqual([
