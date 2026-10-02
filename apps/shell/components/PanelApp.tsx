@@ -129,10 +129,6 @@ function PanelAppContent() {
     (command: PaneChromeCommand) => handlePaneChromeCommandRef.current(command),
     []
   );
-  const navigateToFocusedPane = useCallback(
-    (panelId: string) => navigateToId(panelId, { target: "focused-pane" }),
-    [navigateToId]
-  );
   const registerPanelDevTools = useCallback((handler: () => void) => {
     openPanelDevToolsRef.current = handler;
   }, []);
@@ -225,7 +221,7 @@ function PanelAppContent() {
           title={currentTitle}
           chromeState={chromeState}
           onChromeCommand={handleChromeCommand}
-          onNavigateToId={navigateToFocusedPane}
+          onNavigateToId={navigateToId}
           onPanelContextMenu={showPanelContextMenu}
           paneChromeState={paneChromeState}
           onPaneChromeCommand={handlePaneChromeCommand}

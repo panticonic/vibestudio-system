@@ -13,12 +13,8 @@ import type {
   LazyStatusNavigationData,
 } from "./navigationTypes";
 
-export interface PanelNavigationOptions {
-  /** Explicit user navigation replaces the pane the user most recently focused. */
-  target?: "focused-pane";
-}
-
-export type NavigateToPanelId = (panelId: string, options?: PanelNavigationOptions) => void;
+/** Focus an open panel in place; otherwise navigate the focused pane. */
+export type NavigateToPanelId = (panelId: string) => void;
 
 export interface NavigationLayoutValue {
   mode: NavigationMode;
@@ -114,8 +110,8 @@ export function NavigationProvider({ children }: NavigationProviderProps) {
   const navigateToIdFnRef = useRef<NavigateToPanelId>(() => {});
 
   const navigateToId = useCallback(
-    (panelId: string, options?: PanelNavigationOptions) => {
-      navigateToIdFnRef.current(panelId, options);
+    (panelId: string) => {
+      navigateToIdFnRef.current(panelId);
     },
     [] // Stable forever - no dependencies
   );
