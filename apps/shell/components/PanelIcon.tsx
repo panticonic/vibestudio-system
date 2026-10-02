@@ -8,6 +8,7 @@ import {
 } from "@radix-ui/react-icons";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { PanelNavigationState } from "@vibestudio/shared/types";
+import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
 import { useWorkspaceIcons } from "../shell/workspaceIconsContext";
 
 const BrowserFavicon = lazy(async () => {
@@ -94,7 +95,7 @@ export function PanelIcon({
       />
     );
   }
-  if (icon && !icon.startsWith("./") && !icon.startsWith("data:image/")) {
+  if (isSemanticEmoji(icon)) {
     return (
       <span
         aria-hidden="true"

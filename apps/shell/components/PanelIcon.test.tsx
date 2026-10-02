@@ -16,6 +16,16 @@ afterEach(() => {
 });
 
 describe("PanelIcon", () => {
+  it.each(["target", "lucide:target", "🎯 Mission", "💬🎯"])(
+    "uses the panel glyph instead of rendering invalid text icon %s",
+    (icon) => {
+      const { container } = render(<PanelIcon icon={icon} fallback="panel" />);
+      expect(container.textContent).toBe("");
+      expect(container.querySelector("svg")).not.toBeNull();
+      expect(icons.load).not.toHaveBeenCalled();
+    }
+  );
+
   it("renders a declared semantic icon at the requested breadcrumb size", () => {
     const { getByText } = render(<PanelIcon icon="💬" size={17} fallback="panel" />);
     const icon = getByText("💬");

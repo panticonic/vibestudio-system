@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { SvgUri } from "react-native-svg";
 import { unitIconTarget } from "@vibestudio/shared/panel/assetPathPolicy";
+import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
 import {
   Globe,
   LayoutGrid,
@@ -91,11 +92,7 @@ export function MobileUnitIcon(props: {
         onError={handleImageError}
       />
     );
-  } else if (
-    props.icon &&
-    !props.icon.startsWith("./") &&
-    !props.icon.startsWith("data:image/")
-  ) {
+  } else if (isSemanticEmoji(props.icon)) {
     content = (
       <Text
         accessibilityElementsHidden
