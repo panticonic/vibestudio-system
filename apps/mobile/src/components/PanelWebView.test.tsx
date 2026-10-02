@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react-native";
+import { act, fireEvent, render } from "@testing-library/react-native";
 import React from "react";
 import { PanelWebView, type PanelWebViewHandle } from "./PanelWebView";
 
@@ -25,7 +25,11 @@ jest.mock("react-native-webview", () => {
   };
 });
 
-jest.mock("../services/workspaceBrowserProfile", () => ({ workspaceWebViewConfig: (scope: string) => ({ props: { workspaceProfile: scope } }) }));
+jest.mock("../services/workspaceBrowserProfile", () => ({
+  workspaceWebViewConfig: (scope: string) => ({
+    props: { workspaceProfile: scope },
+  }),
+}));
 
 jest.mock("../services/nativeCapabilities", () => ({
   openExternalUrl: jest.fn(async () => undefined),
@@ -39,6 +43,62 @@ describe("PanelWebView lifecycle", () => {
     mockNativeWebViewProps.length = 0;
   });
 
+  it("keeps a slow owned load alive until its actual completion or failure", () => {
+    jest.useFakeTimers();
+    try {
+      const view = render(
+        <PanelWebView
+          browserProfile="test-account/workspace"
+          panelId="panel:tree/panels~chat/one"
+          url="https://panel.test/entry.js"
+          visible
+          managed
+        />,
+      );
+      act(() => jest.advanceTimersByTime(180_000));
+      expect(view.getByTestId("native-webview")).toBeTruthy();
+      expect(view.getByText("Loading panel...")).toBeTruthy();
+      fireEvent(view.getByTestId("native-webview"), "loadEnd");
+      expect(view.queryByText("Loading panel...")).toBeNull();
+      fireEvent(view.getByTestId("native-webview"), "error", {
+        nativeEvent: { description: "Original asset stream failure" },
+      });
+      expect(view.getByText("Original asset stream failure")).toBeTruthy();
+      view.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("reports an iOS document process termination and ignores a retired process", () => {
+    const common = {
+      browserProfile: "test-account/workspace",
+      panelId: "panel:tree/panels~chat/one",
+      url: "https://panel.test/entry.js",
+      visible: true,
+      managed: true,
+    } as const;
+    const view = render(
+      <PanelWebView
+        {...common}
+        panelInit={{ entityId: "panel:nav-one", connectionId: "conn-a" }}
+      />,
+    );
+    const retired = mockNativeWebViewProps.at(-1)!;
+    view.rerender(
+      <PanelWebView
+        {...common}
+        panelInit={{ entityId: "panel:nav-one", connectionId: "conn-b" }}
+      />,
+    );
+    act(() => (retired["onContentProcessDidTerminate"] as () => void)());
+    expect(view.getByTestId("native-webview")).toBeTruthy();
+    fireEvent(view.getByTestId("native-webview"), "contentProcessDidTerminate");
+    expect(
+      view.getByText("iOS WebView content process was terminated."),
+    ).toBeTruthy();
+  });
+
   it("does not report an unmount when the callback identity changes", () => {
     const first = jest.fn();
     const latest = jest.fn();
@@ -50,7 +110,7 @@ describe("PanelWebView lifecycle", () => {
         visible
         managed={false}
         onUnmount={first}
-      />
+      />,
     );
 
     view.rerender(
@@ -61,7 +121,7 @@ describe("PanelWebView lifecycle", () => {
         visible
         managed={false}
         onUnmount={latest}
-      />
+      />,
     );
 
     expect(first).not.toHaveBeenCalled();
