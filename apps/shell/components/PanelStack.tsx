@@ -63,6 +63,7 @@ import { useShellEvent } from "../shell/useShellEvent";
 import { SavePasswordBar } from "./SavePasswordBar";
 import { assertPresent } from "../utils/assertPresent";
 import { ColumnRow } from "./ColumnRow";
+import { PanelColumnNavigation } from "./PanelColumnNavigation";
 import { usePanelReload } from "./usePanelReload";
 import { usePanelLayout } from "../layout/usePanelLayout";
 import {
@@ -400,15 +401,11 @@ export const PanelStack = memo(function PanelStack({
   // Navigate to an existing panel by ID. Creation never enters this boundary;
   // panel-created is the sole source of creation placement.
   const navigateToPanelId = useCallback<NavigateToPanelId>(
-    (panelId, options) => {
+    (panelId) => {
       if (!panelId) return;
       dispatch({
         type: "show-panel",
         panelId,
-        origin:
-          options?.target === "focused-pane"
-            ? "navigation-click"
-            : "navigate-event",
       });
     },
     [dispatch],
@@ -463,7 +460,6 @@ export const PanelStack = memo(function PanelStack({
         dispatchIntent(payload.intentId, {
           type: "show-panel",
           panelId: payload.panelId,
-          origin: "navigate-event",
         });
       },
       [dispatchIntent],
@@ -1238,7 +1234,7 @@ export const PanelStack = memo(function PanelStack({
           anchorPaneId: layout.focusedPaneId,
         });
       } else {
-        dispatch({ type: "show-panel", panelId, origin: "tree-click" });
+        dispatch({ type: "show-panel", panelId });
       }
       closeMobileTree();
     },
@@ -1589,6 +1585,12 @@ export const PanelStack = memo(function PanelStack({
               flexDirection: "column",
             }}
           >
+            <PanelColumnNavigation
+              layout={layout}
+              residentColumnIds={residentColumnIds}
+              titleOf={(panelId) => panelMap.get(panelId)?.title ?? "Panel"}
+              onRevealColumn={focusColumn}
+            />
             <Box
               ref={setContentEl}
               style={{

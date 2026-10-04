@@ -1,9 +1,14 @@
-// Layout data model for the multi-column panel viewport.
-// See docs/multi-column-panel-layout-plan.md §3.
+// One per-device arrangement owns panel positions, focus, and viewport position.
+// Clicking an open panel focuses it in place. Hidden-panel navigation replaces
+// the focused pane; explicit beside/below or drag actions change the arrangement.
+// Overflow reveals the focused column with the smallest shift, then holds that
+// window steady until navigation, resizing, or layout edits require a change.
 
 export interface PanelLayout {
   columns: LayoutColumn[]; // left-to-right
   focusedPaneId: string | null; // layout-level focus (not DOM focus)
+  /** Leftmost viewport column. Focus inside this window never scrolls it. */
+  viewportColumnId?: string;
 }
 
 export interface LayoutColumn {
@@ -23,13 +28,7 @@ export interface LayoutPane {
   minWidthOverride?: number;
 }
 
-// Local copy of the placement hint (§3.2) until the shared type lands in
-// @vibestudio/types / PackageManifest plumbing (W4).
-export interface PanelPlacementHint {
-  disposition?: "side" | "side-if-room" | "replace" | "split-below"; // default "side"
-  preferredWidth?: number; // px, default PREFERRED_COLUMN_WIDTH
-  minWidth?: number; // px, default MIN_COLUMN_WIDTH
-}
+export type { PanelPlacementHint } from "@vibestudio/shared/types";
 
 // Per-device persistence schema (§3.3). Treated as untrusted on restore.
 export interface PersistedLayout {

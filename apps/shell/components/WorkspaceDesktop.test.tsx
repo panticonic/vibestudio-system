@@ -69,6 +69,7 @@ const api = vi.hoisted(() => {
     list: vi.fn(async () => catalog),
     incomingSurface: vi.fn(async (): Promise<unknown> => null),
     incomingLocations: new Set<(location: PanelLocation) => void>(),
+    directListeners: new Map<string, Set<(payload: unknown) => void>>(),
     open: vi.fn(async (id: string) => {
       const create = vi.fn(async () => ({ id: "panel" }));
       const close = vi.fn();
@@ -127,7 +128,14 @@ vi.mock("../shell/client", () => ({
     listWorkspaces: api.list,
     routeWorkspace: api.route,
   },
-  directEvents: { on: () => () => {} },
+  directEvents: {
+    on: (event: string, listener: (payload: unknown) => void) => {
+      const listeners = api.directListeners.get(event) ?? new Set();
+      api.directListeners.set(event, listeners);
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  },
   incomingShellSurface: { getPending: api.incomingSurface },
   incomingPanelLocation: {
     onLocation: (listener: (location: PanelLocation) => void) => {
@@ -188,6 +196,33 @@ function OpenWorkspace({ workspaceId }: { workspaceId: string }) {
   );
 }
 describe("desktop workspace ownership", () => {
+  it("updates the workspace list on an authenticated catalog event without changing focus", async () => {
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      await waitFor(() => expect(api.route).toHaveBeenCalledWith({ workspaceId: "personal" }));
+      api.list.mockResolvedValueOnce([
+        ...api.catalog,
+        {
+          workspaceId: "new-shared",
+          name: "New shared workspace",
+          running: true,
+          pendingApprovalCount: 0,
+          lastOpened: 0,
+        },
+      ]);
+      act(() => {
+        for (const listener of api.directListeners.get("hub:workspace-catalog-changed") ?? []) {
+          listener({ workspaces: [] });
+        }
+      });
+      expect(await screen.findByRole("button", { name: "Open New shared workspace" })).toBeTruthy();
+      expect(screen.getByLabelText("personal draft").getAttribute("data-visible")).toBe("true");
+    } finally {
+      result.unmount();
+      api.list.mockImplementation(async () => api.catalog);
+    }
+  });
   it("finds a panel in a closed workspace and opens it through that workspace", async () => {
     const result = render(<Desktop />);
     try {
@@ -589,7 +624,11 @@ describe("desktop workspace ownership", () => {
     await waitFor(() => expect(api.calls.has("garden")).toBe(true));
     const garden = api.catalog.pop()!;
     try {
-      fireEvent(window, new Event("focus"));
+      act(() => {
+        for (const listener of api.directListeners.get("hub:workspace-catalog-changed") ?? []) {
+          listener({ workspaces: api.catalog });
+        }
+      });
       await waitFor(() =>
         expect(
           screen.queryByRole("button", { name: "Open Garden" }),

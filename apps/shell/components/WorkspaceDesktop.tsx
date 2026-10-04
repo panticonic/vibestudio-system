@@ -428,6 +428,12 @@ export function WorkspaceDesktop({
     [],
   );
   useDirectShellEvent(
+    "hub:workspace-catalog-changed",
+    useCallback(() => {
+      void refresh();
+    }, [refresh]),
+  );
+  useDirectShellEvent(
     "workspace-focused",
     useCallback(
       ({ workspaceId }) => {

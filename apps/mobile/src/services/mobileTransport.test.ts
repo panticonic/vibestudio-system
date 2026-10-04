@@ -192,14 +192,14 @@ describe("MobileRpcClient Iroh transport", () => {
   it("exposes shell presentation handlers before connect and reattaches them after reconnect", async () => {
     const firstRpc = makeRpc();
     const secondRpc = makeRpc();
-    const workspaceRpc = makeRpc();
+    const accountRpc = makeRpc();
     const firstConnection = makeConnection({
-      rpc: workspaceRpc,
-      hubControlRpc: firstRpc,
+      rpc: firstRpc,
+      hubControlRpc: accountRpc,
     });
     const secondConnection = makeConnection({
-      rpc: workspaceRpc,
-      hubControlRpc: secondRpc,
+      rpc: secondRpc,
+      hubControlRpc: accountRpc,
     });
     mockReconnectMobileSession
       .mockResolvedValueOnce(firstConnection)
@@ -221,7 +221,7 @@ describe("MobileRpcClient Iroh transport", () => {
       },
     );
 
-    expect(workspaceRpc.expose).not.toHaveBeenCalled();
+    expect(accountRpc.expose).not.toHaveBeenCalled();
     await client.close();
     await client.connectAndWait();
     expect(secondRpc.expose).toHaveBeenCalledWith(
@@ -517,6 +517,42 @@ describe("MobileRpcClient Iroh transport", () => {
 
     expect(coldRecover).toHaveBeenCalledTimes(1);
     expect(resubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("joins recovery listeners and returns their original failure to the Iroh owner", async () => {
+    let recover!: (kind: RecoveryKind) => void | Promise<void>;
+    mockReconnectMobileSession.mockImplementation(
+      async (_stored, _mode, onRecovery) => {
+        recover = onRecovery!;
+        return makeConnection();
+      },
+    );
+    const client = new MobileRpcClient({});
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const failure = new Error("Subscription replay failed");
+    client.onRecovery("resubscribe", async () => {
+      throw failure;
+    });
+    client.onRecovery("resubscribe", () => pending);
+    await client.connectAndWait();
+    const replay = Promise.resolve(recover("resubscribe"));
+    let settled = false;
+    void replay.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    await expect(replay).rejects.toBe(failure);
+    await client.close();
   });
 });
 
@@ -825,7 +861,6 @@ describe("MobileRpcClient shared initial connection job", () => {
       const stopStatus = jest.fn();
       const invalid = makeConnection({
         rpc: invalidRpc,
-        ...(phase === "expose" ? { hubControlRpc: invalidRpc } : {}),
         ...(phase === "missing-control" ? { hubControlRpc: undefined } : {}),
         session: makeSession({ onStatusChange: () => stopStatus }),
         close: jest.fn(() => {

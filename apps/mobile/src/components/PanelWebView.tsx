@@ -149,9 +149,6 @@ export interface PanelWebViewProps {
 }
 
 const VIBESTUDIO_USER_AGENT = `Vibestudio-Mobile/1.0 (${Platform.OS}; ${Platform.Version})`;
-const MANAGED_PANEL_STALLED_TIMEOUT_MS = 45_000;
-const MANAGED_PANEL_MAX_LOAD_TIMEOUT_MS = 120_000;
-const MANAGED_PANEL_TIMEOUT_CHECK_MS = 5_000;
 const REFERRER_POLICY_SCRIPT = `try{var m=document.createElement('meta');m.name='referrer';m.content='no-referrer';document.head.appendChild(m);}catch(e){}true;`;
 const RANDOM_UUID_POLYFILL_SCRIPT = `
   (function () {
@@ -832,9 +829,6 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
     useLayoutEffect(() => {
       publishViewportGeometry();
     }, [publishViewportGeometry]);
-    const loadStartedAtRef = useRef<number>(Date.now());
-    const lastLoadProgressAtRef = useRef<number>(Date.now());
-    const lastLoadProgressRef = useRef(0);
     const managedHostAuthority = useMemo(
       () => hostAuthorityOf(url) ?? LOOPBACK_PANEL_HOST,
       [url],
@@ -1027,64 +1021,12 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
 
     useLayoutEffect(() => {
       currentUrlRef.current = url;
-      loadStartedAtRef.current = Date.now();
-      lastLoadProgressAtRef.current = Date.now();
-      lastLoadProgressRef.current = 0;
       // A new document wipes the injected bridge; hold envelopes until it reloads.
       bridgeReadyRef.current = false;
       setHasError(false);
       setIsLoading(true);
       setErrorMessage("");
     }, [documentIncarnationKey, url]);
-
-    useEffect(() => {
-      if (!managed || !visible || !isLoading || hasError) return;
-      const timer = setInterval(() => {
-        const now = Date.now();
-        const elapsedMs = now - loadStartedAtRef.current;
-        const stalledMs = now - lastLoadProgressAtRef.current;
-        const progress = lastLoadProgressRef.current;
-        const maxTimedOut = elapsedMs >= MANAGED_PANEL_MAX_LOAD_TIMEOUT_MS;
-        const stalledTimedOut =
-          stalledMs >= MANAGED_PANEL_STALLED_TIMEOUT_MS && progress < 0.95;
-        if (!maxTimedOut && !stalledTimedOut) return;
-
-        const stalledUrl = currentUrlRef.current || url;
-        const seconds = Math.round(elapsedMs / 1000);
-        console.warn("[PanelWebView] Managed panel load timed out", {
-          panelId,
-          url: stalledUrl,
-          elapsedMs,
-          stalledMs,
-          progress,
-          reason: maxTimedOut ? "max-load-time" : "stalled-load",
-        });
-        smokePhase("workspace-panel-webview-timeout", {
-          panelId,
-          url: stalledUrl,
-          progress,
-        });
-        logDiagnostic("load timeout", {
-          url: stalledUrl,
-          elapsedMs,
-          stalledMs,
-          progress,
-        });
-        webViewRef.current?.stopLoading();
-        setIsLoading(false);
-        setHasError(true);
-        // The real failure is the Iroh connection to the workspace, not a network URL:
-        // the panel loads from an on-device loopback façade, so printing that
-        // 127.0.0.1 address only confused. Point the user at the connection status
-        // bar (which knows the live pipe state) instead.
-        setErrorMessage(
-          `The panel didn't finish loading after ${seconds}s.\n\n` +
-            `Check your connection, then retry.`,
-        );
-      }, MANAGED_PANEL_TIMEOUT_CHECK_MS);
-
-      return () => clearInterval(timer);
-    }, [hasError, isLoading, logDiagnostic, managed, panelId, url, visible]);
 
     const containerStyle = useMemo(
       () => [styles.container, !visible && styles.hidden],
@@ -1410,8 +1352,6 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
           url: loadedUrl,
         });
       }
-      lastLoadProgressAtRef.current = Date.now();
-      lastLoadProgressRef.current = 1;
       setIsLoading(false);
       // The injected bridge (injectedJavaScriptBeforeContentLoaded) has run by
       // load end; deliver anything queued while the webview was (re)loading. The
@@ -1454,9 +1394,6 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
 
     const handleLoadStart = useCallback(
       (syntheticEvent: { nativeEvent: { url?: string } }) => {
-        loadStartedAtRef.current = Date.now();
-        lastLoadProgressAtRef.current = Date.now();
-        lastLoadProgressRef.current = 0;
         // A (re)load restarts the JS context; hold envelopes until load end.
         bridgeReadyRef.current = false;
         if (
@@ -1480,13 +1417,6 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
           syntheticEvent.nativeEvent.url.length > 0
         ) {
           currentUrlRef.current = syntheticEvent.nativeEvent.url;
-        }
-        if (
-          typeof progress === "number" &&
-          progress > lastLoadProgressRef.current
-        ) {
-          lastLoadProgressRef.current = progress;
-          lastLoadProgressAtRef.current = Date.now();
         }
         if (
           progress === undefined ||
@@ -1684,6 +1614,13 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
           }}
           onRenderProcessGone={(event) => {
             if (ownsCurrentDocument()) handleRenderProcessGone(event);
+          }}
+          onContentProcessDidTerminate={() => {
+            if (!ownsCurrentDocument()) return;
+            logDiagnostic("content process terminated", {});
+            setHasError(true);
+            setIsLoading(false);
+            setErrorMessage("iOS WebView content process was terminated.");
           }}
           onFileDownload={
             Platform.OS === "ios"

@@ -100,6 +100,7 @@ export function PanelSurface({
     if (sameBounds(lastBoundsRef.current, bounds)) return;
     lastBoundsRef.current = bounds;
     void view.updateNativePanelSlot(request).catch((error: unknown) => {
+      if (!mountedRef.current) return;
       if (!isRpcConnectionLost(error)) console.warn("[PanelSurface] geometry update failed:", error);
     });
   }, [bindingId, nativeSlotId, panelId, visible, view]);

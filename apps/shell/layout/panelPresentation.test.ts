@@ -113,7 +113,6 @@ describe("panelCreatedLayoutAction", () => {
     ).toEqual({
       type: "show-panel",
       panelId: "panel-root",
-      origin: "navigate-event",
     });
     expect(
       panelCreatedLayoutAction({

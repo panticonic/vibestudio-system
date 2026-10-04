@@ -359,7 +359,6 @@ describe("notify", () => {
       {
         toolCallId: "call-8",
         runId: "run-abcdef",
-        runRef: "@s1",
         message: "use the staging fixture instead",
       },
     ]);

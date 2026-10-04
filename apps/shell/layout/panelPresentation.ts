@@ -23,7 +23,7 @@ export function panelCreatedLayoutAction(
       hint: created.placement,
     };
   }
-  return { type: "show-panel", panelId: created.panelId, origin: "navigate-event" };
+  return { type: "show-panel", panelId: created.panelId };
 }
 
 /**
@@ -51,5 +51,5 @@ export function openInNewColumnAction(
       anchorPaneId,
     };
   }
-  return { type: "show-panel", panelId, origin: "navigate-event" };
+  return { type: "show-panel", panelId };
 }

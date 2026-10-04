@@ -464,8 +464,11 @@ class MobilePanels implements PanelHost {
 
   async loadTreeForPaint(): Promise<void> {
     const panelManager = this.requireManager();
+    smokePhase("workspace-tree-load-start", { workspaceId: this.registry.workspaceId });
     await this.ensureRegistered();
+    smokePhase("workspace-tree-client-registered", { workspaceId: this.registry.workspaceId });
     const groups = await this.treeCache.loadRootGroups(true);
+    smokePhase("workspace-tree-groups-loaded", { workspaceId: this.registry.workspaceId });
     await Promise.all(
       groups.groups.map((group) =>
         this.treeCache.loadFirst({
@@ -1610,14 +1613,43 @@ export class ShellClient {
     for (;;) {
       try {
         const info = await this.connectWorkspace();
+        const prepared = <T>(stage: string, work: Promise<T>): Promise<T> => {
+          smokePhase("workspace-shell-preparation-start", {
+            workspaceId: info.config.id,
+            stage,
+          });
+          return work.then(
+            (result) => {
+              smokePhase("workspace-shell-preparation-complete", {
+                workspaceId: info.config.id,
+                stage,
+              });
+              return result;
+            },
+            (error) => {
+              smokePhase("workspace-shell-preparation-failed", {
+                workspaceId: info.config.id,
+                stage,
+                message: error instanceof Error ? error.message : String(error),
+              });
+              throw error;
+            },
+          );
+        };
         const preparation = [
-          loadMobileShellStartupSnapshot(
-            this.serverEndpointId,
-            info.config.id,
-            this.credentials.deviceId,
+          prepared(
+            "snapshot",
+            loadMobileShellStartupSnapshot(
+              this.serverEndpointId,
+              info.config.id,
+              this.credentials.deviceId,
+            ),
           ),
-          this.refreshBrowserNotificationPermissions(),
-          this.startPanelAssetFacade(info.config.id),
+          prepared(
+            "browser-permissions",
+            this.refreshBrowserNotificationPermissions(),
+          ),
+          prepared("asset-facade", this.startPanelAssetFacade(info.config.id)),
         ] as const;
         let restored: Awaited<(typeof preparation)[0]>;
         try {

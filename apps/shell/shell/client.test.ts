@@ -21,6 +21,7 @@ vi.mock("./workspaceClient", () => ({
     state.clients.push(rpc);
     return {
       unitIcons: { close: vi.fn() },
+      view: { close: vi.fn(async () => {}) },
       app: { openShellSurface: vi.fn() },
       workspace: {
         getActive: async () => "workspace",
@@ -119,6 +120,10 @@ it("binds System RPC identity before its first request and isolates destination 
   expect(systemEvent).toHaveBeenCalledOnce();
   expect(projectEvent).toHaveBeenCalledOnce();
   project.close();
+  await expect(state.clients[1]!.call("main", "workspace.getConfig", [])).rejects.toMatchObject({
+    errorKind: "transport",
+    code: "CONNECTION_LOST",
+  });
   deliver("project");
   expect(projectEvent).toHaveBeenCalledOnce();
 });

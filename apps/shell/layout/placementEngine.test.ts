@@ -6,6 +6,7 @@ import {
   findPane,
   normalizeLayout,
   paneForPanel,
+  reconcileViewport,
   refineDropTarget,
   validateRestoredLayout,
   type LayoutAction,
@@ -46,40 +47,6 @@ const PARENTS: Record<string, string | null> = {
   "other-child": "other-root",
 };
 
-const OWNERS: Record<string, string> = {
-  root: "o1",
-  A: "o1",
-  B: "o1",
-  C: "o1",
-  B2: "o1",
-  D: "o1",
-  "other-root": "o2",
-  "other-child": "o2",
-};
-
-function ancestors(id: string): string[] {
-  const out: string[] = [];
-  let cur = PARENTS[id] ?? null;
-  while (cur !== null) {
-    out.push(cur);
-    cur = PARENTS[cur] ?? null;
-  }
-  return out;
-}
-
-function treeRelation(
-  a: string,
-  b: string
-): "self" | "ancestor" | "descendant" | "sibling" | "none" {
-  if (!(a in PARENTS) || !(b in PARENTS)) return "none";
-  if (OWNERS[a] !== OWNERS[b]) return "none"; // rule 8: owner boundaries
-  if (a === b) return "self";
-  if (ancestors(b).includes(a)) return "ancestor"; // a is an ancestor of b
-  if (ancestors(a).includes(b)) return "descendant"; // a is a descendant of b
-  if (PARENTS[a] === PARENTS[b]) return "sibling";
-  return "none";
-}
-
 interface EnvOverrides {
   viewportWidth?: number;
   viewportHeight?: number;
@@ -96,35 +63,6 @@ function makeEnv(overrides: EnvOverrides = {}): LayoutEnv {
     firstRootPanelId: () =>
       overrides.firstRootPanelId === undefined ? "root" : overrides.firstRootPanelId,
     minWidthOf: (panelId) => overrides.minWidths?.[panelId] ?? MIN_COLUMN_WIDTH,
-    treeRelation,
-    nearestVisibleRelative: (panelId, layout) => {
-      // self < descendant < ancestor < sibling, nearest first (rule 1b).
-      const visible: Array<{ paneId: string; panelId: string }> = [];
-      for (const column of layout.columns) {
-        for (const pane of column.panes) visible.push({ paneId: pane.id, panelId: pane.panelId });
-      }
-      const rank = { self: 0, descendant: 1, ancestor: 2, sibling: 3, none: 4 } as const;
-      const distance = (a: string, b: string): number => {
-        const upA = [a, ...ancestors(a)];
-        const upB = [b, ...ancestors(b)];
-        for (let i = 0; i < upA.length; i++) {
-          const j = upB.indexOf(upA[i] ?? "");
-          if (j !== -1) return i + j;
-        }
-        return Number.POSITIVE_INFINITY;
-      };
-      let best: { paneId: string; score: number; dist: number } | null = null;
-      for (const entry of visible) {
-        const rel = treeRelation(entry.panelId, panelId);
-        const score = rank[rel];
-        if (score >= rank.none) continue;
-        const dist = distance(entry.panelId, panelId); // nearest first
-        if (best === null || score < best.score || (score === best.score && dist < best.dist)) {
-          best = { paneId: entry.paneId, score, dist };
-        }
-      }
-      return best?.paneId ?? null;
-    },
   };
 }
 
@@ -248,7 +186,7 @@ describe("show-panel (rule 1)", () => {
   it("focuses the existing pane when the panel is already visible, never duplicates (rule 9)", () => {
     const layout = layoutOf(["A"], ["B"]);
     const env = makeEnv();
-    const action: LayoutAction = { type: "show-panel", panelId: "B", origin: "tree-click" };
+    const action: LayoutAction = { type: "show-panel", panelId: "B" };
     const next = applyLayoutAction(layout, action, env);
     expect(next.focusedPaneId).toBe("pane-1-0");
     expect(visiblePanelIds(next)).toEqual(["A", "B"]);
@@ -258,45 +196,33 @@ describe("show-panel (rule 1)", () => {
     assertInvariants(again);
   });
 
-  it("uses the nearest tree relative for programmatic navigation without an explicit slot", () => {
-    // B visible; showing C (child of B) should replace in B's pane, not A's.
+  it("uses the focused pane for navigation even when a closer tree relative is open", () => {
+    // C is a child of B, but the user chose A as their navigation pane.
     const layout = layoutOf(["A"], ["B"]);
     layout.focusedPaneId = "pane-0-0";
-    const next = applyLayoutAction(
-      layout,
-      { type: "show-panel", panelId: "C", origin: "navigate-event" },
-      makeEnv()
-    );
-    expect(paneAt(next, 1, 0).panelId).toBe("C");
-    expect(paneAt(next, 0, 0).panelId).toBe("A");
-    expect(next.focusedPaneId).toBe("pane-1-0");
+    const next = applyLayoutAction(layout, { type: "show-panel", panelId: "C" }, makeEnv());
+    expect(paneAt(next, 1, 0).panelId).toBe("B");
+    expect(paneAt(next, 0, 0).panelId).toBe("C");
+    expect(next.focusedPaneId).toBe("pane-0-0");
     assertInvariants(next);
   });
 
-  it.each(["tree-click", "navigation-click"] as const)(
-    "%s replaces the focused child slot so tree and breadcrumbs can retarget it",
-    (origin) => {
-      const layout = layoutOf(["A"], ["B"]);
-      layout.focusedPaneId = "pane-1-0";
-      const next = applyLayoutAction(
-        layout,
-        { type: "show-panel", panelId: "B2", origin },
-        makeEnv()
-      );
-
-      expect(paneAt(next, 0, 0).panelId).toBe("A");
-      expect(paneAt(next, 1, 0).panelId).toBe("B2");
-      expect(next.focusedPaneId).toBe("pane-1-0");
-      assertInvariants(next);
-    }
-  );
+  it("replaces the focused child slot so navigation can retarget it", () => {
+    const layout = layoutOf(["A"], ["B"]);
+    layout.focusedPaneId = "pane-1-0";
+    const next = applyLayoutAction(layout, { type: "show-panel", panelId: "B2" }, makeEnv());
+    expect(paneAt(next, 0, 0).panelId).toBe("A");
+    expect(paneAt(next, 1, 0).panelId).toBe("B2");
+    expect(next.focusedPaneId).toBe("pane-1-0");
+    assertInvariants(next);
+  });
 
   it("falls back to the focused pane when no relative is visible (owner boundary, rule 8)", () => {
     const layout = layoutOf(["A"], ["B"]);
     layout.focusedPaneId = "pane-1-0";
     const next = applyLayoutAction(
       layout,
-      { type: "show-panel", panelId: "other-child", origin: "navigate-event" },
+      { type: "show-panel", panelId: "other-child" },
       makeEnv()
     );
     // other-child is in another owner's tree — "none" to everything visible.
@@ -307,22 +233,14 @@ describe("show-panel (rule 1)", () => {
 
   it("seeds a single column into an empty layout", () => {
     const layout: PanelLayout = { columns: [], focusedPaneId: null };
-    const next = applyLayoutAction(
-      layout,
-      { type: "show-panel", panelId: "A", origin: "navigate-event" },
-      makeEnv()
-    );
+    const next = applyLayoutAction(layout, { type: "show-panel", panelId: "A" }, makeEnv());
     expect(visiblePanelIds(next)).toEqual(["A"]);
     assertInvariants(next);
   });
 
   it("keeps pane (position) ids stable across replace-in-place", () => {
     const layout = layoutOf(["B"]);
-    const next = applyLayoutAction(
-      layout,
-      { type: "show-panel", panelId: "B2", origin: "tree-click" },
-      makeEnv()
-    );
+    const next = applyLayoutAction(layout, { type: "show-panel", panelId: "B2" }, makeEnv());
     expect(paneAt(next, 0, 0).id).toBe("pane-0-0");
     expect(paneAt(next, 0, 0).panelId).toBe("B2");
   });
@@ -586,15 +504,54 @@ describe("present-panel", () => {
     );
   });
 
+  it("side-if-room measures the entire resident arrangement before adding a column", () => {
+    const next = applyLayoutAction(
+      layoutOf(["A"], ["B"], ["D"]),
+      {
+        type: "present-panel",
+        panelId: "C",
+        anchorPanelId: "A",
+        hint: { disposition: "side-if-room" },
+      },
+      makeEnv({ viewportWidth: 2000 })
+    );
+    expect(visiblePanelIds(next)).toEqual(["C", "B", "D"]);
+    expect(computeViewport(next, makeEnv({ viewportWidth: 2000 })).residentColumnIds).toEqual([
+      "col-0",
+      "col-1",
+      "col-2",
+    ]);
+  });
+
+  it("side-if-room preserves other columns and stacked panes when it reuses its anchor", () => {
+    const env = makeEnv({ viewportWidth: 1100 });
+    let layout = layoutOf(["root"], ["A", "B2"], ["D"]);
+    layout.focusedPaneId = "pane-2-0";
+    layout = applyLayoutAction(
+      layout,
+      {
+        type: "present-panel",
+        panelId: "B",
+        anchorPanelId: "A",
+        hint: { disposition: "side-if-room", minWidth: 700 },
+      },
+      env
+    );
+    expect(visiblePanelIds(layout)).toEqual(["root", "B", "B2", "D"]);
+    expect(layout.columns.map((column) => column.id)).toEqual(["col-0", "col-1", "col-2"]);
+    expect(paneAt(layout, 1, 0)).toMatchObject({
+      id: "pane-1-0",
+      panelId: "B",
+      minWidthOverride: 700,
+    });
+    expect(layout.focusedPaneId).toBe("pane-1-0");
+  });
+
   it("clears a presentation override when ordinary navigation replaces the pane", () => {
     const layout = layoutOf(["A"]);
     layout.columns[0]!.panes[0]!.minWidthOverride = 700;
 
-    const next = applyLayoutAction(
-      layout,
-      { type: "show-panel", panelId: "B", origin: "navigate-event" },
-      makeEnv()
-    );
+    const next = applyLayoutAction(layout, { type: "show-panel", panelId: "B" }, makeEnv());
 
     expect(next.columns[0]?.panes[0]).toEqual({
       id: "pane-0-0",
@@ -883,11 +840,7 @@ describe("replacement drift (rule 10)", () => {
   it("replacing B with sibling B2 leaves descendant C's pane untouched", () => {
     const layout = layoutOf(["B"], ["C"]);
     layout.focusedPaneId = "pane-0-0";
-    const next = applyLayoutAction(
-      layout,
-      { type: "show-panel", panelId: "B2", origin: "tree-click" },
-      makeEnv()
-    );
+    const next = applyLayoutAction(layout, { type: "show-panel", panelId: "B2" }, makeEnv());
     expect(next.columns.map((c) => c.panes[0]?.panelId)).toEqual(["B2", "C"]);
     expect(next.columns).toHaveLength(2);
     assertInvariants(next);
@@ -895,6 +848,75 @@ describe("replacement drift (rule 10)", () => {
 });
 
 describe("computeViewport (§3.1 / D10)", () => {
+  it("keeps clicked resident panels in the same on-screen slots", () => {
+    const env = makeEnv({ viewportWidth: 1200 });
+    let layout = layoutOf(["A"], ["B", "B2"], ["C"], ["D"]);
+    layout.focusedPaneId = "pane-2-0";
+    layout = reconcileViewport(layout, env);
+    const columns = layout.columns;
+    const viewport = computeViewport(layout, env);
+    expect(viewport.residentColumnIds).toEqual(["col-1", "col-2"]);
+
+    for (const panelId of ["B", "C", "B2", "B", "C"]) {
+      const paneId = paneForPanel(layout, panelId)!.pane.id;
+      layout = applyLayoutAction(layout, { type: "focus-pane", paneId }, env);
+      expect(computeViewport(layout, env)).toEqual(viewport);
+      expect(layout.columns).toEqual(columns);
+      // Sidebar, breadcrumb, and programmatic focus follow the same rule.
+      layout = applyLayoutAction(layout, { type: "show-panel", panelId }, env);
+      expect(computeViewport(layout, env)).toEqual(viewport);
+      expect(layout.columns).toEqual(columns);
+    }
+  });
+
+  it("reveals parked panels with the smallest shift and keeps that window on subsequent clicks", () => {
+    const env = makeEnv({ viewportWidth: 1200 });
+    let layout = reconcileViewport(layoutOf(["A"], ["B"], ["C"], ["D"]), env);
+    for (const [panelId, expected] of [
+      ["C", ["col-1", "col-2"]],
+      ["B", ["col-1", "col-2"]],
+      ["D", ["col-2", "col-3"]],
+      ["C", ["col-2", "col-3"]],
+      ["A", ["col-0", "col-1"]],
+    ] as const) {
+      layout = applyLayoutAction(layout, { type: "show-panel", panelId }, env);
+      expect(computeViewport(layout, env).residentColumnIds).toEqual(expected);
+    }
+  });
+
+  it("remembers the window after resizing, persistence, and restoring", () => {
+    const env = makeEnv({ viewportWidth: 1200 });
+    let layout = layoutOf(["A"], ["B"], ["C"], ["D"]);
+    layout.focusedPaneId = "pane-3-0";
+    layout = reconcileViewport(layout, env);
+    layout = reconcileViewport(layout, { ...env, viewportWidth: 1800 });
+    expect(computeViewport(layout, { ...env, viewportWidth: 1800 }).residentColumnIds).toEqual([
+      "col-1",
+      "col-2",
+      "col-3",
+    ]);
+    layout = reconcileViewport(layout, env);
+    layout = applyLayoutAction(layout, { type: "show-panel", panelId: "C" }, env);
+    const restored = validateRestoredLayout(
+      { version: 1, layout: JSON.parse(JSON.stringify(layout)) },
+      new Set(["A", "B", "C", "D"])
+    )!;
+    expect(computeViewport(restored, env).residentColumnIds).toEqual(["col-2", "col-3"]);
+    expect(
+      computeViewport(applyLayoutAction(restored, { type: "show-panel", panelId: "D" }, env), env)
+    ).toEqual(computeViewport(restored, env));
+  });
+
+  it("keeps the viewport near its former position when its leading column closes", () => {
+    const env = makeEnv({ viewportWidth: 1200 });
+    let layout = layoutOf(["root"], ["A"], ["B"], ["C"], ["D"]);
+    layout.focusedPaneId = "pane-3-0";
+    layout = reconcileViewport(layout, env);
+    layout = applyLayoutAction(layout, { type: "close-pane", paneId: "pane-2-0" }, env);
+    expect(computeViewport(layout, env).residentColumnIds).toEqual(["col-3", "col-4"]);
+    expect(layout.focusedPaneId).toBe("pane-3-0");
+  });
+
   it("returns everything resident when all columns fit", () => {
     const layout = layoutOf(["A"], ["B"]);
     const vp = computeViewport(layout, makeEnv({ viewportWidth: 2000 }));
@@ -1001,6 +1023,24 @@ describe("validateRestoredLayout (§7)", () => {
     ).toBeNull();
   });
 
+  it("accepts old layouts without a viewport position and validates stored column IDs", () => {
+    const layout = goodLayout();
+    expect(validateRestoredLayout(persisted(layout), allPanels)).not.toBeNull();
+    for (const invalid of [null, 42, ""]) {
+      expect(
+        validateRestoredLayout(persisted({ ...layout, viewportColumnId: invalid }), allPanels)
+      ).toBeNull();
+    }
+    expect(
+      validateRestoredLayout(persisted({ ...layout, viewportColumnId: "deleted" }), allPanels)
+        ?.viewportColumnId
+    ).toBeUndefined();
+    expect(
+      validateRestoredLayout(persisted({ ...layout, viewportColumnId: "col-1" }), allPanels)
+        ?.viewportColumnId
+    ).toBe("col-1");
+  });
+
   it("rejects NaN / non-positive / missing fractions", () => {
     for (const badFr of [NaN, 0, -1, Infinity, undefined, "1"]) {
       const layout = goodLayout();
@@ -1092,7 +1132,6 @@ describe("property: random action sequences preserve invariants", () => {
         return {
           type: "show-panel",
           panelId,
-          origin: rand() < 0.5 ? "tree-click" : "navigate-event",
         };
       case 1:
         return {
@@ -1159,6 +1198,9 @@ describe("property: random action sequences preserve invariants", () => {
         viewportWidth: 600 + Math.floor(rand() * 2000),
         viewportHeight: 300 + Math.floor(rand() * 1200),
         firstRootPanelId: rand() < 0.2 ? null : "root",
+        minWidths: Object.fromEntries(
+          PANELS.map((panelId) => [panelId, 400 + Math.floor(rand() * 600)])
+        ),
       });
       let layout: PanelLayout = { columns: [], focusedPaneId: null };
       for (let step = 0; step < 60; step++) {
@@ -1171,6 +1213,20 @@ describe("property: random action sequences preserve invariants", () => {
           expect([...vp.parkedLeft, ...vp.residentColumnIds, ...vp.parkedRight]).toEqual(
             layout.columns.map((c) => c.id)
           );
+          expect(reconcileViewport(layout, env)).toBe(layout);
+          for (const column of layout.columns.filter((column) =>
+            vp.residentColumnIds.includes(column.id)
+          )) {
+            for (const pane of column.panes) {
+              const clicked = applyLayoutAction(
+                layout,
+                { type: "focus-pane", paneId: pane.id },
+                env
+              );
+              expect(clicked.columns).toEqual(layout.columns);
+              expect(computeViewport(clicked, env)).toEqual(vp);
+            }
+          }
         } catch (error) {
           throw new Error(
             `Invariant violated at seed=${seed} step=${step} action=${JSON.stringify(action)}: ${String(error)}`
@@ -1303,16 +1359,19 @@ describe("place-panel (drag placement)", () => {
     assertInvariants(gutter);
   });
 
-  it("falls back to ordinary show rules when the dropped-on pane is gone", () => {
-    const next = place(layoutOf(["A"]), "B", {
-      kind: "pane-edge",
-      paneId: "pane-9-9",
-      edge: "top",
-    });
-
-    expect(visiblePanelIds(next)).toEqual(["B"]);
-    assertInvariants(next);
-  });
+  it.each([
+    { kind: "pane-edge", paneId: "deleted", edge: "top" },
+    { kind: "pane-center", paneId: "deleted" },
+    { kind: "new-column", afterColumnId: "deleted" },
+  ] satisfies LayoutDropTarget[])(
+    "leaves the layout untouched when a drop target disappears: %j",
+    (target) => {
+      const layout = reconcileViewport(layoutOf(["A"], ["D"]), makeEnv());
+      for (const panelId of ["B", "D"]) {
+        expect(place(layout, panelId, target)).toEqual(layout);
+      }
+    }
+  );
 });
 
 describe("refineDropTarget", () => {

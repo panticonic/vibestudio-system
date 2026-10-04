@@ -19,14 +19,10 @@ import type {
   PersistedLayout,
 } from "./types";
 
-export type TreeRelation = "self" | "ancestor" | "descendant" | "sibling" | "none";
-type ShowPanelOrigin = "tree-click" | "navigation-click" | "navigate-event";
-
 export type LayoutAction =
   | {
       type: "show-panel";
       panelId: string;
-      origin: ShowPanelOrigin;
     }
   | { type: "open-child"; panelId: string; parentId: string; hint?: PanelPlacementHint }
   | {
@@ -51,8 +47,6 @@ export interface LayoutEnv {
   paneChromeHeight: number; // thin drop handle + divider per pane
   firstRootPanelId(): string | null; // seed after closing the last pane; null = empty workspace
   minWidthOf(panelId: string): number; // from placement hints / defaults
-  treeRelation(a: string, b: string): TreeRelation;
-  nearestVisibleRelative(panelId: string, layout: PanelLayout): string | null; // paneId
 }
 
 export interface PaneLocation {
@@ -91,7 +85,7 @@ export function paneForPanel(layout: PanelLayout, panelId: string): PaneLocation
 
 function cloneLayout(layout: PanelLayout): PanelLayout {
   return {
-    focusedPaneId: layout.focusedPaneId,
+    ...layout,
     columns: layout.columns.map((column) => ({
       ...column,
       panes: column.panes.map((pane) => ({ ...pane })),
@@ -175,22 +169,6 @@ function newColumn(panelId: string, widthFr = 1): LayoutColumn {
   return { id: mintColumnId(), widthFr, panes: [newPane(panelId)] };
 }
 
-function isolatePanel(next: PanelLayout, panelId: string): PanelLayout {
-  const existing = paneForPanel(next, panelId);
-  const pane = existing?.pane ?? newPane(panelId);
-  pane.heightFr = 1;
-  return normalizeLayout({
-    columns: [
-      {
-        id: existing?.column.id ?? mintColumnId(),
-        widthFr: 1,
-        panes: [pane],
-      },
-    ],
-    focusedPaneId: pane.id,
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Viewport residency (§3.1 / D10) — parking is derived, never stored.
 
@@ -217,33 +195,42 @@ export function computeViewport(
     return width;
   };
 
-  // Choose the largest contiguous run containing the focused column. On an
-  // equal-size tie, keep more columns to its left: a newly created child is
-  // inserted immediately to its parent's right, so this retains the semantic
-  // parent/child pair without storing a second presentation anchor.
-  let bestStart = focusIndex;
+  // The viewport has a position of its own, like a scroll window. Preserve it
+  // until focus leaves it or its contents no longer fit. Re-optimizing around
+  // every focused column makes an ordinary click move panels under the user.
+  const anchorIndex = columns.findIndex((column) => column.id === layout.viewportColumnId);
+  let bestStart = Math.min(anchorIndex < 0 ? 0 : anchorIndex, focusIndex);
+  while (bestStart < focusIndex && requiredWidth(bestStart, focusIndex) > env.viewportWidth) {
+    bestStart += 1;
+  }
+  // A panel wider than the viewport remains accessible on its own.
   let bestEnd = focusIndex;
-  for (let candidateStart = 0; candidateStart <= focusIndex; candidateStart += 1) {
-    for (let candidateEnd = focusIndex; candidateEnd < columns.length; candidateEnd += 1) {
-      if (requiredWidth(candidateStart, candidateEnd) > env.viewportWidth) continue;
-      const candidateCount = candidateEnd - candidateStart + 1;
-      const bestCount = bestEnd - bestStart + 1;
-      const candidateRightSpan = candidateEnd - focusIndex;
-      const bestRightSpan = bestEnd - focusIndex;
-      if (
-        candidateCount > bestCount ||
-        (candidateCount === bestCount && candidateRightSpan < bestRightSpan)
-      ) {
-        bestStart = candidateStart;
-        bestEnd = candidateEnd;
-      }
-    }
+  while (
+    bestEnd + 1 < columns.length &&
+    requiredWidth(bestStart, bestEnd + 1) <= env.viewportWidth
+  ) {
+    bestEnd += 1;
+  }
+  // Fill spare room on the left, for example after enlarging the window or
+  // closing its last column. Never skip a logical column to pack more panels.
+  while (bestStart > 0 && requiredWidth(bestStart - 1, bestEnd) <= env.viewportWidth) {
+    bestStart -= 1;
   }
   return {
     residentColumnIds: columns.slice(bestStart, bestEnd + 1).map((c) => c.id),
     parkedLeft: columns.slice(0, bestStart).map((c) => c.id),
     parkedRight: columns.slice(bestEnd + 1).map((c) => c.id),
   };
+}
+
+/** Commit the actual viewport position alongside the layout, including on resize. */
+export function reconcileViewport(layout: PanelLayout, env: LayoutEnv): PanelLayout {
+  const viewportColumnId = computeViewport(layout, env).residentColumnIds[0];
+  if (layout.viewportColumnId === viewportColumnId) return layout;
+  const next = { ...layout };
+  if (viewportColumnId === undefined) delete next.viewportColumnId;
+  else next.viewportColumnId = viewportColumnId;
+  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +249,8 @@ export function validateRestoredLayout(
   if (!Array.isArray(rawColumns)) return null;
   const rawFocus = (layout as PanelLayout).focusedPaneId;
   if (rawFocus !== null && typeof rawFocus !== "string") return null;
+  const rawViewport = (layout as PanelLayout).viewportColumnId;
+  if (rawViewport !== undefined && (typeof rawViewport !== "string" || !rawViewport)) return null;
 
   const seenPanelIds = new Set<string>();
   const seenPaneIds = new Set<string>();
@@ -304,7 +293,13 @@ export function validateRestoredLayout(
     }
   }
   if (columns.length === 0) return null;
-  return normalizeLayout({ columns, focusedPaneId: rawFocus });
+  return normalizeLayout({
+    columns,
+    focusedPaneId: rawFocus,
+    ...(columns.some((column) => column.id === rawViewport)
+      ? { viewportColumnId: rawViewport }
+      : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -315,11 +310,31 @@ export function applyLayoutAction(
   action: LayoutAction,
   env: LayoutEnv
 ): PanelLayout {
+  const current = reconcileViewport(layout, env);
+  let next = reduceLayoutAction(current, action, env);
+  if (
+    current.viewportColumnId &&
+    !next.columns.some((column) => column.id === current.viewportColumnId)
+  ) {
+    // When its leading column is removed, keep the window at that position in
+    // the surviving order rather than jumping back to the first column.
+    const oldIndex = current.columns.findIndex((column) => column.id === current.viewportColumnId);
+    const neighbor = next.columns[Math.min(oldIndex, next.columns.length - 1)];
+    next = { ...next, viewportColumnId: neighbor?.id };
+  }
+  return reconcileViewport(next, env);
+}
+
+function reduceLayoutAction(
+  layout: PanelLayout,
+  action: LayoutAction,
+  env: LayoutEnv
+): PanelLayout {
   switch (action.type) {
     case "focus-pane":
       return applyFocusPane(layout, action.paneId);
     case "show-panel":
-      return applyShowPanel(cloneLayout(layout), action.panelId, action.origin, env);
+      return applyShowPanel(cloneLayout(layout), action.panelId);
     case "open-child":
       return applyHintedPlacement(
         cloneLayout(layout),
@@ -337,9 +352,9 @@ export function applyLayoutAction(
         env
       );
     case "open-beside":
-      return applyOpenBeside(cloneLayout(layout), action.panelId, action.anchorPaneId, env);
+      return applyOpenBeside(cloneLayout(layout), action.panelId, action.anchorPaneId);
     case "place-panel":
-      return applyPlacePanel(cloneLayout(layout), action.panelId, action.target, env);
+      return applyPlacePanel(cloneLayout(layout), action.panelId, action.target);
     case "move-pane-to-new-column":
       return applyMovePaneToNewColumn(layout, action.paneId);
     case "split-below":
@@ -364,16 +379,10 @@ function applyFocusPane(layout: PanelLayout, paneId: string): PanelLayout {
 }
 
 /**
- * Rule 1: show-panel — focus if visible. Direct tree/breadcrumb navigation
- * replaces the focused slot; programmatic navigation may use the nearest
- * visible relative when no slot was explicitly chosen.
+ * Navigation focuses an already-open panel in place, otherwise replaces the
+ * focused pane. Tree relationships never choose a different user's slot.
  */
-function applyShowPanel(
-  next: PanelLayout,
-  panelId: string,
-  origin: ShowPanelOrigin,
-  env: LayoutEnv
-): PanelLayout {
+function applyShowPanel(next: PanelLayout, panelId: string): PanelLayout {
   const existing = paneForPanel(next, panelId);
   if (existing) {
     next.focusedPaneId = existing.pane.id; // 1a (D3)
@@ -384,12 +393,7 @@ function applyShowPanel(
     next.columns = [newColumn(panelId)];
     return normalizeLayout(next);
   }
-  // User navigation is how a slot is retargeted. Do not let tree proximity
-  // override the pane the user deliberately focused.
-  const targetPaneId =
-    origin === "tree-click" || origin === "navigation-click"
-      ? next.focusedPaneId
-      : (env.nearestVisibleRelative(panelId, next) ?? next.focusedPaneId);
+  const targetPaneId = next.focusedPaneId;
   const targetPane =
     (targetPaneId !== null ? findPane(next, targetPaneId)?.pane : undefined) ?? firstPane;
   // 1c: replace in place; the pane id (position) survives.
@@ -411,18 +415,28 @@ function verticalFits(column: LayoutColumn, env: LayoutEnv): boolean {
 }
 
 function sideFitsComfortably(
+  layout: PanelLayout,
   anchor: PaneLocation,
   panelId: string,
   hint: PanelPlacementHint | undefined,
   env: LayoutEnv
 ): boolean {
-  const anchorWidth = Math.max(columnMinWidth(anchor.column, env), PREFERRED_COLUMN_WIDTH);
+  const residentIds = new Set(
+    computeViewport({ ...layout, focusedPaneId: anchor.pane.id }, env).residentColumnIds
+  );
+  const residentWidth = layout.columns
+    .filter((column) => residentIds.has(column.id))
+    .reduce(
+      (total, column) => total + Math.max(columnMinWidth(column, env), PREFERRED_COLUMN_WIDTH),
+      0
+    );
   const panelWidth = Math.max(
+    MIN_COLUMN_WIDTH,
     env.minWidthOf(panelId),
     hint?.minWidth ?? 0,
     hint?.preferredWidth ?? PREFERRED_COLUMN_WIDTH
   );
-  return anchorWidth + panelWidth + COLUMN_DIVIDER_WIDTH <= env.viewportWidth;
+  return residentWidth + panelWidth + residentIds.size * COLUMN_DIVIDER_WIDTH <= env.viewportWidth;
 }
 
 function insertColumnAfter(
@@ -477,18 +491,23 @@ function applyHintedPlacement(
   // 2b: replace is semantic: use the requested anchor, or ordinary show rules
   // when that panel is not visible.
   if (disposition === "replace") {
-    if (!semanticAnchor) return applyShowPanel(next, panelId, "navigate-event", env);
+    if (!semanticAnchor) return applyShowPanel(next, panelId);
     setPanePanel(semanticAnchor.pane, panelId, hint);
     next.focusedPaneId = semanticAnchor.pane.id;
     return next;
   }
 
-  if (!anchor) return applyShowPanel(next, panelId, "navigate-event", env);
+  if (!anchor) return applyShowPanel(next, panelId);
 
   if (disposition === "side-if-room") {
-    return sideFitsComfortably(anchor, panelId, hint, env)
-      ? insertColumnAfter(next, anchor.columnIndex, panelId, hint)
-      : isolatePanel(next, panelId);
+    if (sideFitsComfortably(next, anchor, panelId, hint, env)) {
+      return insertColumnAfter(next, anchor.columnIndex, panelId, hint);
+    }
+    // No room beside the anchor: reuse that pane without discarding the rest
+    // of the user's arrangement, including parked columns and stacked panes.
+    setPanePanel(anchor.pane, panelId, hint);
+    next.focusedPaneId = anchor.pane.id;
+    return next;
   }
 
   // Visual placements fall back to the focused pane when their semantic parent
@@ -505,19 +524,14 @@ function applyHintedPlacement(
 }
 
 /** Rule 3: explicit open-beside — always honored (may exceed the fit limit). */
-function applyOpenBeside(
-  next: PanelLayout,
-  panelId: string,
-  anchorPaneId: string,
-  env: LayoutEnv
-): PanelLayout {
+function applyOpenBeside(next: PanelLayout, panelId: string, anchorPaneId: string): PanelLayout {
   const existing = paneForPanel(next, panelId);
   if (existing) {
     next.focusedPaneId = existing.pane.id;
     return next;
   }
   const anchor = findPane(next, anchorPaneId);
-  if (!anchor) return applyShowPanel(next, panelId, "navigate-event", env);
+  if (!anchor) return applyShowPanel(next, panelId);
   return insertColumnAfter(next, anchor.columnIndex, panelId);
 }
 
@@ -534,14 +548,15 @@ function applyOpenBeside(
 function applyPlacePanel(
   next: PanelLayout,
   panelId: string,
-  target: LayoutDropTarget,
-  env: LayoutEnv
+  target: LayoutDropTarget
 ): PanelLayout {
   const source = paneForPanel(next, panelId);
 
   if (target.kind === "pane-center") {
     const destination = findPane(next, target.paneId);
-    if (!destination) return applyShowPanel(next, panelId, "navigate-event", env);
+    // A vanished drop target invalidates the gesture; it must not navigate
+    // some other pane that the user never dropped onto.
+    if (!destination) return next;
     if (source && source.pane.id === destination.pane.id) {
       return applyFocusPane(next, destination.pane.id);
     }
@@ -565,7 +580,7 @@ function applyPlacePanel(
 
   if (target.kind === "pane-edge") {
     const destination = findPane(next, target.paneId);
-    if (!destination) return applyShowPanel(next, panelId, "navigate-event", env);
+    if (!destination) return next;
     if (source && isPlacementNoop(next, source, target, destination, destination.column)) {
       return applyFocusPane(next, source.pane.id);
     }
@@ -593,7 +608,7 @@ function applyPlacePanel(
       ? null
       : (next.columns.find((column) => column.id === target.afterColumnId) ?? null);
   if (target.afterColumnId !== null && anchorColumn === null) {
-    return applyShowPanel(next, panelId, "navigate-event", env);
+    return next;
   }
   if (source && isPlacementNoop(next, source, target, null, anchorColumn)) {
     return applyFocusPane(next, source.pane.id);
@@ -727,9 +742,9 @@ function applySplitBelow(
     return next;
   }
   const anchor = findPane(next, anchorPaneId);
-  if (!anchor) return applyShowPanel(next, panelId, "navigate-event", env);
+  if (!anchor) return applyShowPanel(next, panelId);
   if (!verticalFits(anchor.column, env)) {
-    return applyOpenBeside(next, panelId, anchorPaneId, env);
+    return applyOpenBeside(next, panelId, anchorPaneId);
   }
   return insertPaneBelow(next, anchor, panelId);
 }

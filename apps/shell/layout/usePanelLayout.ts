@@ -7,6 +7,7 @@ import {
   applyLayoutAction,
   computeViewport,
   findPane,
+  reconcileViewport,
   validateRestoredLayout,
   type LayoutAction,
   type LayoutEnv,
@@ -14,7 +15,6 @@ import {
 import {
   fallbackCandidatesFor,
   minWidthOfPanel,
-  nearestVisibleRelativePane,
   observedPanelDeletions,
 } from "./treeEnv";
 import { mintColumnId, mintPaneId, PANE_VERTICAL_CHROME_HEIGHT } from "./types";
@@ -85,9 +85,6 @@ export function usePanelLayout(
       paneChromeHeight: PANE_VERTICAL_CHROME_HEIGHT,
       firstRootPanelId: () => rootPanelsRef.current[0]?.id ?? null,
       minWidthOf: (panelId) => minWidthOfPanel(latestMapsRef.current, panelId),
-      treeRelation: () => "none",
-      nearestVisibleRelative: (panelId, current) =>
-        nearestVisibleRelativePane(latestMapsRef.current, panelId, current),
     }),
     [viewportWidth, viewportHeight]
   );
@@ -200,6 +197,7 @@ export function usePanelLayout(
       for (const action of queued) {
         next = applyLayoutAction(next, action, envRef.current);
       }
+      next = reconcileViewport(next, envRef.current);
       restoredRef.current = true;
       layoutRef.current = next;
       setLayout(next);
@@ -222,7 +220,7 @@ export function usePanelLayout(
     if (!seedId) return;
     setLayout((current) => {
       if (current.columns.length > 0) return current;
-      const next = seedLayout(seedId);
+      const next = reconcileViewport(seedLayout(seedId), envRef.current);
       layoutRef.current = next;
       setLayoutEpoch((epoch) => epoch + 1);
       schedulePersist();
@@ -284,7 +282,22 @@ export function usePanelLayout(
     });
   }, [restored, refreshing, visiblePanelIds, panelMap, parentMap, dispatch]);
 
-  const viewport = useMemo(() => computeViewport(layout, env), [layout, env]);
+  // Resize and newly observed minimum widths can move the viewport. Store its
+  // resolved position so the next focus action starts from what is on screen.
+  useEffect(() => {
+    if (!restored) return;
+    setLayout((current) => {
+      const next = reconcileViewport(current, envRef.current);
+      if (next !== current) {
+        layoutRef.current = next;
+        setLayoutEpoch((epoch) => epoch + 1);
+        schedulePersist();
+      }
+      return next;
+    });
+  }, [restored, env, panelMap, schedulePersist]);
+
+  const viewport = useMemo(() => computeViewport(layout, env), [layout, env, panelMap]);
 
   const bumpLayoutEpoch = useCallback(() => setLayoutEpoch((epoch) => epoch + 1), []);
 

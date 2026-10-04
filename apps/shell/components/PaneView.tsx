@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Cross2Icon } from "@radix-ui/react-icons";
+import { Cross2Icon, DragHandleDots2Icon } from "@radix-ui/react-icons";
 import { Box, Flex, IconButton, Tooltip } from "@radix-ui/themes";
 import { useTouchDevice } from "@workspace/react/responsive";
 
@@ -143,12 +143,8 @@ export function PaneView({
         >
           <button
             type="button"
-            aria-label={railInteractive ? "Focus or move pane" : "Focus pane"}
-            title={
-              railInteractive
-                ? "Drag to move this pane — or focus it and use the arrow keys"
-                : "Focus pane"
-            }
+            aria-label={`Move ${title}`}
+            title="Drag to move this pane, or use the arrow keys"
             aria-keyshortcuts={
               railInteractive ? "ArrowLeft ArrowRight ArrowUp ArrowDown" : undefined
             }
@@ -162,7 +158,6 @@ export function PaneView({
                 fromPaneId: pane.id,
               });
             }}
-            onClick={() => onFocusPane(pane.id)}
             onKeyDown={(event) => {
               if (!railInteractive) return;
               const direction = ARROW_DIRECTIONS[event.key];
@@ -171,7 +166,7 @@ export function PaneView({
               onMovePane(pane.id, direction);
             }}
             style={{
-              flex: "1 1 0",
+              flex: "0 0 24px",
               height: "100%",
               minWidth: 0,
               padding: 0,
@@ -183,14 +178,33 @@ export function PaneView({
               justifyContent: "center",
             }}
           >
-            <span
-              style={{
-                height: 2,
-                width: 32,
-                borderRadius: 999,
-                backgroundColor: markFocused ? "var(--accent-9)" : "var(--gray-a8)",
-              }}
-            />
+            <DragHandleDots2Icon width={12} height={12} />
+          </button>
+          <button
+            type="button"
+            aria-label={`Focus ${title}`}
+            aria-pressed={focused}
+            title={title}
+            tabIndex={railInteractive ? 0 : -1}
+            onClick={() => onFocusPane(pane.id)}
+            style={{
+              flex: "1 1 0",
+              minWidth: 0,
+              height: "100%",
+              padding: "0 4px",
+              border: 0,
+              background: "transparent",
+              color: markFocused ? "var(--accent-11)" : "var(--gray-11)",
+              font: "inherit",
+              fontSize: 11,
+              textAlign: "left",
+              cursor: "pointer",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {title}
           </button>
           {onClosePane && (
             <Tooltip content="Close pane — panel stays in the tree">

@@ -775,6 +775,8 @@ export function useFullPanel(panelId: string | null): {
   const { panel } = useShellWorkspaceClient();
 
   const [value, setValue] = useState<FullPanel | null>(null);
+  const addressedPanelIdRef = useRef(panelId);
+  addressedPanelIdRef.current = panelId;
   const [loading, setLoading] = useState(Boolean(panelId));
   const nextRequestRef = useRef(0);
   const appliedRequestRef = useRef(0);
@@ -784,7 +786,12 @@ export function useFullPanel(panelId: string | null): {
       presentation: Awaited<ReturnType<typeof panel.getPresentation>>,
       request: number,
     ) => {
-      if (!presentation || presentation.id !== panelId) return;
+      if (
+        !presentation ||
+        presentation.id !== panelId ||
+        panelId !== addressedPanelIdRef.current
+      )
+        return;
       // Event-driven and initial reads can overlap. Request start order is not
       // presentation order: an earlier request can finish its durable refresh
       // after a later one and therefore carry the newer native view. Order

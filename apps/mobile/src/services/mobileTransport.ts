@@ -255,9 +255,9 @@ export class MobileRpcClient implements Pick<
       throw new Error(`Mobile RPC method "${method}" is already exposed`);
     }
     this.exposedHandlers.set(method, handler);
-    // Shell presentation belongs to the authenticated account endpoint, not
-    // the replaceable workspace pipe. The host dispatcher calls this endpoint.
-    this.controlRpc?.expose(method, handler, {
+    // The workspace host dispatcher owns these presentation calls.
+    // The account control server does not relay calls to workspace runtimes.
+    this.rpc?.expose(method, handler, {
       kind: "closed",
       reason:
         "Mobile presentation host methods are entered through the host dispatcher.",
@@ -432,8 +432,8 @@ export class MobileRpcClient implements Pick<
       this.connectionToken === token &&
       connection !== undefined &&
       this.connection === connection;
-    const recover = (kind: RecoveryKind) => {
-      if (current()) this.emitRecovery(kind);
+    const recover = async (kind: RecoveryKind): Promise<void> => {
+      if (current()) await this.emitRecovery(kind);
     };
     try {
       connection = this.config.connectWorkspace
@@ -467,7 +467,7 @@ export class MobileRpcClient implements Pick<
         );
       const rpc = connection.rpc;
       for (const [method, handler] of this.exposedHandlers)
-        connection.hubControlRpc.expose(method, handler, {
+        rpc.expose(method, handler, {
           kind: "closed",
           reason:
             "This handler controls an internal execution or presentation surface.",
@@ -505,7 +505,7 @@ export class MobileRpcClient implements Pick<
   }
 
   private async restoreBootstrapSession(
-    onRecovery: (kind: RecoveryKind) => void,
+    onRecovery: (kind: RecoveryKind) => void | Promise<void>,
     token: object,
   ): Promise<IrohConnection> {
     const stored = await loadShellCredential();
@@ -734,9 +734,14 @@ export class MobileRpcClient implements Pick<
    * changed) / the session was dirty — so ShellClient's cold-recover listener
    * actually fires instead of only ever running the lighter resubscribe.
    */
-  private emitRecovery(kind: RecoveryKind): void {
-    for (const listener of this.recoveryListeners.get(kind) ?? [])
-      void listener();
+  private async emitRecovery(kind: RecoveryKind): Promise<void> {
+    const results = await Promise.allSettled(
+      [...(this.recoveryListeners.get(kind) ?? [])].map(async (listener) =>
+        listener(),
+      ),
+    );
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
   }
 }
 

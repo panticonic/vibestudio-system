@@ -21,7 +21,7 @@ function NavigationProbe({ handler }: { handler: ReturnType<typeof vi.fn> }) {
   const { navigateToId, registerNavigateToId } = useNavigation();
   useEffect(() => registerNavigateToId(handler), [handler, registerNavigateToId]);
   return (
-    <button onClick={() => navigateToId("panel-child", { target: "focused-pane" })}>
+    <button onClick={() => navigateToId("panel-child")}>
       Navigate
     </button>
   );
@@ -111,7 +111,7 @@ describe("NavigationProvider", () => {
     expect(renderMode()).toBe("stack");
   });
 
-  it("carries explicit pane navigation through the registered navigation boundary", () => {
+  it("carries panel navigation through the registered navigation boundary", () => {
     const handler = vi.fn();
     render(
       <NavigationProvider>
@@ -121,9 +121,7 @@ describe("NavigationProvider", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Navigate" }));
 
-    expect(handler).toHaveBeenCalledWith("panel-child", {
-      target: "focused-pane",
-    });
+    expect(handler).toHaveBeenCalledWith("panel-child");
   });
 
   it("does not rerender layout consumers when only lazy breadcrumb data changes", () => {

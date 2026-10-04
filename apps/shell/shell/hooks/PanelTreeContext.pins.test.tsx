@@ -289,6 +289,58 @@ describe("flattenTree", () => {
 });
 
 describe("useFullPanel local presentation", () => {
+  it("does not let a late event refresh erase the newly focused panel", async () => {
+    const ready = (id: string, hostViewRevision: number) => ({
+      id,
+      title: id,
+      buildKey: "b".repeat(64),
+      parentId: null,
+      position: 0,
+      selectedChildId: null,
+      children: [],
+      snapshot: {
+        source: "panels/ready",
+        contextId: `context-${id}`,
+        options: {},
+      },
+      artifacts: { buildState: "ready", htmlPath: `/${id}` },
+      hostViewRevision,
+    });
+    let finishOldRefresh!: (value: ReturnType<typeof ready>) => void;
+    getPresentation
+      .mockResolvedValueOnce(ready("panel:tree/a", 1))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOldRefresh = resolve;
+          }),
+      )
+      .mockResolvedValue(ready("panel:tree/b", 2));
+    const { rerender } = render(<FullPanelProbe panelId="panel:tree/a" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("full-panel").textContent).toBe(
+        "panel:tree/a:ready",
+      ),
+    );
+    act(() => {
+      presentationChangeHandler?.({ revision: 2, panelIds: ["panel:tree/a"] });
+    });
+    rerender(<FullPanelProbe panelId="panel:tree/b" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("full-panel").textContent).toBe(
+        "panel:tree/b:ready",
+      ),
+    );
+    // The old request may sample a later host revision when it finally returns.
+    await act(async () => {
+      finishOldRefresh(ready("panel:tree/a", 3));
+    });
+    expect(screen.getByTestId("full-panel").textContent).toBe(
+      "panel:tree/b:ready",
+    );
+    expect(screen.getByTestId("full-panel").dataset["loading"]).toBe("false");
+  });
+
   it("never exposes the previous panel while a different panel is loading", async () => {
     const ready = (id: string) => ({
       id,
