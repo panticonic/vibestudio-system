@@ -41,7 +41,12 @@ import {
   isCurrentFallbackRecord,
 } from "./library.js";
 import { createServerSupervisor } from "./supervisor.js";
-import { runtimeContextLengthFor } from "./runtime-profiles.js";
+import {
+  runtimeContextLengthFor,
+  sameRuntimeConfig,
+  sameRuntimeRecipe,
+  validatedRuntimeConfig,
+} from "./runtime-profiles.js";
 import { runModelBenchmark } from "./benchmark.js";
 import { DEFAULT_MODEL, FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
 
@@ -173,6 +178,7 @@ const CURATED_CATALOG: CuratedModel[] = [
 type BootstrapStage = "idle" | "probing" | "engines" | "ready" | "error";
 
 interface DownloadModelRequest {
+  runtimeConfig?: ModelRuntimeConfig;
   hfRepo: string;
   file: string;
   expectedSha256?: string;
@@ -198,7 +204,9 @@ interface Ctx {
     signal?(): AbortSignal | null;
   };
   workspace?: { getInfo(): Promise<{ id: string }> };
-  subscriptions?: { push(disposable: { dispose(): void }): void };
+  subscriptions?: {
+    push(disposable: { dispose(): void | Promise<void> }): void;
+  };
 }
 
 /** Public API surface of this extension — the awaited return of {@link activate}. */
@@ -275,23 +283,31 @@ function spawnAdapter(
     onStdout(line: string): void;
     onStderr(line: string): void;
   },
-): { pid: number; kill(signal?: string): void } {
+): { pid: number; kill(signal?: string): void; closed: Promise<void> } {
   const child = nodeSpawn(bin, args, {
     env: { ...cleanEnv(), ...opts.env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   createInterface({ input: child.stdout }).on("line", opts.onStdout);
   createInterface({ input: child.stderr }).on("line", opts.onStderr);
+  let spawnFailure: unknown;
+  const closed = new Promise<void>((resolve, reject) => {
+    child.once("close", () =>
+      spawnFailure === undefined ? resolve() : reject(spawnFailure),
+    );
+  });
+  // Preserve the original spawn error while awaiting the authoritative close boundary.
+  void closed.catch(() => {});
   child.on("exit", (code) => opts.onExit(code));
-  child.on("error", () => opts.onExit(null));
+  child.on("error", (error) => {
+    spawnFailure = error;
+    opts.onExit(null);
+  });
   return {
+    closed,
     pid: child.pid ?? -1,
     kill: (signal?: string) => {
-      try {
-        child.kill((signal as NodeJS.Signals | undefined) ?? "SIGTERM");
-      } catch {
-        // already gone
-      }
+      child.kill((signal as NodeJS.Signals | undefined) ?? "SIGTERM");
     },
   };
 }
@@ -405,6 +421,52 @@ export async function activate(ctx: Ctx) {
     },
   });
 
+  const lifetime = new AbortController();
+  const stopped = new Error("Local-models extension disposed");
+  const backgroundFlights = new Set<Promise<unknown>>();
+  function ownBackground<T>(work: Promise<T>): Promise<T> {
+    backgroundFlights.add(work);
+    void work.then(
+      () => backgroundFlights.delete(work),
+      () => backgroundFlights.delete(work),
+    );
+    return work;
+  }
+  let disposal: Promise<void> | undefined;
+  ctx.subscriptions?.push({
+    dispose: () => {
+      if (disposal) return disposal;
+      lifetime.abort(stopped);
+      const flight = (async () => {
+        // Provider closure settles its actual readiness and serving requests.
+        await supervisor.dispose(stopped);
+        const pending = [
+          ...backgroundFlights,
+          ...benchmarkRuns.values(),
+          ...[...addValidationRuns.values()].map(({ run }) => run),
+        ];
+        const outcomes = await Promise.allSettled(pending);
+        const failures = outcomes.flatMap((result) =>
+          result.status === "rejected" && result.reason !== stopped
+            ? [result.reason]
+            : [],
+        );
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1)
+          throw new AggregateError(
+            failures,
+            "Local-models background closure failed",
+            { cause: failures[0] },
+          );
+      })();
+      disposal = flight;
+      void flight.catch(() => {
+        if (disposal === flight) disposal = undefined;
+      });
+      return flight;
+    },
+  });
+
   /** Health reflects the readiness to *serve* a local model on demand, not a
    *  warm fallback: the fallback is loaded lazily (design §5), so a stopped
    *  utility server is normal, not degraded. Healthy = engines installed and
@@ -424,9 +486,13 @@ export async function activate(ctx: Ctx) {
     // its retry budget — surface that as degraded (the floor is best-effort,
     // cloud providers may still be serving), never as a hard unhealthy.
     let utility: ServerState;
-    try { utility = (await supervisor.status()).utility; }
-    catch (error) {
-      ctx.health.degraded({ stage: "runtime-status", reason: error instanceof Error ? error.message : String(error) });
+    try {
+      utility = (await supervisor.status()).utility;
+    } catch (error) {
+      ctx.health.degraded({
+        stage: "runtime-status",
+        reason: error instanceof Error ? error.message : String(error),
+      });
       return;
     }
     if (utility.state === "error") {
@@ -502,6 +568,7 @@ export async function activate(ctx: Ctx) {
   }
 
   function ensureBootstrap(): Promise<void> {
+    if (lifetime.signal.aborted) return Promise.reject(stopped);
     if (bootstrapStage === "ready") return Promise.resolve();
     if (bootstrapRun && bootstrapStage !== "error") return bootstrapRun;
     bootstrapRun = bootstrap();
@@ -546,13 +613,16 @@ export async function activate(ctx: Ctx) {
   // build-time activation smoke verifies the exported API against a synthetic
   // context; it must not install native engines or leave background processes.
   if (process.env["VIBESTUDIO_EXTENSION_SMOKE"] !== "1") {
-    void ensureBootstrap().catch(() => {});
+    void ownBackground(ensureBootstrap()).catch(() => {});
   }
   const benchmarkRuns = new Map<
     string,
     Promise<{ tokensPerSec: number } | null>
   >();
-  const addValidationRuns = new Map<string, Promise<void>>();
+  const addValidationRuns = new Map<
+    string,
+    { config: ModelRuntimeConfig; run: Promise<void> }
+  >();
 
   function hasRecentBenchmark(record: ModelRecord | null): boolean {
     const benchmark = record?.benchmark ?? null;
@@ -566,53 +636,55 @@ export async function activate(ctx: Ctx) {
 
   async function ensureLoadedInternal(
     modelId: string,
-    options: { scheduleFallbackBenchmark?: boolean } = {},
+    options: {
+      scheduleFallbackBenchmark?: boolean;
+      onLoaded?: (config: ModelRuntimeConfig) => void;
+    } = {},
   ): Promise<{ baseUrl: string }> {
+    lifetime.signal.throwIfAborted();
     await awaitInvocation(ensureBootstrap());
     const slug = bareSlug(modelId);
-    if (slug === FALLBACK_MODEL.slug) {
-      const fallback = await awaitInvocation(library.ensureFallback());
-      if (fallback.runtimeValidation?.status === "pending") {
-        await awaitInvocation(validateAddedModel(slug));
-      } else if (fallback.runtimeValidation?.status === "error") {
-        throw new Error(
-          fallback.runtimeValidation.error ??
-            `Local model ${slug} failed installation validation`,
-        );
-      }
-      if (options.scheduleFallbackBenchmark) {
-        scheduleBenchmark(slug);
-      }
-    } else {
-      const record = await library.get(slug);
-      if (record?.runtimeValidation?.status === "pending") {
-        throw new Error(`Local model ${slug} is still being installed`);
-      }
-      if (record?.runtimeValidation?.status === "error") {
-        throw new Error(
-          record.runtimeValidation.error ??
-            `Local model ${slug} failed installation validation`,
-        );
-      }
-    }
-    return awaitInvocation(supervisor.ensureLoaded(slug));
+    if (slug === FALLBACK_MODEL.slug)
+      await awaitInvocation(library.ensureFallback());
+    await awaitInvocation(validateAddedModel(slug));
+    if (slug === FALLBACK_MODEL.slug && options.scheduleFallbackBenchmark)
+      scheduleBenchmark(slug);
+    const loaded = await awaitInvocation(supervisor.ensureLoaded(slug));
+    options.onLoaded?.(loaded.runtimeConfig);
+    return { baseUrl: loaded.baseUrl };
   }
 
   async function validateAddedModel(slug: string): Promise<void> {
-    const active = addValidationRuns.get(slug);
-    if (active) return active;
     const record = await library.get(slug);
-    // Records created before add-time validation are preconfigured models:
-    // they remain trusted and are never probed during startup or invocation.
-    if (
-      !record?.runtimeValidation ||
-      record.runtimeValidation.status === "ready"
-    )
-      return;
-    if (record.runtimeValidation.status === "error") {
+    const active = addValidationRuns.get(slug);
+    if (active) {
+      if (!record || sameRuntimeConfig(active.config, record.config))
+        return active.run;
+      await active.run.catch(() => undefined);
+      return validateAddedModel(slug);
+    }
+    if (!record?.runtimeValidation)
+      throw new Error(
+        `Local model ${slug} has no current installation validation admission`,
+      );
+    if (record.runtimeValidation.status === "error")
       throw new Error(
         record.runtimeValidation.error ??
           `Local model ${slug} failed installation validation`,
+      );
+    const config = validatedRuntimeConfig(record.config);
+    await ensureBootstrap();
+    const recipe = supervisor.validationRecipe(record);
+    if (record.runtimeValidation.status === "ready") {
+      if (!record.runtimeValidation.recipe)
+        throw new Error(
+          `Local model ${slug} has no observed runtime validation recipe`,
+        );
+      if (sameRuntimeRecipe(record.runtimeValidation.recipe, recipe)) return;
+      await library.setRuntimeValidation(
+        slug,
+        { status: "pending", error: null, validatedAt: null },
+        config,
       );
     }
 
@@ -622,28 +694,44 @@ export async function activate(ctx: Ctx) {
         // bootstrap is still in flight. Validation owns an isolated llama.cpp
         // process, so it must join that bootstrap before attempting to spawn.
         await ensureBootstrap();
-        await supervisor.validateModel(slug);
-        await library.setRuntimeValidation(slug, {
-          status: "ready",
-          error: null,
-          validatedAt: Date.now(),
-        });
+        const observed = await supervisor.validateModel(slug, config);
+        await library.setRuntimeValidation(
+          slug,
+          {
+            status: "ready",
+            error: null,
+            validatedAt: Date.now(),
+            recipe: observed.recipe,
+          },
+          config,
+          observed.toolsCapable,
+        );
       } catch (error) {
+        if (error === stopped) throw error;
         const message = error instanceof Error ? error.message : String(error);
-        await library.setRuntimeValidation(slug, {
-          status: "error",
-          error: message,
-          validatedAt: null,
-        });
+        await library.setRuntimeValidation(
+          slug,
+          {
+            status: "error",
+            error: message,
+            validatedAt: null,
+          },
+          config,
+        );
         throw error;
       }
     })();
-    addValidationRuns.set(slug, run);
+    const admission = { config, run };
+    addValidationRuns.set(slug, admission);
     try {
       await run;
     } finally {
-      if (addValidationRuns.get(slug) === run) addValidationRuns.delete(slug);
+      if (addValidationRuns.get(slug) === admission)
+        addValidationRuns.delete(slug);
     }
+    const current = await library.get(slug);
+    if (current && !sameRuntimeConfig(current.config, config))
+      await validateAddedModel(slug);
   }
 
   async function benchmarkModelInternal(
@@ -667,12 +755,24 @@ export async function activate(ctx: Ctx) {
         return { tokensPerSec: recentBenchmark.tokensPerSec };
       }
 
+      let servedConfig: ModelRuntimeConfig | undefined;
       return runModelBenchmark(slug, {
         fetch: globalThis.fetch,
-        ensureLoaded: (candidate) => ensureLoadedInternal(candidate),
+        signal: lifetime.signal,
+        ensureLoaded: (candidate) =>
+          ensureLoadedInternal(candidate, {
+            onLoaded: (config) => {
+              servedConfig = config;
+            },
+          }),
         apiKey: () => supervisor.apiKey(),
-        setBenchmark: (candidate, result) =>
-          library.setBenchmark(candidate, result),
+        setBenchmark: async (candidate, result) => {
+          if (!servedConfig)
+            throw new Error(
+              "Benchmark has no actual served model configuration",
+            );
+          await library.setBenchmark(candidate, result, servedConfig);
+        },
         now: () => Date.now(),
         log,
       });
@@ -689,12 +789,15 @@ export async function activate(ctx: Ctx) {
   }
 
   function scheduleBenchmark(modelId: string): void {
-    void benchmarkModelInternal(modelId).catch((error: unknown) => {
-      log("benchmark scheduling failed", {
-        slug: bareSlug(modelId),
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    if (lifetime.signal.aborted) return;
+    void ownBackground(benchmarkModelInternal(modelId)).catch(
+      (error: unknown) => {
+        log("benchmark scheduling failed", {
+          slug: bareSlug(modelId),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
   }
 
   async function finishModelAddition(
@@ -716,7 +819,7 @@ export async function activate(ctx: Ctx) {
     req: DownloadModelRequest,
   ): Promise<DownloadJob> {
     const job = await library.startDownloadJob(req);
-    void finishModelAddition(library.startDownload(req)).catch(
+    void ownBackground(finishModelAddition(library.startDownload(req))).catch(
       (error: unknown) => {
         log("model installation validation failed", {
           slug: job.slug,
@@ -1073,7 +1176,11 @@ export async function activate(ctx: Ctx) {
      * Progress remains observable through listModels/status while this call
      * waits. Cancellation releases this caller, not the shared installation.
      */
-    async installModel(modelId: string): Promise<DownloadJob | null> {
+    async installModel(
+      modelId: string,
+      runtimeConfig?: ModelRuntimeConfig,
+    ): Promise<DownloadJob | null> {
+      if (runtimeConfig) runtimeConfig = validatedRuntimeConfig(runtimeConfig);
       const slug = bareSlug(modelId);
       const model = oneClickModel(slug);
       if (!model) {
@@ -1087,6 +1194,7 @@ export async function activate(ctx: Ctx) {
           ? isCurrentFallbackRecord(existing)
           : existing !== null
       ) {
+        if (runtimeConfig) await library.setModelConfig(slug, runtimeConfig);
         await awaitInvocation(validateAddedModel(slug));
         return null;
       }
@@ -1101,7 +1209,9 @@ export async function activate(ctx: Ctx) {
         try {
           const cached = await fs.stat(cachedFallbackPath);
           if (cached.isFile()) {
-            const record = await awaitInvocation(library.ensureFallback());
+            const record = await awaitInvocation(
+              library.ensureFallback(undefined, runtimeConfig),
+            );
             await awaitInvocation(validateAddedModel(record.slug));
             return null;
           }
@@ -1116,6 +1226,7 @@ export async function activate(ctx: Ctx) {
           expectedSha256: model.sha256,
           displayName: model.displayName,
           slug: model.slug,
+          ...(runtimeConfig ? { runtimeConfig } : {}),
         }),
       );
     },
@@ -1124,7 +1235,9 @@ export async function activate(ctx: Ctx) {
       assertLoopbackAuthCaller();
       await awaitInvocation(ensureBootstrap());
       const apiKey = await awaitInvocation(supervisor.apiKey());
-      const origins = Object.values(await awaitInvocation(supervisor.status())).flatMap((server) =>
+      const origins = Object.values(
+        await awaitInvocation(supervisor.status()),
+      ).flatMap((server) =>
         server.state === "running" ? [`http://127.0.0.1:${server.port}`] : [],
       );
       return { apiKey, origins };
@@ -1238,8 +1351,12 @@ export async function activate(ctx: Ctx) {
       emit({ kind: "models.changed" });
     },
 
-    async importDir(dir: string): Promise<ModelRecord[]> {
-      const imported = await library.importDir(dir);
+    async importDir(
+      dir: string,
+      runtimeConfig?: ModelRuntimeConfig,
+    ): Promise<ModelRecord[]> {
+      if (runtimeConfig) runtimeConfig = validatedRuntimeConfig(runtimeConfig);
+      const imported = await library.importDir(dir, runtimeConfig);
       await Promise.all(
         imported.map((record) => validateAddedModel(record.slug)),
       );

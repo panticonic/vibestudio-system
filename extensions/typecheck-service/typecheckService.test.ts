@@ -33,6 +33,86 @@ afterEach(async () => {
 });
 
 describe("typecheck.check", () => {
+  it("shares the bundler asset contract and retains unsupported imports and type errors", async () => {
+    await writeFile(
+      join(panelDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { noUncheckedSideEffectImports: true },
+        include: ["index.ts"],
+      })
+    );
+    await writeFile(
+      join(panelDir, "index.ts"),
+      [
+        'import "./styles.css";',
+        'import logo from "./logo.svg";',
+        'import "./unsupported.asset";',
+        "export const validUrl: string = logo;",
+        "export const invalidUrl: number = logo;",
+      ].join("\n")
+    );
+    const result = await typeCheckRpcMethods["typecheck.check"](panelDir);
+    const errors = result.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+    expect(errors).toHaveLength(2);
+    expect(errors.some((diagnostic) => diagnostic.code === 2322)).toBe(true);
+    expect(errors.some((diagnostic) => diagnostic.message.includes("unsupported.asset"))).toBe(
+      true
+    );
+    expect(errors.some((diagnostic) => /styles\.css|logo\.svg/.test(diagnostic.message))).toBe(
+      false
+    );
+  });
+
+  it("loads authored workspace ambient declarations outside the checked unit", async () => {
+    const unit = join(panelDir, "panels", "example");
+    await mkdir(unit, { recursive: true });
+    await mkdir(join(panelDir, "types"));
+    await writeFile(
+      join(panelDir, "types", "workspace.d.ts"),
+      "declare const workspaceLabel: string;"
+    );
+    await writeFile(join(unit, "index.ts"), "export const label: string = workspaceLabel;");
+    const result = await typeCheckRpcMethods["typecheck.check"](unit, undefined, undefined, {
+      workspaceContext: { monorepoRoot: panelDir, packages: new Map() },
+    });
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("uses the new declared dependency environment when a context revision changes", async () => {
+    const source = 'import { answer } from "typed-pkg"; export const value: number = answer;\n';
+    await writeFile(join(panelDir, "index.ts"), source);
+    const roots: string[] = [];
+    for (const [revision, type] of [
+      ["before", "string"],
+      ["after", "number"],
+    ]) {
+      const root = join(panelDir, "resources", revision!, "node_modules");
+      const pkg = join(root, "typed-pkg");
+      await mkdir(pkg, { recursive: true });
+      await writeFile(
+        join(pkg, "package.json"),
+        JSON.stringify({
+          name: "typed-pkg",
+          version: "1.0.0",
+          types: "index.d.ts",
+        })
+      );
+      await writeFile(join(pkg, "index.d.ts"), `export declare const answer: ${type};\n`);
+      roots.push(root);
+    }
+    const before = await typeCheckRpcMethods["typecheck.check"](panelDir, "index.ts", undefined, {
+      workspaceContext: null,
+      stateHash: "state:before",
+      nodeModulesPaths: [roots[0]!],
+    });
+    const after = await typeCheckRpcMethods["typecheck.check"](panelDir, "index.ts", undefined, {
+      workspaceContext: null,
+      stateHash: "state:after",
+      nodeModulesPaths: [roots[1]!],
+    });
+    expect(before.diagnostics.some((diagnostic) => diagnostic.code === 2322)).toBe(true);
+    expect(after.diagnostics).toEqual([]);
+  });
   it("bounds native project reuse with LRU eviction", async () => {
     for (let index = 0; index < 10; index += 1) {
       const child = join(panelDir, `panel-${index}`);
@@ -415,10 +495,13 @@ describe("typecheck.getBrowserTypeDefinitions", () => {
     await writeFile(join(packageDir, "index.d.ts"), "export declare const answer: number;\n");
     await writeFile(join(packageDir, "sub.d.ts"), "export declare const subAnswer: string;\n");
 
-    const result = await typeCheckRpcMethods["typecheck.getBrowserTypeDefinitions"](panelDir, [
-      "typed-pkg",
-      "typed-pkg",
-    ]);
+    const result = await typeCheckRpcMethods["typecheck.getBrowserTypeDefinitions"](
+      panelDir,
+      ["typed-pkg", "typed-pkg"],
+      {
+        nodeModulesPaths: [join(panelDir, "node_modules")],
+      }
+    );
 
     expect(result.packageTypes).toHaveLength(1);
     expect(result.packageTypes[0]).toEqual(

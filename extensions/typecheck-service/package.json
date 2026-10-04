@@ -76,7 +76,6 @@
     }
   },
   "dependencies": {
-    "@vibestudio/env-paths": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "@vibestudio/typecheck": "workspace:*",
     "@vibestudio/workspace-contracts": "workspace:*"

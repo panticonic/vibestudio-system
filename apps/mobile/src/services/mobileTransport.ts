@@ -255,7 +255,13 @@ export class MobileRpcClient implements Pick<
       throw new Error(`Mobile RPC method "${method}" is already exposed`);
     }
     this.exposedHandlers.set(method, handler);
-    this.rpc?.expose(method, handler, { kind: "closed", reason: "Mobile presentation host methods are entered through the host dispatcher." });
+    // Shell presentation belongs to the authenticated account endpoint, not
+    // the replaceable workspace pipe. The host dispatcher calls this endpoint.
+    this.controlRpc?.expose(method, handler, {
+      kind: "closed",
+      reason:
+        "Mobile presentation host methods are entered through the host dispatcher.",
+    });
   }
 
   async stream(
@@ -461,7 +467,11 @@ export class MobileRpcClient implements Pick<
         );
       const rpc = connection.rpc;
       for (const [method, handler] of this.exposedHandlers)
-        rpc.expose(method, handler, {"kind":"closed","reason":"This handler controls an internal execution or presentation surface."});
+        connection.hubControlRpc.expose(method, handler, {
+          kind: "closed",
+          reason:
+            "This handler controls an internal execution or presentation surface.",
+        });
       subscriptions.push(
         connection.session.onStatusChange((status) => {
           if (current()) this.setStatus(status);
@@ -697,11 +707,19 @@ export class MobileRpcClient implements Pick<
   }
 
   private subscribeToRpcEvent(rpc: RpcClient, event: string): () => void {
-    return rpc.on(event, (ev) => {
-      if (this.rpc !== rpc) return;
-      for (const listener of this.eventSubscriptions.get(event) ?? [])
-        listener(ev);
-    }, {"kind":"closed","reason":"This listener consumes host or implementation lifecycle events."});
+    return rpc.on(
+      event,
+      (ev) => {
+        if (this.rpc !== rpc) return;
+        for (const listener of this.eventSubscriptions.get(event) ?? [])
+          listener(ev);
+      },
+      {
+        kind: "closed",
+        reason:
+          "This listener consumes host or implementation lifecycle events.",
+      },
+    );
   }
 
   private setStatus(status: ConnectionStatus): void {

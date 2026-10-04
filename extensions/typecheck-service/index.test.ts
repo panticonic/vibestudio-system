@@ -31,7 +31,7 @@ async function api(
         chainContextId?: string;
       },
   contextProjectionsPath = path.join(os.tmpdir(), "vibestudio-context-projections"),
-  workspaceRoot = process.cwd(),
+  workspaceRoot = os.tmpdir(),
   ensureMaterialized: (scope: string | string[] | "all") => Promise<void> = async () => {}
 ) {
   const callerInfo = typeof caller === "string" ? { callerId: caller } : caller;
@@ -42,6 +42,18 @@ async function api(
       },
     },
     fs: { ensureMaterialized },
+    rpc: {
+      async call<T>(_target: string, method: string): Promise<T> {
+        expect(method).toBe("build.prepareTypecheck");
+        return {
+          stateHash: "state:test",
+          dependencyKey: null,
+          nodeModulesPaths: [],
+          workspacePackages: {},
+          moduleConditions: [],
+        } as T;
+      },
+    },
     invocation: {
       current: () =>
         callerInfo
@@ -102,9 +114,15 @@ describe("@workspace-extensions/typecheck-service", () => {
     expect(result.TS_LIB_FILES["lib.es5.d.ts"]).toBe(TS_LIB_FILES["lib.es5.d.ts"]);
     expect(result.typeDefinitionFiles).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ filePath: "file:///node_modules/fs/index.d.ts" }),
-        expect.objectContaining({ filePath: "file:///node_modules/path/index.d.ts" }),
-        expect.objectContaining({ filePath: "file:///vibestudio/globals.d.ts" }),
+        expect.objectContaining({
+          filePath: "file:///node_modules/fs/index.d.ts",
+        }),
+        expect.objectContaining({
+          filePath: "file:///node_modules/path/index.d.ts",
+        }),
+        expect.objectContaining({
+          filePath: "file:///vibestudio/globals.d.ts",
+        }),
       ])
     );
   });
@@ -123,7 +141,9 @@ describe("@workspace-extensions/typecheck-service", () => {
     const service = await api(undefined, contextProjectionsPath);
 
     try {
-      const result = await service.checkPanel("panels/my-app", { contextId: "ctx-1" });
+      const result = await service.checkPanel("panels/my-app", {
+        contextId: "ctx-1",
+      });
       expect(result.errorCount).toBeGreaterThan(0);
       expect(result.diagnostics.some((diagnostic) => diagnostic.file.includes("ctx-1"))).toBe(true);
     } finally {
@@ -214,6 +234,18 @@ describe("@workspace-extensions/typecheck-service", () => {
         },
       },
       fs: { ensureMaterialized: async () => {} },
+      rpc: {
+        async call<T>(_target: string, method: string): Promise<T> {
+          expect(method).toBe("build.prepareTypecheck");
+          return {
+            stateHash: "state:test",
+            dependencyKey: null,
+            nodeModulesPaths: [],
+            workspacePackages: {},
+            moduleConditions: [],
+          } as T;
+        },
+      },
       invocation: {
         current: () => ({
           caller: { callerId: "worker:agent" },
@@ -250,7 +282,10 @@ describe("@workspace-extensions/typecheck-service", () => {
     fs.writeFileSync(path.join(workspaceRoot, "pnpm-workspace.yaml"), "packages: []\n");
     fs.writeFileSync(
       path.join(sharedPath, "package.json"),
-      JSON.stringify({ name: "@workspace/shared", exports: { ".": "./index.ts" } })
+      JSON.stringify({
+        name: "@workspace/shared",
+        exports: { ".": "./index.ts" },
+      })
     );
     fs.writeFileSync(path.join(sharedPath, "index.ts"), "export const value = 1;\n");
     fs.writeFileSync(
@@ -349,6 +384,18 @@ describe("@workspace-extensions/typecheck-service", () => {
         },
       },
       fs: { ensureMaterialized: async () => {} },
+      rpc: {
+        async call<T>(_target: string, method: string): Promise<T> {
+          expect(method).toBe("build.prepareTypecheck");
+          return {
+            stateHash: "state:test",
+            dependencyKey: null,
+            nodeModulesPaths: [],
+            workspacePackages: {},
+            moduleConditions: [],
+          } as T;
+        },
+      },
       invocation: {
         current: () => ({
           caller: { callerId: "worker:agent" },

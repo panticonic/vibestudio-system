@@ -375,7 +375,7 @@ function RunRow({
               </Text>
               {run.effectFailures.map((effect) => (
                 <Text
-                  key={effect.invocationId}
+                  key={`${effect.source.nativeTaskId}:${effect.source.nativeEntryId}`}
                   as="span"
                   style={{ display: "block" }}
                 >

@@ -7,18 +7,22 @@ import { ImagesDO } from "./index.js";
 
 const BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
-const bytes = (value: string) => Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+const bytes = (value: string) =>
+  Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 function fixtureClass() {
   const content = new Map<string, string>();
   const roots = new Map<string, string>();
   let providerCalls = 0;
   let retaining: (owner: string) => Promise<void> = async () => {};
   let storing: (owner: string) => Promise<void> = async () => {};
-  let provider: (input: GenerateImageInput, signal: AbortSignal) => Promise<string> = async () =>
-    BASE64;
+  let releasing: (owner: string) => Promise<void> = async () => {};
+  let provider: (
+    input: GenerateImageInput,
+    signal: AbortSignal,
+  ) => Promise<string> = async () => BASE64;
   class TestImagesDO extends ImagesDO {
     protected override async persistAlarmSchedule(
-      schedule: { wakeAt: number } | null
+      schedule: { wakeAt: number } | null,
     ): Promise<void> {
       if (schedule) this.ctx.storage.setAlarm(schedule.wakeAt);
     }
@@ -44,6 +48,7 @@ function fixtureClass() {
     }
     protected override async releaseContent(owner: string) {
       roots.delete(owner);
+      await releasing(owner);
     }
     protected override async readContent(digest: string) {
       return content.get(digest) ?? null;
@@ -51,7 +56,7 @@ function fixtureClass() {
     protected override async generateContent(
       input: GenerateImageInput,
       _id: string,
-      signal: AbortSignal
+      signal: AbortSignal,
     ) {
       providerCalls += 1;
       return {
@@ -79,6 +84,9 @@ function fixtureClass() {
     setStoring: (next: typeof storing) => {
       storing = next;
     },
+    setReleasing: (next: typeof releasing) => {
+      releasing = next;
+    },
     setProvider: (next: typeof provider) => {
       provider = next;
     },
@@ -86,14 +94,92 @@ function fixtureClass() {
 }
 
 describe("durable image jobs and assets", () => {
+  it("joins retained release debt after a forget acknowledgement was lost and the job row is already gone", async () => {
+    const fixture = fixtureClass();
+    const first = await createTestDO(fixture.TestImagesDO);
+    const job = await first.call<ImageGenerationJob>("generate", {
+      requestId: "forget-lost-ack",
+      prompt: "A ship",
+    });
+    await first.instance.alarm();
+    const original = new Error("Original CAS release acknowledgement lost");
+    let refused = true;
+    fixture.setReleasing(async () => {
+      if (refused) throw original;
+    });
+    await expect(first.call("forgetJob", job.id)).rejects.toThrow(
+      original.message,
+    );
+    expect(first.sql.exec("SELECT * FROM image_jobs").toArray()).toEqual([]);
+    expect(
+      first.sql.exec("SELECT * FROM image_retention_effects").toArray(),
+    ).toHaveLength(1);
+    expect(fixture.roots.size).toBe(0);
+    const reopened = await createTestDO(
+      fixture.TestImagesDO,
+      {},
+      { db: first.db },
+    );
+    await expect(reopened.call("forgetJob", job.id)).rejects.toThrow(
+      original.message,
+    );
+    expect(
+      reopened.sql.exec("SELECT * FROM image_retention_effects").toArray(),
+    ).toHaveLength(1);
+    refused = false;
+    await reopened.call("forgetJob", job.id);
+    await reopened.call("forgetJob", job.id);
+    expect(
+      reopened.sql.exec("SELECT * FROM image_retention_effects").toArray(),
+    ).toEqual([]);
+    expect(reopened.sql.exec("SELECT * FROM image_owners").toArray()).toEqual(
+      [],
+    );
+    expect(fixture.calls()).toBe(1);
+  });
+
+  it("refuses forgetting a live job and accepts exact repeated terminal cleanup without re-creating it", async () => {
+    const fixture = fixtureClass();
+    const host = await createTestDO(fixture.TestImagesDO);
+    const job = await host.call<ImageGenerationJob>("generate", {
+      requestId: "forget-live",
+      prompt: "A lantern",
+    });
+    await expect(host.call("forgetJob", job.id)).rejects.toThrow(
+      "Cancel an active image job",
+    );
+    expect(await host.call("getJob", job.id)).toMatchObject({
+      status: "queued",
+    });
+    await host.call("cancel", job.id);
+    await Promise.all([
+      host.call("forgetJob", job.id),
+      host.call("forgetJob", job.id),
+    ]);
+    await expect(host.call("getJob", job.id)).rejects.toThrow(
+      "Unknown image job",
+    );
+    expect(
+      host.sql.exec("SELECT * FROM image_retention_effects").toArray(),
+    ).toEqual([]);
+    expect(fixture.calls()).toBe(0);
+  });
+
   it("maps maximally escaped logical owners to stable bounded CAS keys across restart", async () => {
     const fixture = fixtureClass();
     const host = await createTestDO(fixture.TestImagesDO);
     const owner = '\\"'.repeat(128);
-    const asset = await host.call<ImageAsset>("importAsset", { base64: BASE64, owner });
+    const asset = await host.call<ImageAsset>("importAsset", {
+      base64: BASE64,
+      owner,
+    });
     const [key] = fixture.roots.keys();
     expect(key).toMatch(/^[0-9a-f]{64}$/);
-    const reopened = await createTestDO(fixture.TestImagesDO, {}, { db: host.db });
+    const reopened = await createTestDO(
+      fixture.TestImagesDO,
+      {},
+      { db: host.db },
+    );
     await reopened.call("retain", { assetId: asset.id, owner });
     expect([...fixture.roots.keys()]).toEqual([key]);
     await reopened.call("release", { assetId: asset.id, owner });
@@ -103,7 +189,9 @@ describe("durable image jobs and assets", () => {
   it("atomically owns every input before admission awaits and releases all of them when forgotten", async () => {
     const fixture = fixtureClass();
     const host = await createTestDO(fixture.TestImagesDO);
-    const first = await host.call<ImageAsset>("importAsset", { base64: BASE64 });
+    const first = await host.call<ImageAsset>("importAsset", {
+      base64: BASE64,
+    });
     const second = await host.call<ImageAsset>("importAsset", {
       base64: btoa(atob(BASE64) + "variant"),
     });
@@ -126,18 +214,24 @@ describe("durable image jobs and assets", () => {
     });
     const outcome = admission.then(
       () => null,
-      (error: unknown) => error
+      (error: unknown) => error,
     );
     await started;
-    const id = String(host.sql.exec("SELECT id FROM image_jobs").toArray()[0]!["id"]);
+    const id = String(
+      host.sql.exec("SELECT id FROM image_jobs").toArray()[0]!["id"],
+    );
     await host.call("cancel", id);
     const retirement = host.call("forgetJob", id);
     resume();
     await Promise.all([outcome, retirement]);
     await host.instance.alarm();
     expect(host.sql.exec("SELECT * FROM image_jobs").toArray()).toEqual([]);
-    expect(host.sql.exec("SELECT * FROM image_owners").toArray()).toHaveLength(2);
-    expect(host.sql.exec("SELECT * FROM image_retention_effects").toArray()).toEqual([]);
+    expect(host.sql.exec("SELECT * FROM image_owners").toArray()).toHaveLength(
+      2,
+    );
+    expect(
+      host.sql.exec("SELECT * FROM image_retention_effects").toArray(),
+    ).toEqual([]);
     expect(fixture.roots.size).toBe(2);
     expect(fixture.calls()).toBe(0);
   });
@@ -155,7 +249,10 @@ describe("durable image jobs and assets", () => {
       assetId: result.asset!.id,
       owner: JSON.stringify(["job", job.id]),
     });
-    await host.call("release", { assetId: result.asset!.id, owner: `job:${job.id}` });
+    await host.call("release", {
+      assetId: result.asset!.id,
+      owner: `job:${job.id}`,
+    });
     expect(await host.call("getAsset", result.asset!.id)).toEqual(result.asset);
     expect(fixture.roots.size).toBe(1);
     await host.call("forgetJob", job.id);
@@ -165,7 +262,9 @@ describe("durable image jobs and assets", () => {
   it("serializes concurrent request replays while retaining references", async () => {
     const fixture = fixtureClass();
     const host = await createTestDO(fixture.TestImagesDO);
-    const reference = await host.call<ImageAsset>("importAsset", { base64: BASE64 });
+    const reference = await host.call<ImageAsset>("importAsset", {
+      base64: BASE64,
+    });
     let entered!: () => void;
     const started = new Promise<void>((resolve) => {
       entered = resolve;
@@ -178,14 +277,20 @@ describe("durable image jobs and assets", () => {
       entered();
       await blocked;
     });
-    const request = { requestId: "concurrent", prompt: "A lantern", references: [reference] };
+    const request = {
+      requestId: "concurrent",
+      prompt: "A lantern",
+      references: [reference],
+    };
     const first = host.call<ImageGenerationJob>("generate", request);
     await started;
     const second = host.call<ImageGenerationJob>("generate", request);
     resume();
     const [left, right] = await Promise.all([first, second]);
     expect(left).toEqual(right);
-    expect(host.sql.exec("SELECT id FROM image_jobs").toArray()).toHaveLength(1);
+    expect(host.sql.exec("SELECT id FROM image_jobs").toArray()).toHaveLength(
+      1,
+    );
     await host.instance.alarm();
     expect(fixture.calls()).toBe(1);
   });
@@ -197,7 +302,12 @@ describe("durable image jobs and assets", () => {
       entered = resolve;
     });
     let finish!: (value: string) => void;
-    fixture.setProvider(async () => {
+    let abort!: () => void;
+    const aborted = new Promise<void>((resolve) => {
+      abort = resolve;
+    });
+    fixture.setProvider(async (_input, signal) => {
+      signal.addEventListener("abort", abort, { once: true });
       entered();
       return new Promise<string>((resolve) => {
         finish = resolve;
@@ -210,15 +320,21 @@ describe("durable image jobs and assets", () => {
     });
     const first = host.instance.alarm();
     await started;
-    await host.call("cancel", job.id);
+    const cancellation = host.call("cancel", job.id);
+    await aborted;
     await host.call("retry", job.id);
-    expect(await host.instance.alarm()).toMatchObject({ wakeAt: expect.any(Number) });
+    expect(await host.instance.alarm()).toMatchObject({
+      wakeAt: expect.any(Number),
+    });
     expect(fixture.calls()).toBe(1);
     fixture.setProvider(async () => BASE64);
     finish(BASE64);
-    await first;
+    await Promise.all([first, cancellation]);
     await host.instance.alarm();
-    expect(await host.call("getJob", job.id)).toMatchObject({ status: "succeeded", attempt: 2 });
+    expect(await host.call("getJob", job.id)).toMatchObject({
+      status: "succeeded",
+      attempt: 2,
+    });
     expect(fixture.calls()).toBe(2);
   });
 
@@ -236,6 +352,14 @@ describe("durable image jobs and assets", () => {
       entered();
       await blocked;
     });
+    let abort!: () => void;
+    const aborted = new Promise<void>((resolve) => {
+      abort = resolve;
+    });
+    fixture.setProvider(async (_input, signal) => {
+      signal.addEventListener("abort", abort, { once: true });
+      return BASE64;
+    });
     const host = await createTestDO(fixture.TestImagesDO);
     const job = await host.call<ImageGenerationJob>("generate", {
       requestId: "forget-inflight",
@@ -243,20 +367,25 @@ describe("durable image jobs and assets", () => {
     });
     const running = host.instance.alarm();
     await started;
-    await host.call("cancel", job.id);
+    const cancellation = host.call("cancel", job.id);
+    await aborted;
     const forgotten = host.call("forgetJob", job.id);
     resume();
-    await Promise.all([running, forgotten]);
+    await Promise.all([running, forgotten, cancellation]);
     await host.instance.alarm();
     expect(fixture.roots.size).toBe(0);
     expect(host.sql.exec("SELECT * FROM image_owners").toArray()).toEqual([]);
-    expect(host.sql.exec("SELECT * FROM image_retention_effects").toArray()).toEqual([]);
+    expect(
+      host.sql.exec("SELECT * FROM image_retention_effects").toArray(),
+    ).toEqual([]);
   });
 
   it("hides failed art-direction publication and never reuses a deleted version", async () => {
     const fixture = fixtureClass();
     const host = await createTestDO(fixture.TestImagesDO);
-    const reference = await host.call<ImageAsset>("importAsset", { base64: BASE64 });
+    const reference = await host.call<ImageAsset>("importAsset", {
+      base64: BASE64,
+    });
     fixture.setRetaining(async () => {
       throw new Error("CAS retention failed");
     });
@@ -265,23 +394,29 @@ describe("durable image jobs and assets", () => {
         id: "style",
         brief: "Copper etching",
         references: [reference],
-      })
+      }),
     ).rejects.toThrow("CAS retention failed");
-    await expect(host.call("getArtDirection", { id: "style", version: 1 })).rejects.toThrow(
-      "Unknown art direction"
-    );
+    await expect(
+      host.call("getArtDirection", { id: "style", version: 1 }),
+    ).rejects.toThrow("Unknown art direction");
     fixture.setRetaining(async () => {});
     await host.instance.alarm();
     expect(fixture.roots.size).toBe(1);
-    const second = await host.call<{ id: string; version: number }>("putArtDirection", {
-      id: "style",
-      brief: "Copper etching",
-      references: [reference],
-    });
+    const second = await host.call<{ id: string; version: number }>(
+      "putArtDirection",
+      {
+        id: "style",
+        brief: "Copper etching",
+        references: [reference],
+      },
+    );
     expect(second.version).toBe(2);
     await host.call("deleteArtDirection", second);
     expect(
-      await host.call("putArtDirection", { id: "style", brief: "Amber painting" })
+      await host.call("putArtDirection", {
+        id: "style",
+        brief: "Amber painting",
+      }),
     ).toMatchObject({ version: 3 });
   });
 
@@ -302,12 +437,16 @@ describe("durable image jobs and assets", () => {
       digest: sha256Hex(bytes(BASE64)),
       provenance: { imageModel: "gpt-image-2" },
     });
-    const reopened = await createTestDO(fixture.TestImagesDO, {}, { db: first.db });
+    const reopened = await createTestDO(
+      fixture.TestImagesDO,
+      {},
+      { db: first.db },
+    );
     expect(
       await reopened.call("generate", {
         requestId: "scene:one",
         prompt: "A warm lantern in an engraving",
-      })
+      }),
     ).toEqual(result);
     expect(await reopened.call("readAsset", result.asset!.id)).toEqual({
       asset: result.asset,
@@ -315,21 +454,31 @@ describe("durable image jobs and assets", () => {
     });
     expect(fixture.calls()).toBe(1);
     await expect(
-      reopened.call("generate", { requestId: "scene:one", prompt: "A different image" })
+      reopened.call("generate", {
+        requestId: "scene:one",
+        prompt: "A different image",
+      }),
     ).rejects.toThrow("different image request");
-    const durable = first.sql.exec("SELECT request_json,job_json FROM image_jobs").toArray();
+    const durable = first.sql
+      .exec("SELECT request_json,job_json FROM image_jobs")
+      .toArray();
     expect(JSON.stringify(durable)).not.toContain(BASE64);
   });
 
   it("retains reference closure and versioned art direction across deletion until a job is forgotten", async () => {
     const fixture = fixtureClass();
     const host = await createTestDO(fixture.TestImagesDO);
-    const reference = await host.call<ImageAsset>("importAsset", { base64: BASE64 });
-    const direction = await host.call<{ id: string; version: number }>("putArtDirection", {
-      id: "etching",
-      brief: "Copperplate lines, warm amber",
-      references: [reference],
+    const reference = await host.call<ImageAsset>("importAsset", {
+      base64: BASE64,
     });
+    const direction = await host.call<{ id: string; version: number }>(
+      "putArtDirection",
+      {
+        id: "etching",
+        brief: "Copperplate lines, warm amber",
+        references: [reference],
+      },
+    );
     const job = await host.call<ImageGenerationJob>("generate", {
       requestId: "scene:two",
       prompt: "A lighthouse",
@@ -339,17 +488,27 @@ describe("durable image jobs and assets", () => {
     await host.call("release", { assetId: reference.id, owner: "import" });
     fixture.setProvider(async (input) => {
       expect(input.prompt).toContain("Copperplate lines, warm amber");
-      expect(input.references).toEqual([{ base64: BASE64, mimeType: "image/png" }]);
+      expect(input.references).toEqual([
+        { base64: BASE64, mimeType: "image/png" },
+      ]);
       return BASE64;
     });
     await host.instance.alarm();
     const result = await host.call<ImageGenerationJob>("getJob", job.id);
     expect(result.status).toBe("succeeded");
-    await host.call("retain", { assetId: result.asset!.id, owner: "app:chosen-scene" });
+    await host.call("retain", {
+      assetId: result.asset!.id,
+      owner: "app:chosen-scene",
+    });
     await host.call("forgetJob", job.id);
     expect(await host.call("getAsset", result.asset!.id)).toEqual(result.asset);
-    await expect(host.call("getAsset", reference.id)).rejects.toThrow("not retained");
-    await host.call("release", { assetId: result.asset!.id, owner: "app:chosen-scene" });
+    await expect(host.call("getAsset", reference.id)).rejects.toThrow(
+      "not retained",
+    );
+    await host.call("release", {
+      assetId: result.asset!.id,
+      owner: "app:chosen-scene",
+    });
     expect(fixture.roots.size).toBe(0);
   });
 
@@ -360,7 +519,12 @@ describe("durable image jobs and assets", () => {
       started = resolve;
     });
     let finish!: (value: string) => void;
+    let abort!: () => void;
+    const aborted = new Promise<void>((resolve) => {
+      abort = resolve;
+    });
     fixture.setProvider(async (_input, signal) => {
+      signal.addEventListener("abort", abort, { once: true });
       started();
       const result = await new Promise<string>((resolve) => {
         finish = resolve;
@@ -375,14 +539,26 @@ describe("durable image jobs and assets", () => {
     });
     const generation = host.instance.alarm();
     await waiting;
-    expect((await host.call<ImageGenerationJob>("cancel", job.id)).status).toBe("cancelled");
+    let settled = false;
+    const cancellation = host
+      .call<ImageGenerationJob>("cancel", job.id)
+      .finally(() => {
+        settled = true;
+      });
+    await aborted;
+    expect(settled).toBe(false);
     finish(BASE64);
+    expect((await cancellation).status).toBe("cancelled");
     await generation;
     expect(fixture.roots.size).toBe(0);
     fixture.setProvider(async () => BASE64);
-    expect((await host.call<ImageGenerationJob>("retry", job.id)).attempt).toBe(2);
+    expect((await host.call<ImageGenerationJob>("retry", job.id)).attempt).toBe(
+      2,
+    );
     await host.instance.alarm();
-    expect((await host.call<ImageGenerationJob>("getJob", job.id)).status).toBe("succeeded");
+    expect((await host.call<ImageGenerationJob>("getJob", job.id)).status).toBe(
+      "succeeded",
+    );
     expect(fixture.calls()).toBe(2);
   });
 
@@ -396,9 +572,13 @@ describe("durable image jobs and assets", () => {
     host.sql.exec(
       "UPDATE image_jobs SET status='running', job_json=? WHERE id=?",
       JSON.stringify({ ...job, status: "running" }),
-      job.id
+      job.id,
     );
-    const restarted = await createTestDO(fixture.TestImagesDO, {}, { db: host.db });
+    const restarted = await createTestDO(
+      fixture.TestImagesDO,
+      {},
+      { db: host.db },
+    );
     await restarted.instance.alarm();
     expect(await restarted.call("getJob", job.id)).toMatchObject({
       status: "failed",
@@ -407,6 +587,8 @@ describe("durable image jobs and assets", () => {
     expect(fixture.calls()).toBe(0);
     await restarted.call("retry", job.id);
     await restarted.instance.alarm();
-    expect((await restarted.call<ImageGenerationJob>("getJob", job.id)).status).toBe("succeeded");
+    expect(
+      (await restarted.call<ImageGenerationJob>("getJob", job.id)).status,
+    ).toBe("succeeded");
   });
 });

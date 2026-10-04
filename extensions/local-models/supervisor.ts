@@ -11,19 +11,30 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { createServer as createHttpServer, type IncomingMessage } from "node:http";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+} from "node:http";
 import { createServer as createNetServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import type {
   EngineState,
   ModelRecord,
+  ModelRuntimeConfig,
+  ModelRuntimeValidationRecipe,
   OwnerInfo,
   OwnershipRole,
   ServerKind,
   ServerState,
 } from "@workspace/model-catalog/localModels";
-import { runtimeContextLengthFor } from "./runtime-profiles.js";
+import { ServerReadiness } from "./server-readiness.js";
+import {
+  effectiveModelRuntime,
+  observedRuntimeRecipe,
+  modelRuntimeArgs,
+  validatedRuntimeConfig,
+} from "./runtime-profiles.js";
 import { FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
 
 export interface SupervisorDeps {
@@ -37,14 +48,14 @@ export interface SupervisorDeps {
       onExit(code: number | null): void;
       onStdout(line: string): void;
       onStderr(line: string): void;
-    }
-  ): { pid: number; kill(signal?: string): void };
+    },
+  ): { pid: number; kill(signal?: string): void; closed: Promise<void> };
   fetch: typeof fetch;
   log(msg: string, data?: unknown): void;
   emit(
     event:
       | { kind: "server.state"; server: ServerKind; state: ServerState }
-      | { kind: "models.changed" }
+      | { kind: "models.changed" },
   ): void;
   engines(): EngineState | null;
   fallbackModel(): Promise<ModelRecord | null>;
@@ -65,22 +76,31 @@ export type SupervisorAdminCommand =
   | { kind: "restart"; server: ServerKind }
   | { kind: "status" };
 
-export type SupervisorAdminResult = { baseUrl: string } | { ok: true } | { servers: Record<ServerKind, ServerState> };
+export type SupervisorAdminResult =
+  | { baseUrl: string; runtimeConfig: ModelRuntimeConfig }
+  | { ok: true }
+  | { servers: Record<ServerKind, ServerState> };
 
 export interface SupervisorAdminTransport {
   listen(
     port: number,
     apiKey: string,
-    handler: (command: SupervisorAdminCommand) => Promise<SupervisorAdminResult>
+    handler: (
+      command: SupervisorAdminCommand,
+    ) => Promise<SupervisorAdminResult>,
   ): Promise<{ close(): Promise<void> | void }>;
   request(
     port: number,
     apiKey: string,
-    command: SupervisorAdminCommand
+    command: SupervisorAdminCommand,
   ): Promise<SupervisorAdminResult>;
 }
 
-type SpawnedProcess = { pid: number; kill(signal?: string): void };
+type SpawnedProcess = {
+  pid: number;
+  kill(signal?: string): void;
+  closed: Promise<void>;
+};
 type TimerHandle = ReturnType<typeof setTimeout>;
 type ServerEvent = "stdout" | "stderr";
 
@@ -93,6 +113,8 @@ interface PersistedConfig {
 interface RuntimeProcess {
   token: number;
   child: SpawnedProcess;
+  readiness: ServerReadiness;
+  recipe: string;
   expectedExit: boolean;
   eaddrInUse: boolean;
 }
@@ -101,18 +123,13 @@ interface ServerRuntime {
   state: ServerState;
   process: RuntimeProcess | null;
   restartTimer: TimerHandle | null;
-  healthTimer: TimerHandle | null;
-  consecutiveHealthFailures: number;
   failureTimes: number[];
   startedAt: number | null;
+  launchFlight?: Promise<RuntimeProcess | undefined>;
+  exitFlight?: Promise<void>;
+  stopFlight?: Promise<void>;
 }
 
-const HEALTH_POLL_MS = 10_000;
-/** Model load keeps /health at 503 for tens of seconds after spawn (CPU load
- *  of a ~1.6 GB GGUF) — the request path waits this long before giving up. */
-const HEALTH_WAIT_MS = 120_000;
-const HEALTH_WAIT_STEP_MS = 1_000;
-const HEALTH_FAILURE_LIMIT = 3;
 const FAILURE_WINDOW_MS = 60_000;
 const MAIN_FAILURE_LIMIT = 5;
 const MAIN_MAX_BACKOFF_MS = 16_000;
@@ -127,12 +144,22 @@ export function createServerSupervisor(deps: SupervisorDeps): {
   role(): OwnershipRole;
   ownerInfo(): OwnerInfo | null;
   status(): Promise<Record<ServerKind, ServerState>>;
-  ensureLoaded(slug: string): Promise<{ baseUrl: string }>;
-  validateModel(slug: string): Promise<{ baseUrl: string }>;
+  ensureLoaded(
+    slug: string,
+  ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }>;
+  validateModel(
+    slug: string,
+    config?: ModelRuntimeConfig,
+  ): Promise<{
+    baseUrl: string;
+    toolsCapable: boolean;
+    recipe: ModelRuntimeValidationRecipe;
+  }>;
+  validationRecipe(model: ModelRecord): ModelRuntimeValidationRecipe;
   apiKey(): Promise<string>;
   restart(kind: ServerKind): Promise<void>;
   tailLog(kind: ServerKind, lines?: number): string[];
-  dispose(): Promise<void>;
+  dispose(reason?: unknown): Promise<void>;
 } {
   return new ServerSupervisor(deps).api();
 }
@@ -158,6 +185,14 @@ class ServerSupervisor {
   private adminListener: { close(): Promise<void> | void } | null = null;
   private activated = false;
   private disposed = false;
+  private disposalReason: unknown = new Error(
+    "Local-models supervisor is disposed",
+  );
+  private activationFlight: Promise<void> | undefined;
+  private disposalFlight: Promise<void> | undefined;
+  private readonly ownedProcesses = new Set<SpawnedProcess>();
+  private readonly readiness = new Set<ServerReadiness>();
+  private readonly exitFlights = new Set<Promise<void>>();
   private nextProcessToken = 0;
   /**
    * Prefer the fastest smoke-tested engine for the utility server. If that
@@ -168,10 +203,21 @@ class ServerSupervisor {
   private idleTimer: TimerHandle | null = null;
   private readonly lastUsed = new Map<string, number>();
   /** Models present in the preset consumed by this supervisor's live router. */
-  private routerCatalogModels = new Set<string>();
+  private routerCatalogModels = new Map<string, string>();
+  private mainModelSlug: string | undefined;
+  private readonly loadedRecipes = new Map<string, string>();
+  private readonly loadFlights: Partial<
+    Record<
+      ServerKind,
+      Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }>
+    >
+  > = {};
   /** Models this supervisor has explicitly loaded through the live router. */
   private readonly loadedMainModels = new Set<string>();
-  private readonly logs: Record<ServerKind, string[]> = { utility: [], main: [] };
+  private readonly logs: Record<ServerKind, string[]> = {
+    utility: [],
+    main: [],
+  };
   private readonly servers: Record<ServerKind, ServerRuntime> = {
     utility: this.createRuntime(),
     main: this.createRuntime(),
@@ -195,12 +241,22 @@ class ServerSupervisor {
     role(): OwnershipRole;
     ownerInfo(): OwnerInfo | null;
     status(): Promise<Record<ServerKind, ServerState>>;
-    ensureLoaded(slug: string): Promise<{ baseUrl: string }>;
-    validateModel(slug: string): Promise<{ baseUrl: string }>;
+    ensureLoaded(
+      slug: string,
+    ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }>;
+    validateModel(
+      slug: string,
+      config?: ModelRuntimeConfig,
+    ): Promise<{
+      baseUrl: string;
+      toolsCapable: boolean;
+      recipe: ModelRuntimeValidationRecipe;
+    }>;
+    validationRecipe(model: ModelRecord): ModelRuntimeValidationRecipe;
     apiKey(): Promise<string>;
     restart(kind: ServerKind): Promise<void>;
     tailLog(kind: ServerKind, lines?: number): string[];
-    dispose(): Promise<void>;
+    dispose(reason?: unknown): Promise<void>;
   } {
     return {
       activate: () => this.activate(),
@@ -208,11 +264,18 @@ class ServerSupervisor {
       ownerInfo: () => this.ownerInfoValue,
       status: () => this.status(),
       ensureLoaded: (slug) => this.ensureLoaded(slug),
-      validateModel: (slug) => this.validateModel(slug),
+      validateModel: (slug, config) => this.validateModel(slug, config),
+      validationRecipe: (model) =>
+        observedRuntimeRecipe(
+          this.recipeFor(
+            model.slug === FALLBACK_MODEL.slug ? "utility" : "main",
+            model,
+          ),
+        ),
       apiKey: () => this.publicApiKey(),
       restart: (kind) => this.restart(kind),
       tailLog: (kind, lines) => this.tailLog(kind, lines),
-      dispose: () => this.dispose(),
+      dispose: (reason) => this.dispose(reason),
     };
   }
 
@@ -221,20 +284,36 @@ class ServerSupervisor {
       state: { state: "stopped" },
       process: null,
       restartTimer: null,
-      healthTimer: null,
-      consecutiveHealthFailures: 0,
       failureTimes: [],
       startedAt: null,
     };
   }
 
-  private async activate(): Promise<void> {
-    if (this.activated) return;
-    this.disposed = false;
-    mkdirSync(this.rootDir, { recursive: true });
-    mkdirSync(this.paths.models, { recursive: true });
-    await this.acquireOrAttach(false);
-    this.activated = true;
+  private activate(): Promise<void> {
+    if (this.disposed) return Promise.reject(this.disposalReason);
+    if (this.activated) return Promise.resolve();
+    return (this.activationFlight ??= (async () => {
+      mkdirSync(this.rootDir, { recursive: true });
+      mkdirSync(this.paths.models, { recursive: true });
+      await this.acquireOrAttach(false);
+      this.activated = true;
+    })());
+  }
+
+  private spawnOwned(
+    ...args: Parameters<SupervisorDeps["spawn"]>
+  ): SpawnedProcess {
+    if (this.disposed) throw this.disposalReason;
+    const child = this.deps.spawn(...args);
+    this.ownedProcesses.add(child);
+    // A process handle remains owned while termination is in flight, even if a restart
+    // already detached it from the currently serving slot. A closed spawn failure is
+    // a terminal operation outcome; readiness delivers it without retaining fake cleanup debt.
+    void child.closed.then(
+      () => this.ownedProcesses.delete(child),
+      () => this.ownedProcesses.delete(child),
+    );
+    return child;
   }
 
   private async acquireOrAttach(retried: boolean): Promise<void> {
@@ -282,7 +361,9 @@ class ServerSupervisor {
       return;
     }
 
-    throw new Error("local-models owner lock exists but owner metadata is unavailable");
+    throw new Error(
+      "local-models owner lock exists but owner metadata is unavailable",
+    );
   }
 
   private async tryAcquireOwner(): Promise<boolean> {
@@ -322,8 +403,12 @@ class ServerSupervisor {
   private async loadOrCreatePorts(): Promise<Required<PersistedConfig>> {
     const config = this.readConfig();
     if (config) {
-      if (validPort(config.adminPort)) return config as Required<PersistedConfig>;
-      const adminPort = await allocatePort([config.utilityPort, config.mainPort]);
+      if (validPort(config.adminPort))
+        return config as Required<PersistedConfig>;
+      const adminPort = await allocatePort([
+        config.utilityPort,
+        config.mainPort,
+      ]);
       const migrated = { ...config, adminPort };
       this.writeConfig(migrated);
       return migrated;
@@ -345,7 +430,9 @@ class ServerSupervisor {
   }
 
   private writeConfig(config: PersistedConfig): void {
-    writeFileSync(this.paths.config, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    writeFileSync(this.paths.config, `${JSON.stringify(config, null, 2)}\n`, {
+      mode: 0o600,
+    });
   }
 
   private async startAdminListener(apiKey: string): Promise<void> {
@@ -354,13 +441,19 @@ class ServerSupervisor {
         throw new Error("local-models admin port is not initialized");
       }
       try {
-        this.adminListener = await this.adminTransport().listen(this.adminPort, apiKey, (command) =>
-          this.handleAdminCommand(command)
+        this.adminListener = await this.adminTransport().listen(
+          this.adminPort,
+          apiKey,
+          (command) => this.handleAdminCommand(command),
         );
         return;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
-        this.adminPort = await allocatePort([this.ports.utility, this.ports.main, this.adminPort]);
+        this.adminPort = await allocatePort([
+          this.ports.utility,
+          this.ports.main,
+          this.adminPort,
+        ]);
         this.writeConfig({
           utilityPort: this.ports.utility,
           mainPort: this.ports.main,
@@ -368,7 +461,9 @@ class ServerSupervisor {
         });
       }
     }
-    throw new Error("local-models admin endpoint could not acquire a loopback port");
+    throw new Error(
+      "local-models admin endpoint could not acquire a loopback port",
+    );
   }
 
   private writeOwnerInfo(): void {
@@ -388,7 +483,9 @@ class ServerSupervisor {
       since: this.ownerInfoValue?.since ?? this.deps.now(),
       serverPids,
     };
-    writeFileSync(this.paths.owner, `${JSON.stringify(owner, null, 2)}\n`, { mode: 0o600 });
+    writeFileSync(this.paths.owner, `${JSON.stringify(owner, null, 2)}\n`, {
+      mode: 0o600,
+    });
     this.ownerInfoValue = owner;
   }
 
@@ -408,15 +505,22 @@ class ServerSupervisor {
             "workspaceId",
             "since",
             "serverPids",
-          ].includes(key)
+          ].includes(key),
       )
     ) {
       return null;
     }
-    if (!validPort(value.ports?.utility) || !validPort(value.ports?.main)) return null;
-    if (value.adminPort !== undefined && !validPort(value.adminPort)) return null;
-    if (!Number.isInteger(value.pid) || typeof value.bootId !== "string") return null;
-    if (typeof value.workspaceId !== "string" || typeof value.since !== "number") return null;
+    if (!validPort(value.ports?.utility) || !validPort(value.ports?.main))
+      return null;
+    if (value.adminPort !== undefined && !validPort(value.adminPort))
+      return null;
+    if (!Number.isInteger(value.pid) || typeof value.bootId !== "string")
+      return null;
+    if (
+      typeof value.workspaceId !== "string" ||
+      typeof value.since !== "number"
+    )
+      return null;
     return value;
   }
 
@@ -459,7 +563,9 @@ class ServerSupervisor {
       if (this.roleValue === "attached") {
         const result = await this.requestOwner({ kind: "status" });
         if (!("servers" in result) || !isServerStates(result.servers)) {
-          throw new Error("local-models owner returned an invalid status response");
+          throw new Error(
+            "local-models owner returned an invalid status response",
+          );
         }
         return result.servers;
       }
@@ -486,12 +592,17 @@ class ServerSupervisor {
     return {
       state: "running",
       port,
-      loadedModels: kind === "utility" ? [FALLBACK_MODEL.slug] : Array.from(this.loadedMainModels),
+      loadedModels:
+        kind === "utility"
+          ? [FALLBACK_MODEL.slug]
+          : Array.from(this.loadedMainModels),
       uptimeMs: Math.max(0, this.deps.now() - startedAt),
     };
   }
 
-  private async ensureLoaded(inputSlug: string): Promise<{ baseUrl: string }> {
+  private async ensureLoaded(
+    inputSlug: string,
+  ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }> {
     await this.activate();
     const slug = normalizeSlug(inputSlug);
     if (this.roleValue === "attached") {
@@ -499,32 +610,107 @@ class ServerSupervisor {
       if (this.roleValue === "attached") {
         const result = await this.requestOwner({ kind: "ensure-loaded", slug });
         if (!("baseUrl" in result)) {
-          throw new Error("local-models owner returned an invalid load response");
+          throw new Error(
+            "local-models owner returned an invalid load response",
+          );
         }
-        return { baseUrl: result.baseUrl };
+        return {
+          baseUrl: result.baseUrl,
+          runtimeConfig: validatedRuntimeConfig(result.runtimeConfig),
+        };
       }
     }
     return this.ensureLoadedAsOwner(slug);
   }
 
-  private async ensureLoadedAsOwner(slug: string): Promise<{ baseUrl: string }> {
-    if (this.roleValue !== "owner") throw new Error("local-models supervisor is attached");
+  private ensureLoadedAsOwner(
+    slug: string,
+  ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }> {
+    const kind = slug === FALLBACK_MODEL.slug ? "utility" : "main";
+    const previous = this.loadFlights[kind];
+    const flight = (
+      previous ? previous.catch(() => undefined) : Promise.resolve()
+    ).then(() => this.loadAsOwner(slug));
+    this.loadFlights[kind] = flight;
+    void flight.then(
+      () => {
+        if (this.loadFlights[kind] === flight) delete this.loadFlights[kind];
+      },
+      () => {
+        if (this.loadFlights[kind] === flight) delete this.loadFlights[kind];
+      },
+    );
+    return flight;
+  }
+
+  private async loadAsOwner(
+    slug: string,
+  ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }> {
+    if (this.disposed) throw this.disposalReason;
+    if (this.roleValue !== "owner")
+      throw new Error("local-models supervisor is attached");
     if (slug === FALLBACK_MODEL.slug) {
+      const source = await this.deps.fallbackModel();
+      if (!source) throw new Error(`local model not found: ${slug}`);
+      const model = {
+        ...source,
+        config: validatedRuntimeConfig(source.config),
+      };
+      await this.reconcileRecipe("utility", model);
       this.markUsed(slug);
-      await this.ensureOwnerServer("utility");
-      await this.assertHealthy("utility");
-      return { baseUrl: baseUrl(this.portFor("utility")) };
+      const active = await this.ensureOwnerServer("utility", model);
+      await this.assertHealthy("utility", active);
+      return {
+        baseUrl: baseUrl(this.portFor("utility")),
+        runtimeConfig: validatedRuntimeConfig(model.config),
+      };
     }
 
-    const model = await this.deps.libraryModel(slug);
-    if (!model) throw new Error(`local model not found: ${slug}`);
+    const source = await this.deps.libraryModel(slug);
+    if (!source) throw new Error(`local model not found: ${slug}`);
+    const model = { ...source, config: validatedRuntimeConfig(source.config) };
 
-    await this.ensureOwnerServer("main");
-    await this.assertHealthy("main");
+    this.mainModelSlug = slug;
+    await this.reconcileRecipe("main", model);
+    const active = await this.ensureOwnerServer("main", model);
+    await this.assertHealthy("main", active);
 
     this.markUsed(slug);
-    await this.ensureRouterModelLoaded(slug);
-    return { baseUrl: baseUrl(this.portFor("main")) };
+    await this.ensureRouterModelLoaded(model);
+    return {
+      baseUrl: baseUrl(this.portFor("main")),
+      runtimeConfig: validatedRuntimeConfig(model.config),
+    };
+  }
+
+  private recipeFor(kind: ServerKind, model: ModelRecord) {
+    const engines = this.deps.engines();
+    return effectiveModelRuntime(
+      model,
+      kind === "utility" && this.utilityCpuFallback && engines
+        ? { ...engines, gpu: null }
+        : engines,
+    );
+  }
+
+  private async reconcileRecipe(
+    kind: ServerKind,
+    model: ModelRecord,
+  ): Promise<void> {
+    const runtime = this.servers[kind];
+    if (runtime.launchFlight) await runtime.launchFlight;
+    if (runtime.exitFlight) await runtime.exitFlight;
+    const recipe = this.recipeFor(kind, model);
+    const identity = kind === "utility" ? JSON.stringify(recipe) : recipe.bin;
+    const loaded = this.loadedRecipes.get(model.slug);
+    if (
+      runtime.process &&
+      (runtime.process.recipe !== identity ||
+        (loaded !== undefined && loaded !== JSON.stringify(recipe)))
+    ) {
+      this.clearRestartTimer(kind);
+      await this.stopProcess(kind, "SIGTERM");
+    }
   }
 
   /**
@@ -536,20 +722,26 @@ class ServerSupervisor {
    * Only the owner performs router mutations. Attached workspaces forward the
    * complete load request through the authenticated admin endpoint.
    */
-  private async ensureRouterModelLoaded(slug: string): Promise<void> {
+  private async ensureRouterModelLoaded(model: ModelRecord): Promise<void> {
+    const slug = model.slug;
     const key = await this.apiKey();
     const endpoint = `http://127.0.0.1:${this.portFor("main")}`;
-    if (!this.routerCatalogModels.has(slug)) {
-      const presetPath = await this.writeRouterPreset();
+    const recipe = JSON.stringify(this.recipeFor("main", model));
+    if (this.routerCatalogModels.get(slug) !== recipe) {
+      const presetPath = await this.writeRouterPreset(model);
       if (!presetPath || !this.routerCatalogModels.has(slug)) {
-        throw new Error(`local model ${slug} is missing from the router preset`);
+        throw new Error(
+          `local model ${slug} is missing from the router preset`,
+        );
       }
       const reload = await this.deps.fetch(`${endpoint}/models?reload=1`, {
         method: "GET",
         headers: { Authorization: `Bearer ${key}` },
       });
       if (!reload.ok) {
-        throw new Error(`local model router catalog refresh failed with HTTP ${reload.status}`);
+        throw new Error(
+          `local model router catalog refresh failed with HTTP ${reload.status}`,
+        );
       }
     }
 
@@ -565,15 +757,24 @@ class ServerSupervisor {
     if (!load.ok) {
       const detail = await load.text().catch(() => "");
       throw new Error(
-        `local model ${slug} failed to load with HTTP ${load.status}${detail ? `: ${detail}` : ""}`
+        `local model ${slug} failed to load with HTTP ${load.status}${detail ? `: ${detail}` : ""}`,
       );
     }
     // --models-max 1 makes this the only resident main model.
     this.loadedMainModels.clear();
     this.loadedMainModels.add(slug);
+    this.loadedRecipes.clear();
+    this.loadedRecipes.set(slug, recipe);
   }
 
-  private async validateModel(inputSlug: string): Promise<{ baseUrl: string }> {
+  private async validateModel(
+    inputSlug: string,
+    config?: ModelRuntimeConfig,
+  ): Promise<{
+    baseUrl: string;
+    toolsCapable: boolean;
+    recipe: ModelRuntimeValidationRecipe;
+  }> {
     await this.activate();
     const slug = normalizeSlug(inputSlug);
     const model =
@@ -582,20 +783,19 @@ class ServerSupervisor {
         : await this.deps.libraryModel(slug);
     if (!model) throw new Error(`local model not found: ${slug}`);
 
-    const engines = this.deps.engines();
-    const engine = engines?.gpu ?? engines?.cpu;
-    if (!engine) throw new Error("llama.cpp engine is not installed");
+    const recipe = this.recipeFor(
+      slug === FALLBACK_MODEL.slug ? "utility" : "main",
+      config ? { ...model, config: validatedRuntimeConfig(config) } : model,
+    );
 
     // Installation validation is deliberately isolated from the shared,
     // workspace-owned serving processes. Any workspace can add a model without
     // taking over or restarting another workspace's warm router.
     const port = await allocatePort();
-    const contextLength = runtimeContextLengthFor(model);
-    let exited = false;
-    let exitCode: number | null = null;
     const stderr: string[] = [];
-    const child = this.deps.spawn(
-      engine.serverBinPath,
+    const readiness = this.processReadiness(port);
+    const child = this.spawnOwned(
+      recipe.bin,
       [
         "-m",
         model.file,
@@ -605,8 +805,7 @@ class ServerSupervisor {
         "127.0.0.1",
         "--api-key-file",
         this.paths.authKey,
-        "-c",
-        String(contextLength),
+        ...modelRuntimeArgs(recipe),
         "--jinja",
         "-np",
         "1",
@@ -614,36 +813,58 @@ class ServerSupervisor {
       {
         env: cleanEnv(),
         onExit: (code) => {
-          exited = true;
-          exitCode = code;
+          readiness.fail(
+            new Error(
+              `local model ${slug} validation server exited with code ${String(code)}${stderr.at(-1) ? `: ${stderr.at(-1)}` : ""}`,
+            ),
+          );
         },
-        onStdout: () => {},
+        onStdout: (line) => {
+          readiness.observe(line);
+        },
         onStderr: (line) => {
           stderr.push(line);
           if (stderr.length > 20) stderr.shift();
+          readiness.observe(line);
         },
-      }
+      },
     );
 
+    let failure: unknown;
     try {
-      const deadline = this.deps.now() + HEALTH_WAIT_MS;
-      let healthy = await this.healthCheck(port);
-      while (!healthy && !exited && this.deps.now() < deadline) {
-        await this.sleep(HEALTH_WAIT_STEP_MS);
-        healthy = await this.healthCheck(port);
-      }
-      if (!healthy) {
-        const detail = stderr.at(-1);
-        throw new Error(
-          `local model ${slug} validation server ${
-            exited ? `exited with code ${String(exitCode)}` : "did not become healthy"
-          }${detail ? `: ${detail}` : ""}`
-        );
-      }
-      await this.assertModelRuntime(port, model);
-      return { baseUrl: baseUrl(port) };
+      readiness.start();
+      void child.closed.then(
+        () =>
+          readiness.fail(
+            new Error(`local model ${slug} validation server closed`),
+          ),
+        (error) => readiness.fail(error),
+      );
+      await readiness.ready;
+      const toolsCapable = await this.assertModelRuntime(port, model);
+      return {
+        baseUrl: baseUrl(port),
+        toolsCapable,
+        recipe: observedRuntimeRecipe(recipe),
+      };
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      child.kill("SIGTERM");
+      try {
+        child.kill("SIGTERM");
+        await child.closed;
+        await readiness.join();
+        this.readiness.delete(readiness);
+      } catch (cleanup) {
+        if (failure !== undefined)
+          throw new AggregateError(
+            [failure, cleanup],
+            "Local model validation and child closure failed",
+            { cause: failure },
+          );
+        throw cleanup;
+      }
     }
   }
 
@@ -668,11 +889,13 @@ class ServerSupervisor {
     return this.deps.adminTransport ?? HTTP_ADMIN_TRANSPORT;
   }
 
-  private async requestOwner(command: SupervisorAdminCommand): Promise<SupervisorAdminResult> {
+  private async requestOwner(
+    command: SupervisorAdminCommand,
+  ): Promise<SupervisorAdminResult> {
     const port = this.ownerInfoValue?.adminPort ?? this.adminPort;
     if (!validPort(port)) {
       throw new Error(
-        "local-models owner predates the admin control plane; restart the owning workspace"
+        "local-models owner predates the admin control plane; restart the owning workspace",
       );
     }
     const key = await this.apiKey();
@@ -680,9 +903,10 @@ class ServerSupervisor {
   }
 
   private async handleAdminCommand(
-    command: SupervisorAdminCommand
+    command: SupervisorAdminCommand,
   ): Promise<SupervisorAdminResult> {
-    if (this.roleValue !== "owner") throw new Error("local-models supervisor is attached");
+    if (this.roleValue !== "owner")
+      throw new Error("local-models supervisor is attached");
     if (command.kind === "ensure-loaded") {
       return this.ensureLoadedAsOwner(normalizeSlug(command.slug));
     }
@@ -691,30 +915,56 @@ class ServerSupervisor {
     return { ok: true };
   }
 
-  private async ensureOwnerServer(kind: ServerKind): Promise<void> {
-    if (this.roleValue !== "owner") throw new Error("local-models supervisor is attached");
+  private async ensureOwnerServer(
+    kind: ServerKind,
+    model: ModelRecord,
+  ): Promise<RuntimeProcess> {
+    if (this.roleValue !== "owner")
+      throw new Error("local-models supervisor is attached");
     const runtime = this.servers[kind];
-    if (runtime.process || runtime.state.state === "running" || runtime.state.state === "starting")
-      return;
-    await this.startServer(kind);
+    if (runtime.process) return runtime.process;
+    // An admitted exit may already own exact port reallocation/replacement.
+    if (runtime.exitFlight) await runtime.exitFlight;
+    if (runtime.process) return runtime.process;
+    const active = await this.startServer(kind, model);
+    if (!active)
+      throw this.disposed
+        ? this.disposalReason
+        : new Error(
+            runtime.state.state === "error"
+              ? runtime.state.message
+              : `${kind} server is unavailable`,
+          );
+    return active;
   }
 
-  private async assertHealthy(kind: ServerKind): Promise<void> {
-    // The request-path "model starting" phase (design §6.3): a freshly
-    // spawned server answers /health 503 until the weights are loaded, so
-    // wait it out instead of one-shot failing — verified live: the LFM2.5
-    // CPU load takes ~20-60 s on the reference box.
-    const deadline = this.deps.now() + HEALTH_WAIT_MS;
-    let healthy = await this.healthCheck(this.portFor(kind));
-    while (!healthy && this.deps.now() < deadline) {
-      if (this.servers[kind].state.state === "error") break; // supervisor gave up
-      await this.sleep(HEALTH_WAIT_STEP_MS);
-      healthy = await this.healthCheck(this.portFor(kind));
-    }
-    if (!healthy) throw new Error(`${kind} server is not healthy`);
-    const runtime = this.servers[kind];
-    runtime.consecutiveHealthFailures = 0;
-    if (runtime.process) this.setState(kind, this.runningState(kind));
+  private async assertHealthy(
+    kind: ServerKind,
+    active: RuntimeProcess,
+  ): Promise<void> {
+    await active.readiness.ready;
+    if (this.servers[kind].process !== active || this.disposed)
+      throw this.disposed
+        ? this.disposalReason
+        : new Error(`${kind} server was withdrawn before readiness admission`);
+  }
+
+  private processReadiness(port: number): ServerReadiness {
+    const readiness = new ServerReadiness(async (signal) => {
+      const key = await this.apiKey();
+      signal.throwIfAborted();
+      const response = await this.deps.fetch(
+        `http://127.0.0.1:${port}/health`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${key}` },
+          signal,
+        },
+      );
+      return response.ok;
+    });
+    this.readiness.add(readiness);
+    return readiness;
   }
 
   /**
@@ -723,15 +973,21 @@ class ServerSupervisor {
    * into the OpenAI shape, and its embedded template must retain that call when
    * the next turn is rendered. This is deliberately never run on invocation.
    */
-  private async assertModelRuntime(port: number, model: ModelRecord): Promise<void> {
+  private async assertModelRuntime(
+    port: number,
+    model: ModelRecord,
+  ): Promise<boolean> {
     const key = await this.apiKey();
-    const propsResponse = await this.deps.fetch(`http://127.0.0.1:${port}/props`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${key}` },
-    });
+    const propsResponse = await this.deps.fetch(
+      `http://127.0.0.1:${port}/props`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${key}` },
+      },
+    );
     if (!propsResponse.ok) {
       throw new Error(
-        `local model ${model.slug} runtime properties failed with HTTP ${propsResponse.status}`
+        `local model ${model.slug} runtime properties failed with HTTP ${propsResponse.status}`,
       );
     }
     const props = (await propsResponse.json()) as {
@@ -741,17 +997,15 @@ class ServerSupervisor {
         supports_object_arguments?: boolean;
       };
     };
-    if (!model.toolsCapable) return;
-
     const caps = props.chat_template_caps;
     if (
       caps?.supports_tools !== true ||
       caps.supports_tool_calls !== true ||
       caps.supports_object_arguments !== true
     ) {
-      throw new Error(
-        `local model ${model.slug} declares tool support but its active chat template cannot round-trip structured tool calls`
-      );
+      // A GGUF template mentioning tools is not proof of runtime capability.
+      // This remains a usable text model; never advertise or offer structured tools.
+      return false;
     }
 
     const assistantCallSentinel = "vibestudio-assistant-call-sentinel";
@@ -804,23 +1058,27 @@ class ServerSupervisor {
           tool_choice: "required",
           temperature: 0,
         }),
-      }
+      },
     );
     if (!generationResponse.ok) {
       throw new Error(
-        `local model ${model.slug} tool-call probe failed with HTTP ${generationResponse.status}`
+        `local model ${model.slug} tool-call probe failed with HTTP ${generationResponse.status}`,
       );
     }
     const generated = (await generationResponse.json()) as {
       choices?: Array<{
         message?: {
           tool_calls?: Array<{
-            function?: { name?: string; arguments?: string | Record<string, unknown> };
+            function?: {
+              name?: string;
+              arguments?: string | Record<string, unknown>;
+            };
           }>;
         };
       }>;
     };
-    const generatedCall = generated.choices?.[0]?.message?.tool_calls?.[0]?.function;
+    const generatedCall =
+      generated.choices?.[0]?.message?.tool_calls?.[0]?.function;
     let generatedArguments: unknown = generatedCall?.arguments;
     if (typeof generatedArguments === "string") {
       try {
@@ -833,65 +1091,65 @@ class ServerSupervisor {
       generatedCall?.name !== "vibestudio_runtime_probe" ||
       !generatedArguments ||
       typeof generatedArguments !== "object" ||
-      (generatedArguments as Record<string, unknown>)["value"] !== assistantCallSentinel
+      (generatedArguments as Record<string, unknown>)["value"] !==
+        assistantCallSentinel
     ) {
       throw new Error(
-        `local model ${model.slug} could not reliably select and produce a parsed structured tool call from the full agent tool surface`
+        `local model ${model.slug} could not reliably select and produce a parsed structured tool call from the full agent tool surface`,
       );
     }
 
-    const templateResponse = await this.deps.fetch(`http://127.0.0.1:${port}/apply-template`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: model.slug,
-        messages: [
-          { role: "user", content: "Run the runtime probe." },
-          {
-            role: "assistant",
-            content: null,
-            tool_calls: [
-              {
-                id: "runtime_probe_call",
-                type: "function",
-                function: {
-                  name: "vibestudio_runtime_probe",
-                  arguments: JSON.stringify({ value: assistantCallSentinel }),
+    const templateResponse = await this.deps.fetch(
+      `http://127.0.0.1:${port}/apply-template`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: model.slug,
+          messages: [
+            { role: "user", content: "Run the runtime probe." },
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "runtime_probe_call",
+                  type: "function",
+                  function: {
+                    name: "vibestudio_runtime_probe",
+                    arguments: JSON.stringify({ value: assistantCallSentinel }),
+                  },
                 },
-              },
-            ],
-          },
-          {
-            role: "tool",
-            tool_call_id: "runtime_probe_call",
-            name: "vibestudio_runtime_probe",
-            content: JSON.stringify({ received: true }),
-          },
-          { role: "user", content: "Continue." },
-        ],
-        tools: [probeTool],
-        add_generation_prompt: true,
-      }),
-    });
+              ],
+            },
+            {
+              role: "tool",
+              tool_call_id: "runtime_probe_call",
+              name: "vibestudio_runtime_probe",
+              content: JSON.stringify({ received: true }),
+            },
+            { role: "user", content: "Continue." },
+          ],
+          tools: [probeTool],
+          add_generation_prompt: true,
+        }),
+      },
+    );
     if (!templateResponse.ok) {
       throw new Error(
-        `local model ${model.slug} chat-template probe failed with HTTP ${templateResponse.status}`
+        `local model ${model.slug} chat-template probe failed with HTTP ${templateResponse.status}`,
       );
     }
     const rendered = (await templateResponse.json()) as { prompt?: string };
     if (!rendered.prompt?.includes(assistantCallSentinel)) {
       throw new Error(
-        `local model ${model.slug} chat template drops assistant tool calls from conversation history`
+        `local model ${model.slug} chat template drops assistant tool calls from conversation history`,
       );
     }
-  }
-
-  private sleep(ms: number): Promise<void> {
-    const setTimeoutFn = this.deps.setTimeoutFn ?? setTimeout;
-    return new Promise((resolve) => setTimeoutFn(() => resolve(), ms));
+    return true;
   }
 
   private async restart(kind: ServerKind): Promise<void> {
@@ -899,9 +1157,14 @@ class ServerSupervisor {
     if (this.roleValue === "attached") {
       await this.ensureAttachedOwnerAlive();
       if (this.roleValue === "attached") {
-        const result = await this.requestOwner({ kind: "restart", server: kind });
+        const result = await this.requestOwner({
+          kind: "restart",
+          server: kind,
+        });
         if (!("ok" in result) || result.ok !== true) {
-          throw new Error("local-models owner returned an invalid restart response");
+          throw new Error(
+            "local-models owner returned an invalid restart response",
+          );
         }
         return;
       }
@@ -910,7 +1173,8 @@ class ServerSupervisor {
   }
 
   private async restartAsOwner(kind: ServerKind): Promise<void> {
-    if (this.roleValue !== "owner") throw new Error("local-models supervisor is attached");
+    if (this.roleValue !== "owner")
+      throw new Error("local-models supervisor is attached");
 
     // A restart only re-launches a server that was already up (or mid-launch):
     // the fallback floor is lazy (design §5), so restarting a cold utility must
@@ -922,60 +1186,124 @@ class ServerSupervisor {
       runtime.state.state === "starting" ||
       runtime.state.state === "backoff";
     this.clearRestartTimer(kind);
-    this.clearHealthTimer(kind);
-    this.stopProcess(kind, "SIGTERM");
+    await this.stopProcess(kind, "SIGTERM");
 
     if (shouldRun) await this.startServer(kind);
     else this.setState(kind, { state: "stopped" });
   }
 
-  private async startServer(kind: ServerKind): Promise<void> {
+  private startServer(
+    kind: ServerKind,
+    model?: ModelRecord,
+  ): Promise<RuntimeProcess | undefined> {
+    const runtime = this.servers[kind];
+    if (runtime.launchFlight) return runtime.launchFlight;
+    const flight = (runtime.stopFlight ?? Promise.resolve()).then(() =>
+      this.startProcess(kind, model),
+    );
+    runtime.launchFlight = flight;
+    void flight.then(
+      () => {
+        if (runtime.launchFlight === flight) runtime.launchFlight = undefined;
+      },
+      () => {
+        if (runtime.launchFlight === flight) runtime.launchFlight = undefined;
+      },
+    );
+    return flight;
+  }
+
+  private async startProcess(
+    kind: ServerKind,
+    model?: ModelRecord,
+  ): Promise<RuntimeProcess | undefined> {
     if (this.disposed || this.roleValue !== "owner") return;
     this.clearRestartTimer(kind);
-    this.clearHealthTimer(kind);
 
     const runtime = this.servers[kind];
-    runtime.consecutiveHealthFailures = 0;
     if (kind === "main") this.loadedMainModels.clear();
 
-    const launch = await this.launchSpec(kind);
-    if (!launch) return;
+    const launch = await this.launchSpec(kind, model);
+    if (!launch || this.disposed) return;
 
     const token = ++this.nextProcessToken;
+    const readiness = this.processReadiness(this.portFor(kind));
     this.setState(kind, { state: "starting" });
 
     try {
-      const child = this.deps.spawn(launch.bin, launch.args, {
+      const child = this.spawnOwned(launch.bin, launch.args, {
         env: cleanEnv(),
         onExit: (code) => {
-          void this.handleExit(kind, token, code);
+          readiness.fail(
+            new Error(
+              `${kind} server exited with code ${String(code)}${this.tailLog(kind, 1)[0] ? `: ${this.tailLog(kind, 1)[0]}` : ""}`,
+            ),
+          );
+          const flight = this.handleExit(kind, token, code);
+          this.exitFlights.add(flight);
+          runtime.exitFlight = flight;
+          void flight.then(
+            () => {
+              this.exitFlights.delete(flight);
+              if (runtime.exitFlight === flight) runtime.exitFlight = undefined;
+            },
+            () => {},
+          );
         },
-        onStdout: (line) => this.recordLog(kind, "stdout", line),
+        onStdout: (line) => {
+          this.recordLog(kind, "stdout", line);
+          readiness.observe(line);
+        },
         onStderr: (line) => {
           if (line.includes("EADDRINUSE")) {
             const active = this.servers[kind].process;
             if (active?.token === token) active.eaddrInUse = true;
           }
           this.recordLog(kind, "stderr", line);
+          readiness.observe(line);
         },
       });
-      runtime.process = { token, child, expectedExit: false, eaddrInUse: false };
+      const active: RuntimeProcess = {
+        token,
+        child,
+        readiness,
+        recipe: launch.recipe,
+        expectedExit: false,
+        eaddrInUse: false,
+      };
+      runtime.process = active;
       runtime.startedAt = this.deps.now();
       this.writeOwnerInfo(); // record the child pid for dead-owner reaping
-      this.setState(kind, this.runningState(kind));
-      this.scheduleHealthPoll(kind);
+      readiness.start();
+      void child.closed.then(
+        () => readiness.fail(new Error(`${kind} server closed`)),
+        (error) => readiness.fail(error),
+      );
+      void readiness.ready.then(
+        () => {
+          if (this.disposed || runtime.process?.token !== token) return;
+          this.setState(kind, this.runningState(kind));
+        },
+        () => {},
+      );
+      return active;
     } catch (error) {
+      readiness.fail(error);
+      this.readiness.delete(readiness);
       if (isEaddrInUse(error)) {
         await this.reallocatePort(kind);
-        await this.startServer(kind);
-        return;
+        return await this.startProcess(kind);
       }
       this.recordLog(kind, "stderr", errorMessage(error));
       await this.handleFailure(kind, errorMessage(error));
+      throw error;
     }
   }
 
-  private async launchSpec(kind: ServerKind): Promise<{ bin: string; args: string[] } | null> {
+  private async launchSpec(
+    kind: ServerKind,
+    selected?: ModelRecord,
+  ): Promise<{ bin: string; args: string[]; recipe: string } | null> {
     const engines = this.deps.engines();
     if (!engines?.cpu) {
       this.setState(kind, {
@@ -987,7 +1315,7 @@ class ServerSupervisor {
     }
 
     if (kind === "utility") {
-      const fallback = await this.deps.fallbackModel();
+      const fallback = selected ?? (await this.deps.fallbackModel());
       if (!fallback) {
         this.setState(kind, {
           state: "error",
@@ -996,9 +1324,10 @@ class ServerSupervisor {
         });
         return null;
       }
-      const utilityEngine = !this.utilityCpuFallback && engines.gpu ? engines.gpu : engines.cpu;
+      const recipe = this.recipeFor("utility", fallback);
       return {
-        bin: utilityEngine.serverBinPath,
+        bin: recipe.bin,
+        recipe: JSON.stringify(recipe),
         args: [
           "-m",
           fallback.file,
@@ -1008,8 +1337,7 @@ class ServerSupervisor {
           "127.0.0.1",
           "--api-key-file",
           this.paths.authKey,
-          "-c",
-          String(runtimeContextLengthFor(fallback)),
+          ...modelRuntimeArgs(recipe),
           "--jinja",
           // Single sequence, not `-np 2`: llama.cpp splits the KV cache evenly
           // across parallel slots. The fallback needs its full advertised 128K
@@ -1023,13 +1351,21 @@ class ServerSupervisor {
       };
     }
 
-    const mainEngine = engines.gpu ?? engines.cpu;
+    const model =
+      selected ??
+      (this.mainModelSlug
+        ? await this.deps.libraryModel(this.mainModelSlug)
+        : (await this.deps.libraryModels()).find(
+            (record) => record.slug !== FALLBACK_MODEL.slug,
+          ));
+    if (!model) return null;
+    const recipe = this.recipeFor("main", model);
     // Router discovery: --models-dir does NOT scan our nested
     // publisher/repo/file.gguf layout (verified live: "Available models (0)"),
     // and file-derived names wouldn't match our slugs. A generated preset INI
     // solves both — sections are slugs, entries point at the exact GGUF
     // (design §4.4; verified against current llama.cpp releases).
-    const presetPath = await this.writeRouterPreset();
+    const presetPath = await this.writeRouterPreset(model);
     if (!presetPath) {
       this.setState(kind, {
         state: "error",
@@ -1039,7 +1375,8 @@ class ServerSupervisor {
       return null;
     }
     return {
-      bin: mainEngine.serverBinPath,
+      bin: recipe.bin,
+      recipe: recipe.bin,
       args: [
         "--models-preset",
         presetPath,
@@ -1058,20 +1395,31 @@ class ServerSupervisor {
 
   /** Generate the router preset INI from the library (fallback excluded — it
    *  has its own dedicated server). Returns null when the library is empty. */
-  private async writeRouterPreset(): Promise<string | null> {
-    const records = (await this.deps.libraryModels()).filter(
-      (record) => record.slug !== FALLBACK_MODEL.slug
-    );
+  private async writeRouterPreset(
+    selected?: ModelRecord,
+  ): Promise<string | null> {
+    const records = (await this.deps.libraryModels())
+      .filter((record) => record.slug !== FALLBACK_MODEL.slug)
+      .map((record) => (selected?.slug === record.slug ? selected : record));
     if (records.length === 0) {
       this.routerCatalogModels.clear();
       return null;
     }
-    this.routerCatalogModels = new Set(records.map((record) => record.slug));
+    this.routerCatalogModels = new Map(
+      records.map((record) => [
+        record.slug,
+        JSON.stringify(this.recipeFor("main", record)),
+      ]),
+    );
     const sections = records.map((record) => {
-      const ctx = runtimeContextLengthFor(record);
-      const lines = [`[${record.slug}]`, `model = ${record.file}`, `ctx-size = ${ctx}`];
-      if (record.config.gpuLayers !== null) {
-        lines.push(`n-gpu-layers = ${record.config.gpuLayers}`);
+      const recipe = this.recipeFor("main", record);
+      const lines = [
+        `[${record.slug}]`,
+        `model = ${record.file}`,
+        `ctx-size = ${recipe.contextLength}`,
+      ];
+      if (recipe.gpuLayers !== null) {
+        lines.push(`n-gpu-layers = ${recipe.gpuLayers}`);
       }
       return lines.join("\n");
     });
@@ -1080,7 +1428,11 @@ class ServerSupervisor {
     return presetPath;
   }
 
-  private async handleExit(kind: ServerKind, token: number, code: number | null): Promise<void> {
+  private async handleExit(
+    kind: ServerKind,
+    token: number,
+    code: number | null,
+  ): Promise<void> {
     const runtime = this.servers[kind];
     const active = runtime.process;
     if (!active || active.token !== token) return;
@@ -1088,7 +1440,6 @@ class ServerSupervisor {
     runtime.process = null;
     runtime.startedAt = null;
     if (kind === "main") this.loadedMainModels.clear();
-    this.clearHealthTimer(kind);
 
     if (active.expectedExit || this.disposed) {
       this.setState(kind, { state: "stopped" });
@@ -1099,21 +1450,29 @@ class ServerSupervisor {
       this.recordLog(
         kind,
         "stderr",
-        `${kind} server port ${this.portFor(kind)} is in use; reallocating`
+        `${kind} server port ${this.portFor(kind)} is in use; reallocating`,
       );
       await this.reallocatePort(kind);
       await this.startServer(kind);
       return;
     }
 
-    await this.handleFailure(kind, `${kind} server exited with code ${code ?? "null"}`);
+    await this.handleFailure(
+      kind,
+      `${kind} server exited with code ${code ?? "null"}`,
+    );
   }
 
-  private async handleFailure(kind: ServerKind, message: string): Promise<void> {
+  private async handleFailure(
+    kind: ServerKind,
+    message: string,
+  ): Promise<void> {
     if (this.disposed) return;
     const runtime = this.servers[kind];
     const now = this.deps.now();
-    runtime.failureTimes = runtime.failureTimes.filter((time) => now - time <= FAILURE_WINDOW_MS);
+    runtime.failureTimes = runtime.failureTimes.filter(
+      (time) => now - time <= FAILURE_WINDOW_MS,
+    );
     runtime.failureTimes.push(now);
 
     const engines = this.deps.engines();
@@ -1122,18 +1481,26 @@ class ServerSupervisor {
       this.recordLog(
         "utility",
         "stderr",
-        `accelerated utility server failed; degrading to CPU: ${message}`
+        `accelerated utility server failed; degrading to CPU: ${message}`,
       );
     }
 
     if (kind === "main" && runtime.failureTimes.length >= MAIN_FAILURE_LIMIT) {
-      this.setState("main", { state: "error", message, logTail: this.tailLog("main") });
+      this.setState("main", {
+        state: "error",
+        message,
+        logTail: this.tailLog("main"),
+      });
       return;
     }
 
     const attempt = runtime.failureTimes.length;
-    const maxBackoff = kind === "utility" ? UTILITY_MAX_BACKOFF_MS : MAIN_MAX_BACKOFF_MS;
-    const nextRetryMs = Math.min(maxBackoff, 1000 * 2 ** Math.max(0, attempt - 1));
+    const maxBackoff =
+      kind === "utility" ? UTILITY_MAX_BACKOFF_MS : MAIN_MAX_BACKOFF_MS;
+    const nextRetryMs = Math.min(
+      maxBackoff,
+      1000 * 2 ** Math.max(0, attempt - 1),
+    );
     this.setState(kind, { state: "backoff", attempt, nextRetryMs });
     runtime.restartTimer = this.setTimer(() => {
       runtime.restartTimer = null;
@@ -1152,61 +1519,6 @@ class ServerSupervisor {
       adminPort: this.adminPort ?? undefined,
     });
     this.writeOwnerInfo();
-  }
-
-  private scheduleHealthPoll(kind: ServerKind): void {
-    const runtime = this.servers[kind];
-    this.clearHealthTimer(kind);
-    runtime.healthTimer = this.setTimer(() => {
-      runtime.healthTimer = null;
-      void this.runHealthPoll(kind);
-    }, HEALTH_POLL_MS);
-  }
-
-  private async runHealthPoll(kind: ServerKind): Promise<void> {
-    if (this.disposed || this.roleValue !== "owner") return;
-    const runtime = this.servers[kind];
-    if (!runtime.process) return;
-
-    const healthy = await this.healthCheck(this.portFor(kind));
-    if (healthy) {
-      runtime.consecutiveHealthFailures = 0;
-      this.scheduleHealthPoll(kind);
-      return;
-    }
-
-    runtime.consecutiveHealthFailures += 1;
-    if (runtime.consecutiveHealthFailures < HEALTH_FAILURE_LIMIT) {
-      this.scheduleHealthPoll(kind);
-      return;
-    }
-
-    this.recordLog(
-      kind,
-      "stderr",
-      `${kind} server failed ${HEALTH_FAILURE_LIMIT} consecutive health checks`
-    );
-    this.stopProcess(kind, "SIGTERM");
-    await this.handleFailure(kind, `${kind} server failed health checks`);
-  }
-
-  private async healthCheck(port: number): Promise<boolean> {
-    let key: string;
-    try {
-      key = await this.apiKey();
-    } catch {
-      return false;
-    }
-
-    try {
-      const response = await this.deps.fetch(`http://127.0.0.1:${port}/health`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${key}` },
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
   }
 
   private scheduleIdleUnload(): void {
@@ -1232,21 +1544,21 @@ class ServerSupervisor {
       const fallbackIdleFor = now - fallbackUsedAt;
       if (fallbackIdleFor >= IDLE_UNLOAD_MS) {
         this.lastUsed.delete(FALLBACK_MODEL.slug);
-        this.stopIdleServer("utility");
+        await this.stopIdleServer("utility");
       } else {
         nextCheckMs = Math.min(nextCheckMs, IDLE_UNLOAD_MS - fallbackIdleFor);
       }
     }
 
     const mainUses = Array.from(this.lastUsed.entries()).filter(
-      ([slug]) => slug !== FALLBACK_MODEL.slug
+      ([slug]) => slug !== FALLBACK_MODEL.slug,
     );
     if (mainUses.length > 0) {
       const newestMainUse = Math.max(...mainUses.map(([, usedAt]) => usedAt));
       const mainIdleFor = now - newestMainUse;
       if (mainIdleFor >= IDLE_UNLOAD_MS) {
         for (const [slug] of mainUses) this.lastUsed.delete(slug);
-        this.stopIdleServer("main");
+        await this.stopIdleServer("main");
       } else {
         nextCheckMs = Math.min(nextCheckMs, IDLE_UNLOAD_MS - mainIdleFor);
       }
@@ -1260,25 +1572,50 @@ class ServerSupervisor {
     }
   }
 
-  private stopIdleServer(kind: ServerKind): void {
+  private async stopIdleServer(kind: ServerKind): Promise<void> {
     this.clearRestartTimer(kind);
-    this.clearHealthTimer(kind);
-    this.stopProcess(kind, "SIGTERM");
+    await this.stopProcess(kind, "SIGTERM");
     if (kind === "main") this.loadedMainModels.clear();
     this.setState(kind, { state: "stopped" });
   }
 
-  private stopProcess(kind: ServerKind, signal: string): void {
+  private stopProcess(kind: ServerKind, signal: string): Promise<void> {
+    const runtime = this.servers[kind];
+    if (runtime.stopFlight) return runtime.stopFlight;
+    const flight = this.finishStop(kind, signal);
+    runtime.stopFlight = flight;
+    void flight.then(
+      () => {
+        if (runtime.stopFlight === flight) runtime.stopFlight = undefined;
+      },
+      () => {
+        if (runtime.stopFlight === flight) runtime.stopFlight = undefined;
+      },
+    );
+    return flight;
+  }
+
+  private async finishStop(kind: ServerKind, signal: string): Promise<void> {
     const runtime = this.servers[kind];
     const active = runtime.process;
     if (!active) return;
+    // A refusal retains this exact process; no replacement can take its port.
     active.expectedExit = true;
-    runtime.process = null;
-    runtime.startedAt = null;
     try {
       active.child.kill(signal);
     } catch (error) {
-      this.deps.log("failed to stop local-models server", { kind, error: errorMessage(error) });
+      active.expectedExit = false;
+      throw error;
+    }
+    active.readiness.fail(new Error(`${kind} server was explicitly stopped`));
+    await active.child.closed;
+    await active.readiness.join();
+    if (runtime.exitFlight) await runtime.exitFlight;
+    if (runtime.process === active) runtime.process = null;
+    runtime.startedAt = null;
+    if (kind === "main") {
+      this.loadedMainModels.clear();
+      this.loadedRecipes.clear();
     }
   }
 
@@ -1287,13 +1624,6 @@ class ServerSupervisor {
     if (!timer) return;
     this.clearTimeoutFn(timer);
     this.servers[kind].restartTimer = null;
-  }
-
-  private clearHealthTimer(kind: ServerKind): void {
-    const timer = this.servers[kind].healthTimer;
-    if (!timer) return;
-    this.clearTimeoutFn(timer);
-    this.servers[kind].healthTimer = null;
   }
 
   private setTimer(callback: () => void, delayMs: number): TimerHandle {
@@ -1317,7 +1647,8 @@ class ServerSupervisor {
     const lines = line.split(/\r?\n/).filter((entry) => entry.length > 0);
     for (const entry of lines.length > 0 ? lines : [line]) {
       target.push(event === "stderr" ? `[stderr] ${entry}` : entry);
-      if (target.length > RING_LINES) target.splice(0, target.length - RING_LINES);
+      if (target.length > RING_LINES)
+        target.splice(0, target.length - RING_LINES);
     }
   }
 
@@ -1327,38 +1658,85 @@ class ServerSupervisor {
     return this.logs[kind].slice(-bounded);
   }
 
-  private async dispose(): Promise<void> {
-    if (this.disposed) return;
+  private dispose(reason: unknown = this.disposalReason): Promise<void> {
+    if (this.disposalFlight) return this.disposalFlight;
     this.disposed = true;
+    this.disposalReason = reason;
+    for (const readiness of this.readiness) readiness.fail(reason);
+    const flight = this.finishDisposal();
+    this.disposalFlight = flight;
+    void flight.catch(() => {
+      if (this.disposalFlight === flight) this.disposalFlight = undefined;
+    });
+    return flight;
+  }
 
+  private async finishDisposal(): Promise<void> {
+    const failures: unknown[] = [];
+    if (this.activationFlight) {
+      try {
+        await this.activationFlight;
+      } catch (error) {
+        failures.push(error);
+      }
+    }
     if (this.idleTimer) {
       this.clearTimeoutFn(this.idleTimer);
       this.idleTimer = null;
     }
     for (const kind of SERVER_KINDS) {
       this.clearRestartTimer(kind);
-      this.clearHealthTimer(kind);
-      this.stopProcess(kind, "SIGTERM");
-      this.setState(kind, { state: "stopped" });
+      const active = this.servers[kind].process;
+      if (active) active.expectedExit = true;
     }
-
-    if (this.roleValue === "owner") {
-      const listener = this.adminListener;
-      this.adminListener = null;
+    const joins: Promise<void>[] = [];
+    let failedToStop = false;
+    for (const child of this.ownedProcesses) {
       try {
-        await listener?.close();
+        child.kill("SIGTERM");
+        joins.push(child.closed);
       } catch (error) {
-        this.deps.log("failed to stop local-models admin endpoint", {
-          error: errorMessage(error),
-        });
+        failedToStop = true;
+        failures.push(error);
       }
-      if (this.lockFd !== null) {
-        closeSync(this.lockFd);
-        this.lockFd = null;
-      }
-      unlinkIfExists(this.paths.owner);
-      unlinkIfExists(this.paths.lock);
     }
+    for (const result of await Promise.allSettled(joins))
+      if (result.status === "rejected") failures.push(result.reason);
+    for (const result of await Promise.allSettled(
+      [...this.readiness].map((readiness) => readiness.join()),
+    ))
+      if (result.status === "rejected") failures.push(result.reason);
+    this.readiness.clear();
+    // Child close occurs after its exit callback. Join that callback's resource work
+    // before withdrawing the lease, including port changes admitted before sealing.
+    for (const result of await Promise.allSettled([...this.exitFlights]))
+      if (result.status === "rejected") failures.push(result.reason);
+    // A failed stop still owns a live child. Keep the lease for an explicit disposal retry.
+    if (!failedToStop) {
+      for (const kind of SERVER_KINDS)
+        this.setState(kind, { state: "stopped" });
+      if (this.roleValue === "owner") {
+        try {
+          await this.adminListener?.close();
+          this.adminListener = null;
+          if (this.lockFd !== null) {
+            closeSync(this.lockFd);
+            this.lockFd = null;
+          }
+          unlinkIfExists(this.paths.owner);
+          unlinkIfExists(this.paths.lock);
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(
+        failures,
+        "Local-models disposal failed to join owned resources",
+        { cause: failures[0] },
+      );
   }
 }
 
@@ -1370,11 +1748,18 @@ function baseUrl(port: number): string {
   return `http://127.0.0.1:${port}/v1`;
 }
 
-function cleanEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+function cleanEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
-    if (key === "LD_PRELOAD" || key === "NODE_OPTIONS" || key.startsWith("DYLD_")) continue;
+    if (
+      key === "LD_PRELOAD" ||
+      key === "NODE_OPTIONS" ||
+      key.startsWith("DYLD_")
+    )
+      continue;
     env[key] = value;
   }
   return env;
@@ -1382,10 +1767,12 @@ function cleanEnv(source: NodeJS.ProcessEnv = process.env): Record<string, strin
 
 async function allocatePort(exclude?: number | number[]): Promise<number> {
   const excluded = new Set(
-    Array.isArray(exclude) ? exclude : exclude === undefined ? [] : [exclude]
+    Array.isArray(exclude) ? exclude : exclude === undefined ? [] : [exclude],
   );
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const port = await askOsForPort().catch(() => fallbackPort(excluded, attempt));
+    const port = await askOsForPort().catch(() =>
+      fallbackPort(excluded, attempt),
+    );
     if (!excluded.has(port)) return port;
   }
   return askOsForPort().catch(() => fallbackPort(excluded, 20));
@@ -1409,7 +1796,12 @@ function askOsForPort(): Promise<number> {
 }
 
 function validPort(port: unknown): port is number {
-  return typeof port === "number" && Number.isInteger(port) && port > 0 && port <= 65535;
+  return (
+    typeof port === "number" &&
+    Number.isInteger(port) &&
+    port > 0 &&
+    port <= 65535
+  );
 }
 
 function fallbackPort(excluded: ReadonlySet<number>, attempt: number): number {
@@ -1444,7 +1836,9 @@ const HTTP_ADMIN_TRANSPORT: SupervisorAdminTransport = {
         resolve({
           close: () =>
             new Promise<void>((closeResolve, closeReject) => {
-              server.close((error) => (error ? closeReject(error) : closeResolve()));
+              server.close((error) =>
+                error ? closeReject(error) : closeResolve(),
+              );
             }),
         });
       });
@@ -1462,10 +1856,15 @@ const HTTP_ADMIN_TRANSPORT: SupervisorAdminTransport = {
     const body = (await response.json().catch(() => null)) as unknown;
     if (!response.ok) {
       const detail =
-        isRecord(body) && typeof body["error"] === "string" ? `: ${body["error"]}` : "";
-      throw new Error(`local-models owner request failed with HTTP ${response.status}${detail}`);
+        isRecord(body) && typeof body["error"] === "string"
+          ? `: ${body["error"]}`
+          : "";
+      throw new Error(
+        `local-models owner request failed with HTTP ${response.status}${detail}`,
+      );
     }
-    if (!isAdminResult(body)) throw new Error("local-models owner returned malformed JSON");
+    if (!isAdminResult(body))
+      throw new Error("local-models owner returned malformed JSON");
     return body;
   },
 };
@@ -1473,8 +1872,11 @@ const HTTP_ADMIN_TRANSPORT: SupervisorAdminTransport = {
 async function handleAdminHttpRequest(
   request: IncomingMessage,
   apiKey: string,
-  handler: (command: SupervisorAdminCommand) => Promise<SupervisorAdminResult>
-): Promise<{ status: number; body: SupervisorAdminResult | { error: string } }> {
+  handler: (command: SupervisorAdminCommand) => Promise<SupervisorAdminResult>,
+): Promise<{
+  status: number;
+  body: SupervisorAdminResult | { error: string };
+}> {
   if (request.method !== "POST" || request.url !== "/admin") {
     return { status: 404, body: { error: "not found" } };
   }
@@ -1482,7 +1884,9 @@ async function handleAdminHttpRequest(
     return { status: 401, body: { error: "unauthorized" } };
   }
   try {
-    const command = parseAdminCommand(JSON.parse(await readBoundedBody(request)) as unknown);
+    const command = parseAdminCommand(
+      JSON.parse(await readBoundedBody(request)) as unknown,
+    );
     return { status: 200, body: await handler(command) };
   } catch (error) {
     return { status: 400, body: { error: errorMessage(error) } };
@@ -1495,7 +1899,8 @@ async function readBoundedBody(request: IncomingMessage): Promise<string> {
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.byteLength;
-    if (bytes > ADMIN_BODY_LIMIT_BYTES) throw new Error("admin request body is too large");
+    if (bytes > ADMIN_BODY_LIMIT_BYTES)
+      throw new Error("admin request body is too large");
     chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -1505,7 +1910,8 @@ function parseAdminCommand(value: unknown): SupervisorAdminCommand {
   if (!isRecord(value) || typeof value["kind"] !== "string") {
     throw new Error("invalid admin command");
   }
-  if (value["kind"] === "status" && Object.keys(value).length === 1) return { kind: "status" };
+  if (value["kind"] === "status" && Object.keys(value).length === 1)
+    return { kind: "status" };
   if (
     value["kind"] === "ensure-loaded" &&
     typeof value["slug"] === "string" &&
@@ -1523,25 +1929,57 @@ function parseAdminCommand(value: unknown): SupervisorAdminCommand {
 }
 
 function isAdminResult(value: unknown): value is SupervisorAdminResult {
-  return isRecord(value) && (typeof value["baseUrl"] === "string" || value["ok"] === true || isServerStates(value["servers"]));
+  return (
+    isRecord(value) &&
+    (typeof value["baseUrl"] === "string" ||
+      value["ok"] === true ||
+      isServerStates(value["servers"]))
+  );
 }
 
-function isServerStates(value: unknown): value is Record<ServerKind, ServerState> {
-  return isRecord(value) && Object.keys(value).length === 2 &&
-    isServerState(value["utility"]) && isServerState(value["main"]);
+function isServerStates(
+  value: unknown,
+): value is Record<ServerKind, ServerState> {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === 2 &&
+    isServerState(value["utility"]) &&
+    isServerState(value["main"])
+  );
 }
 
 function isServerState(value: unknown): value is ServerState {
   if (!isRecord(value)) return false;
   switch (value["state"]) {
-    case "stopped": case "starting": return Object.keys(value).length === 1;
-    case "running": return validPort(value["port"]) &&
-      Array.isArray(value["loadedModels"]) && value["loadedModels"].every((model) => typeof model === "string") &&
-      typeof value["uptimeMs"] === "number" && Number.isFinite(value["uptimeMs"]) && value["uptimeMs"] >= 0;
-    case "backoff": return typeof value["attempt"] === "number" && Number.isInteger(value["attempt"]) && value["attempt"] > 0 &&
-      typeof value["nextRetryMs"] === "number" && Number.isFinite(value["nextRetryMs"]) && value["nextRetryMs"] >= 0;
-    case "error": return typeof value["message"] === "string" && Array.isArray(value["logTail"]) && value["logTail"].every((line) => typeof line === "string");
-    default: return false;
+    case "stopped":
+    case "starting":
+      return Object.keys(value).length === 1;
+    case "running":
+      return (
+        validPort(value["port"]) &&
+        Array.isArray(value["loadedModels"]) &&
+        value["loadedModels"].every((model) => typeof model === "string") &&
+        typeof value["uptimeMs"] === "number" &&
+        Number.isFinite(value["uptimeMs"]) &&
+        value["uptimeMs"] >= 0
+      );
+    case "backoff":
+      return (
+        typeof value["attempt"] === "number" &&
+        Number.isInteger(value["attempt"]) &&
+        value["attempt"] > 0 &&
+        typeof value["nextRetryMs"] === "number" &&
+        Number.isFinite(value["nextRetryMs"]) &&
+        value["nextRetryMs"] >= 0
+      );
+    case "error":
+      return (
+        typeof value["message"] === "string" &&
+        Array.isArray(value["logTail"]) &&
+        value["logTail"].every((line) => typeof line === "string")
+      );
+    default:
+      return false;
   }
 }
 
@@ -1583,7 +2021,8 @@ function readBootId(): string {
 }
 
 function maybeUnref(handle: TimerHandle): void {
-  if (typeof handle !== "object" || handle === null || !("unref" in handle)) return;
+  if (typeof handle !== "object" || handle === null || !("unref" in handle))
+    return;
   const maybeHandle = handle as { unref?: () => void };
   maybeHandle.unref?.();
 }

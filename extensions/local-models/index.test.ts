@@ -2,7 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModelRecord } from "@workspace/model-catalog/localModels";
+import type {
+  ModelRecord,
+  ModelRuntimeConfig,
+} from "@workspace/model-catalog/localModels";
 import { DEFAULT_MODEL, FALLBACK_MODEL } from "./constants.js";
 
 interface TestDownloadJob {
@@ -44,17 +47,32 @@ const modelLibraryMock = vi.hoisted(() => {
   } | null = null;
   const state = {
     downloads: [] as TestDownloadJob[],
+    records: new Map<string, ModelRecord>(),
     nextDownloadOrdinal: 1,
     resolveDownload(job: TestDownloadJob): void {
       const pending = pendingDownload;
       pendingDownload = null;
-      pending?.resolve(job);
+      if (pending) {
+        state.records.set(job.slug, {
+          ...fallbackRecord({
+            status: "pending",
+            error: null,
+            validatedAt: null,
+          }),
+          slug: job.slug,
+          toolsCapable: false,
+        });
+        pending.resolve(job);
+      }
     },
     reset(): void {
       state.downloads = [];
+      state.records.clear();
       state.nextDownloadOrdinal = 1;
       pendingDownload = null;
-      state.library.get.mockReset().mockResolvedValue(null);
+      state.library.get
+        .mockReset()
+        .mockImplementation(async (slug) => state.records.get(slug) ?? null);
       state.library.list.mockReset().mockResolvedValue([]);
       state.library.startDownload.mockClear();
       state.library.startDownloadJob.mockClear();
@@ -81,7 +99,9 @@ const modelLibraryMock = vi.hoisted(() => {
       cancelDownload: vi.fn(async () => {}),
       listDownloads: vi.fn(() => state.downloads.map((job) => ({ ...job }))),
       remove: vi.fn(async () => {}),
-      importDir: vi.fn(async () => []),
+      importDir: vi.fn<
+        (dir: string, config?: ModelRuntimeConfig) => Promise<ModelRecord[]>
+      >(async () => []),
       setModelConfig: vi.fn(async () => {}),
       setBenchmark: vi.fn(async () => {}),
       setRuntimeValidation: vi.fn(async () => {}),
@@ -128,8 +148,29 @@ const engineMock = vi.hoisted(() => {
 
 const supervisorMock = vi.hoisted(() => {
   const state = {
-    ensureLoaded: vi.fn(async () => ({ baseUrl: "http://127.0.0.1:8080/v1" })),
-    validateModel: vi.fn(async () => {}),
+    ensureLoaded: vi.fn(async () => ({
+      baseUrl: "http://127.0.0.1:8080/v1",
+      runtimeConfig: { contextLength: null, gpuLayers: null },
+    })),
+    validateModel: vi.fn(
+      async (_slug: string, config?: ModelRuntimeConfig) => ({
+        baseUrl: "http://127.0.0.1:8080/v1",
+        toolsCapable: true,
+        recipe: {
+          buildTag: "test",
+          backend: "cpu" as const,
+          contextLength: config?.contextLength ?? FALLBACK_MODEL.contextLength,
+          gpuLayers: 0,
+        },
+      }),
+    ),
+    validationRecipe: vi.fn((model: ModelRecord) => ({
+      buildTag: "test",
+      backend: "cpu" as const,
+      contextLength: model.config.contextLength ?? model.trainedContextLength,
+      gpuLayers: 0,
+    })),
+    dispose: vi.fn<() => Promise<void>>(async () => {}),
     status: vi.fn(() => ({
       utility: { state: "stopped" as string, port: 8080 },
       main: { state: "stopped" as string, port: 8081 },
@@ -137,6 +178,7 @@ const supervisorMock = vi.hoisted(() => {
     reset(): void {
       state.ensureLoaded.mockClear();
       state.validateModel.mockClear();
+      state.dispose.mockReset().mockResolvedValue(undefined);
       state.status.mockReset();
       state.status.mockReturnValue({
         utility: { state: "stopped", port: 8080 },
@@ -197,12 +239,14 @@ vi.mock("./supervisor.js", () => ({
     activate: vi.fn(async () => {}),
     ensureLoaded: supervisorMock.ensureLoaded,
     validateModel: supervisorMock.validateModel,
+    validationRecipe: supervisorMock.validationRecipe,
     status: supervisorMock.status,
     ownerInfo: vi.fn(() => null),
     role: vi.fn(() => "owner"),
     apiKey: vi.fn(async () => "test-key"),
     restart: vi.fn(async () => {}),
     tailLog: vi.fn(() => []),
+    dispose: supervisorMock.dispose,
   })),
 }));
 
@@ -211,6 +255,77 @@ vi.mock("./benchmark.js", () => ({
 }));
 
 describe("local-models extension", () => {
+  it("joins an admitted benchmark body after disposal cancels its actual fetch scope", async () => {
+    const owned: Array<{ dispose(): void | Promise<void> }> = [];
+    let finish!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const { runModelBenchmark } = await import("./benchmark.js");
+    let signal: AbortSignal | undefined;
+    vi.mocked(runModelBenchmark).mockImplementationOnce(async (_slug, deps) => {
+      signal = deps.signal;
+      entered();
+      await pending;
+      return null;
+    });
+    const { activate } = await import("./index.js");
+    const local = await activate({
+      log: { info() {} },
+      emit() {},
+      subscriptions: {
+        push: (value) => {
+          owned.push(value);
+        },
+      },
+    });
+    const benchmark = local.benchmarkModel(FALLBACK_MODEL.slug);
+    await started;
+    let joined = false;
+    const closure = Promise.resolve(owned[0]!.dispose()).then(() => {
+      joined = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(signal?.aborted).toBe(true);
+    expect(joined).toBe(false);
+    finish();
+    await benchmark;
+    await closure;
+    expect(joined).toBe(true);
+  });
+
+  it("registers and joins the original supervisor disposal including its original failure", async () => {
+    const owned: Array<{ dispose(): void | Promise<void> }> = [];
+    let reject!: (error: unknown) => void;
+    const closure = new Promise<void>((_resolve, no) => {
+      reject = no;
+    });
+    supervisorMock.dispose.mockImplementation(() => closure);
+    const { activate } = await import("./index.js");
+    await activate({
+      log: { info() {} },
+      emit() {},
+      subscriptions: {
+        push: (disposable) => {
+          owned.push(disposable);
+        },
+      },
+    });
+    expect(owned).toHaveLength(1);
+    const joined = owned[0]!.dispose();
+    expect(supervisorMock.dispose).toHaveBeenCalledTimes(1);
+    expect(owned[0]!.dispose()).toBe(joined);
+    const original = new Error("Original supervisor cleanup failed");
+    const assertion = expect(joined).rejects.toBe(original);
+    reject(original);
+    await assertion;
+  });
+
   let tempRoot = "";
 
   beforeEach(() => {
@@ -541,9 +656,21 @@ describe("local-models extension", () => {
     let releaseValidation!: () => void;
     supervisorMock.validateModel.mockImplementationOnce(
       () =>
-        new Promise<void>((resolve) => {
-          releaseValidation = resolve;
-        }),
+        new Promise<Awaited<ReturnType<typeof supervisorMock.validateModel>>>(
+          (resolve) => {
+            releaseValidation = () =>
+              resolve({
+                baseUrl: "http://127.0.0.1:8080/v1",
+                toolsCapable: true,
+                recipe: {
+                  buildTag: "test",
+                  backend: "cpu",
+                  contextLength: 131072,
+                  gpuLayers: 0,
+                },
+              });
+          },
+        ),
     );
     const finalJob = { ...modelLibraryMock.downloads[0]!, receivedBytes: 100 };
     modelLibraryMock.downloads = [];
@@ -557,7 +684,45 @@ describe("local-models extension", () => {
     expect(modelLibraryMock.library.setRuntimeValidation).toHaveBeenCalledWith(
       FALLBACK_MODEL.slug,
       expect.objectContaining({ status: "ready" }),
+      pending.config,
+      true,
     );
+  });
+
+  it("admits requested runtime configuration before installation and import validation", async () => {
+    const { activate } = await import("./index.js");
+    const api = await activate({ log: { info: vi.fn() }, emit: vi.fn() });
+    const config = { contextLength: 4096, gpuLayers: 0 };
+    const installation = api.installModel(FALLBACK_MODEL.ref, config);
+    await vi.waitFor(() =>
+      expect(modelLibraryMock.library.startDownload).toHaveBeenCalledOnce(),
+    );
+    expect(modelLibraryMock.library.startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeConfig: config }),
+    );
+    const pending = {
+      ...fallbackRecord({ status: "pending", error: null, validatedAt: null }),
+      config,
+    };
+    modelLibraryMock.library.get.mockResolvedValue(pending);
+    const job = { ...modelLibraryMock.downloads[0]!, receivedBytes: 100 };
+    modelLibraryMock.resolveDownload(job);
+    await installation;
+    expect(modelLibraryMock.library.setRuntimeValidation).toHaveBeenCalledWith(
+      pending.slug,
+      expect.objectContaining({ status: "ready" }),
+      config,
+      true,
+    );
+    modelLibraryMock.library.importDir.mockResolvedValueOnce([pending]);
+    await api.importDir("/owned/imports", config);
+    expect(modelLibraryMock.library.importDir).toHaveBeenCalledWith(
+      "/owned/imports",
+      config,
+    );
+    await expect(
+      api.installModel(FALLBACK_MODEL.ref, { contextLength: 0, gpuLayers: 0 }),
+    ).rejects.toThrow("contextLength");
   });
 
   it("installs the preferred Qwen model with its pinned artifact identity", async () => {
@@ -679,12 +844,15 @@ describe("local-models extension", () => {
     expect(modelLibraryMock.library.setRuntimeValidation).toHaveBeenCalledWith(
       FALLBACK_MODEL.slug,
       expect.objectContaining({ status: "ready", error: null }),
+      pending.config,
+      true,
     );
     expect(supervisorMock.ensureLoaded).toHaveBeenCalledTimes(1);
   });
 
-  it("never validates a preconfigured fallback record during invocation", async () => {
+  it("reuses only an actually observed current fallback admission during invocation", async () => {
     const preconfigured = fallbackRecord();
+    modelLibraryMock.library.get.mockResolvedValue(preconfigured);
     modelLibraryMock.library.ensureFallback.mockResolvedValueOnce(
       preconfigured,
     );
@@ -703,6 +871,60 @@ describe("local-models extension", () => {
       modelLibraryMock.library.setRuntimeValidation,
     ).not.toHaveBeenCalled();
     expect(supervisorMock.ensureLoaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses missing current validation rather than trusting pre-validation records", async () => {
+    const missing = fallbackRecord();
+    Reflect.deleteProperty(missing, "runtimeValidation");
+    modelLibraryMock.library.get.mockResolvedValue(missing);
+    modelLibraryMock.library.ensureFallback.mockResolvedValue(missing);
+    const { activate } = await import("./index.js");
+    const api = await activate({ log: { info: vi.fn() }, emit: vi.fn() });
+    await expect(api.ensureLoaded(missing.slug)).rejects.toThrow(
+      "no current installation validation admission",
+    );
+    expect(supervisorMock.ensureLoaded).not.toHaveBeenCalled();
+    expect(supervisorMock.validateModel).not.toHaveBeenCalled();
+  });
+
+  it("reobserves ready capabilities after the actual effective engine recipe changes", async () => {
+    const record = fallbackRecord();
+    record.runtimeValidation.recipe = {
+      buildTag: "previous-engine",
+      backend: "cpu",
+      contextLength: record.trainedContextLength,
+      gpuLayers: 0,
+    };
+    modelLibraryMock.library.get.mockResolvedValue(record);
+    modelLibraryMock.library.ensureFallback.mockResolvedValue(record);
+    const { activate } = await import("./index.js");
+    const api = await activate({ log: { info: vi.fn() }, emit: vi.fn() });
+    await expect(api.ensureLoaded(record.slug)).resolves.toMatchObject({
+      baseUrl: "http://127.0.0.1:8080/v1",
+    });
+    expect(supervisorMock.validateModel).toHaveBeenCalledWith(
+      record.slug,
+      record.config,
+    );
+    expect(modelLibraryMock.library.setRuntimeValidation).toHaveBeenCalledWith(
+      record.slug,
+      expect.objectContaining({ status: "pending" }),
+      record.config,
+    );
+    expect(modelLibraryMock.library.setRuntimeValidation).toHaveBeenCalledWith(
+      record.slug,
+      expect.objectContaining({
+        status: "ready",
+        recipe: {
+          buildTag: "test",
+          backend: "cpu",
+          contextLength: record.trainedContextLength,
+          gpuLayers: 0,
+        },
+      }),
+      record.config,
+      true,
+    );
   });
 
   it("surfaces a failed fallback download as a terminal model error", async () => {
@@ -783,7 +1005,17 @@ function fallbackRecord(
     sha256: "a".repeat(64),
     importedInPlace: false,
     config: { contextLength: null, gpuLayers: null },
-    runtimeValidation,
+    runtimeValidation: runtimeValidation ?? {
+      status: "ready",
+      error: null,
+      validatedAt: 1,
+      recipe: {
+        buildTag: "test",
+        backend: "cpu",
+        contextLength: FALLBACK_MODEL.contextLength,
+        gpuLayers: 0,
+      },
+    },
     addedAt: 1,
   };
 }

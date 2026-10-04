@@ -3,8 +3,8 @@
  *
  * Runs TypeScript's language service (via @vibestudio/typecheck) directly
  * against the disk. Workspace packages resolve through the workspace context
- * map; exact external declarations are installed into the owned dependency
- * cache with the host's explicitly supplied application root.
+ * map; external declarations come from the exact dependency resources admitted
+ * by the host to this native workspace.
  *
  * Internal method keys:
  *   - typecheck.check          — diagnostics for a file or whole project
@@ -16,24 +16,19 @@
  */
 
 import * as fs from "fs/promises";
-import * as fsSync from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
+import { assetModuleDeclarations } from "@vibestudio/shared/assetModules";
 import {
   TypeCheckService,
   createTypeDefinitionLoader,
   createDiskFileSource,
   getBrowserTypeDefinitions,
-  getDefaultNodeModulesPaths,
   loadSourceFiles,
   type BrowserTypeDefinitions,
   type LoadedTypeDefinitions,
   type TypeCheckDiagnostic,
-  discoverWorkspaceContext,
   type WorkspaceContext,
 } from "@vibestudio/typecheck";
-import { getUserDataPath } from "@vibestudio/env-paths";
-import { runNpmInstall } from "@vibestudio/shared/npmInstaller";
 
 /**
  * Per-panel native project cache. Map insertion order is the LRU order, so a
@@ -41,10 +36,15 @@ import { runNpmInstall } from "@vibestudio/shared/npmInstaller";
  */
 const MAX_TYPECHECK_PROJECTS = 8;
 const typeCheckServiceCache = new Map<string, TypeCheckService>();
-const nodeModulesPathCache = new Map<string, string[]>();
 
 export interface TypeCheckRpcOptions {
   workspaceContext?: WorkspaceContext | null;
+  /** Read-only dependency resources supplied by the native workspace owner. */
+  nodeModulesPaths?: string[];
+  /** Exact source revision; prevents project reuse across changed declarations. */
+  stateHash?: string;
+  dependencyKey?: string | null;
+  moduleConditions?: string[];
 }
 
 export interface BrowserPackageTypeDefinitionFile {
@@ -69,166 +69,13 @@ export interface BrowserTypeDefinitionsResponse extends BrowserTypeDefinitions {
   packageTypeDefinitionFiles: BrowserPackageTypeDefinitionFile[];
 }
 
-interface PackageJson {
-  name?: string;
-  dependencies?: Record<string, string>;
-  peerDependencies?: Record<string, string>;
-}
-
-function readPackageJson(packageDir: string): PackageJson | null {
-  try {
-    return JSON.parse(
-      fsSync.readFileSync(path.join(packageDir, "package.json"), "utf-8")
-    ) as PackageJson;
-  } catch {
-    return null;
-  }
-}
-
-function hashDeps(deps: Record<string, string>): string {
-  const entries = Object.entries(deps).sort(([a], [b]) => a.localeCompare(b));
-  const hash = crypto.createHash("sha256");
-  hash.update(JSON.stringify(entries));
-  return hash.digest("hex").slice(0, 16);
-}
-
-function compareVersions(a: string, b: string): number {
-  if (a === "*" || a === "workspace:*") return -1;
-  if (b === "*" || b === "workspace:*") return 1;
-
-  const parseVersion = (v: string): number[] => {
-    const cleaned = v.replace(/^[\^~>=<]+/, "");
-    return cleaned.split(".").map((n) => parseInt(n, 10) || 0);
-  };
-
-  const aParts = parseVersion(a);
-  const bParts = parseVersion(b);
-  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-    const diff = (aParts[i] ?? 0) - (bParts[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-async function ensureExternalDeps(deps: Record<string, string>): Promise<string> {
-  if (Object.keys(deps).length === 0) return "";
-
-  const key = hashDeps(deps);
-  const cacheDir = path.join(getUserDataPath(), "external-deps", key);
-  const sentinelPath = path.join(cacheDir, ".ready");
-  const nodeModulesDir = path.join(cacheDir, "node_modules");
-
-  if (fsSync.existsSync(sentinelPath)) return nodeModulesDir;
-
-  const tmpDir = `${cacheDir}.tmp.${Date.now()}.${process.pid}`;
-  fsSync.mkdirSync(tmpDir, { recursive: true });
-  fsSync.writeFileSync(
-    path.join(tmpDir, "package.json"),
-    JSON.stringify(
-      {
-        name: "external-deps-install",
-        version: "0.0.0",
-        private: true,
-        dependencies: deps,
-      },
-      null,
-      2
-    )
-  );
-
-  try {
-    const appRoot = process.env["VIBESTUDIO_APP_ROOT"]?.trim();
-    if (!appRoot) {
-      throw new Error("Typecheck dependency installation requires VIBESTUDIO_APP_ROOT");
-    }
-    await runNpmInstall(tmpDir, { appRoot });
-    fsSync.writeFileSync(path.join(tmpDir, ".ready"), new Date().toISOString());
-    try {
-      fsSync.renameSync(tmpDir, cacheDir);
-    } catch (err: any) {
-      if (err.code === "ENOTEMPTY" || err.code === "EEXIST" || err.code === "ENOTDIR") {
-        if (fsSync.existsSync(sentinelPath)) {
-          try {
-            fsSync.rmSync(tmpDir, { recursive: true, force: true });
-          } catch (cleanupError) {
-            console.warn("[typecheck-service] Failed to remove a redundant install:", cleanupError);
-          }
-          return nodeModulesDir;
-        }
-        fsSync.rmSync(cacheDir, { recursive: true, force: true });
-        fsSync.renameSync(tmpDir, cacheDir);
-      } else {
-        throw err;
-      }
-    }
-    return nodeModulesDir;
-  } catch (error) {
-    try {
-      fsSync.rmSync(tmpDir, { recursive: true, force: true });
-    } catch (cleanupError) {
-      console.warn("[typecheck-service] Failed to clean up an incomplete install:", cleanupError);
-    }
-    throw new Error(
-      `Failed to install external dependencies for typecheck: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
-
 function typecheckCacheKey(panelPath: string, options?: TypeCheckRpcOptions): string {
   const resolved = path.resolve(panelPath);
   const workspaceKey =
     options && "workspaceContext" in options
       ? (options.workspaceContext?.monorepoRoot ?? "none")
       : "auto";
-  return `${resolved}\0${workspaceKey}`;
-}
-
-async function resolveTypecheckNodeModulesPaths(
-  panelPath: string,
-  options?: TypeCheckRpcOptions
-): Promise<string[]> {
-  const resolved = path.resolve(panelPath);
-  const key = typecheckCacheKey(resolved, options);
-  const cached = nodeModulesPathCache.get(key);
-  if (cached) return cached;
-
-  const workspaceContext =
-    options && "workspaceContext" in options
-      ? options.workspaceContext
-      : discoverWorkspaceContext(resolved);
-  const externals: Record<string, string> = {};
-  const visited = new Set<string>();
-
-  const walk = (dir: string) => {
-    const realDir = path.resolve(dir);
-    if (visited.has(realDir)) return;
-    visited.add(realDir);
-
-    const pkg = readPackageJson(realDir);
-    if (!pkg) return;
-
-    const allDeps = { ...pkg.peerDependencies, ...pkg.dependencies };
-    for (const [name, version] of Object.entries(allDeps)) {
-      const workspaceDepDir = workspaceContext?.packages.get(name)?.dir;
-      if (workspaceDepDir) {
-        walk(workspaceDepDir);
-        continue;
-      }
-      if (version.startsWith("workspace:")) continue;
-      if (!externals[name] || compareVersions(version, externals[name]!) > 0) {
-        externals[name] = version;
-      }
-    }
-  };
-
-  walk(resolved);
-
-  const paths: string[] = [];
-  const externalNodeModules = await ensureExternalDeps(externals);
-  if (externalNodeModules) paths.push(externalNodeModules);
-
-  nodeModulesPathCache.set(key, paths);
-  return paths;
+  return `${resolved}\0${workspaceKey}\0${options?.stateHash ?? "standalone"}\0${options?.dependencyKey ?? "standalone"}\0${JSON.stringify(options?.nodeModulesPaths ?? [])}`;
 }
 
 /**
@@ -248,10 +95,16 @@ async function getOrCreateTypeCheckService(
     return cached;
   }
 
-  const nodeModulesPaths = await resolveTypecheckNodeModulesPaths(resolved, options);
+  const nodeModulesPaths = options?.nodeModulesPaths ?? [];
+  const sharedTypesDir = path.join(options?.workspaceContext?.monorepoRoot ?? resolved, "types");
+  const assetDeclarationsPath = path.join(sharedTypesDir, "__vibestudio_asset_modules__.d.ts");
   const service = new TypeCheckService({
     panelPath: resolved,
     nodeModulesPaths,
+    requiredRootFiles: [assetDeclarationsPath],
+    ...(options?.moduleConditions
+      ? { compilerOptions: { customConditions: options.moduleConditions } }
+      : {}),
     ...(options && "workspaceContext" in options
       ? { workspaceContext: options.workspaceContext }
       : {}),
@@ -263,6 +116,22 @@ async function getOrCreateTypeCheckService(
   const files = await loadSourceFiles(fileSource, ".");
   for (const [relPath, content] of files) {
     service.updateFile(path.resolve(resolved, relPath), content);
+  }
+
+  // Use the same asset declarations as exact-state build reports. These are
+  // compiler overlays, so checking a unit never writes generated workspace files.
+  service.updateFile(assetDeclarationsPath, assetModuleDeclarations());
+  if (options?.workspaceContext) {
+    try {
+      const sharedTypes = await loadSourceFiles(createDiskFileSource(sharedTypesDir), ".");
+      for (const [relPath, content] of sharedTypes) {
+        if (relPath.endsWith(".d.ts")) {
+          service.updateFile(path.resolve(sharedTypesDir, relPath), content);
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
 
   typeCheckServiceCache.set(key, service);
@@ -376,15 +245,11 @@ function serializeLoadedPackageTypeDefinitions(
 }
 
 async function loadBrowserPackageTypeDefinitions(
-  panelPath: string,
+  _panelPath: string,
   packageNames: readonly string[],
   options?: TypeCheckRpcOptions
 ): Promise<SerializedPackageTypeDefinitions[]> {
-  const resolved = path.resolve(panelPath);
-  const nodeModulesPaths = [
-    ...(await resolveTypecheckNodeModulesPaths(resolved, options)),
-    ...getDefaultNodeModulesPaths(resolved),
-  ];
+  const nodeModulesPaths = options?.nodeModulesPaths ?? [];
   const loader = createTypeDefinitionLoader({
     nodeModulesPaths: [...new Set(nodeModulesPaths)],
   });
@@ -406,7 +271,10 @@ export const typeCheckRpcMethods = {
     filePath?: string,
     fileContent?: string,
     options?: TypeCheckRpcOptions
-  ): Promise<{ diagnostics: SerializedDiagnostic[]; checkedFiles: string[] }> => {
+  ): Promise<{
+    diagnostics: SerializedDiagnostic[];
+    checkedFiles: string[];
+  }> => {
     const service = await getOrCreateTypeCheckService(panelPath, options);
     const resolved = path.resolve(panelPath);
 
@@ -546,7 +414,6 @@ export const typeCheckRpcMethods = {
 export function clearTypeCheckCache(): void {
   for (const service of typeCheckServiceCache.values()) service.dispose();
   typeCheckServiceCache.clear();
-  nodeModulesPathCache.clear();
 }
 
 export function getTypeCheckCacheStats(): {

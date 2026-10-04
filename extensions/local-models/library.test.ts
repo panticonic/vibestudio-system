@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { modelRecordStore } from "./model-record-store.js";
 import * as fsp from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -8,7 +12,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HardwareProfile } from "@workspace/model-catalog/localModels";
 import { detectToolsCapable, parseGgufHeader } from "./gguf.js";
-import { createModelLibrary, estimateFit, type ModelLibraryDeps } from "./library.js";
+import {
+  createModelLibrary,
+  estimateFit,
+  type ModelLibraryDeps,
+} from "./library.js";
 import { FALLBACK_MODEL } from "./constants.js";
 
 const GGUF_TYPE = {
@@ -46,7 +54,9 @@ const rangeServers: RangeServer[] = [];
 afterEach(async () => {
   await Promise.all(rangeServers.splice(0).map((server) => server.close()));
   await Promise.all(
-    tempRoots.splice(0).map((root) => fsp.rm(root, { recursive: true, force: true }))
+    tempRoots
+      .splice(0)
+      .map((root) => fsp.rm(root, { recursive: true, force: true })),
   );
 });
 
@@ -71,8 +81,14 @@ describe("GGUF parser", () => {
       ["test.u64", { kind: "uint64", value: 9000n }],
       ["test.i64", { kind: "int64", value: -9000n }],
       ["test.f64", { kind: "float64", value: 2.5 }],
-      ["test.array.u32", { kind: "array", elementKind: "uint32", values: [1, 2, 3] }],
-      ["test.array.string", { kind: "array", elementKind: "string", values: ["a", "b"] }],
+      [
+        "test.array.u32",
+        { kind: "array", elementKind: "uint32", values: [1, 2, 3] },
+      ],
+      [
+        "test.array.string",
+        { kind: "array", elementKind: "string", values: ["a", "b"] },
+      ],
     ]);
 
     expect(parseGgufHeader(gguf)).toEqual({
@@ -87,7 +103,9 @@ describe("GGUF parser", () => {
   it("detects tool-capable chat templates", () => {
     expect(detectToolsCapable(null)).toBe(false);
     expect(detectToolsCapable("{{ messages }}")).toBe(false);
-    expect(detectToolsCapable("{% if tools %}{{ tools }}{% endif %}")).toBe(true);
+    expect(detectToolsCapable("{% if tools %}{{ tools }}{% endif %}")).toBe(
+      true,
+    );
     expect(detectToolsCapable("{{ message.tool_calls }}")).toBe(true);
     expect(detectToolsCapable("<|tool_call_start|>{}")).toBe(true);
   });
@@ -130,6 +148,278 @@ describe("estimateFit", () => {
 });
 
 describe("ModelLibrary", () => {
+  it("persists download and import runtime configuration before validation and fences stale completion", async () => {
+    const root = await tempRoot();
+    const body = modelBytes("configured", 4096);
+    const server = await startRangeServer({ "Configured-Q4_K_M.gguf": body });
+    const { library } = createTestLibrary(root, server);
+    const config = { contextLength: 2048, gpuLayers: 0 };
+    const job = await library.startDownload({
+      hfRepo: "Acme/Configured-GGUF",
+      file: "Configured-Q4_K_M.gguf",
+      runtimeConfig: config,
+    });
+    expect(await library.get(job.slug)).toMatchObject({
+      config,
+      runtimeValidation: { status: "pending" },
+    });
+    await library.setRuntimeValidation(
+      job.slug,
+      {
+        status: "ready",
+        error: null,
+        validatedAt: 1,
+        recipe: {
+          buildTag: "test",
+          backend: "cpu",
+          contextLength: 2048,
+          gpuLayers: 0,
+        },
+      },
+      config,
+      true,
+    );
+    await library.setBenchmark(job.slug, { tokensPerSec: 3, measuredAt: 1 });
+    const revised = { contextLength: 1024, gpuLayers: 0 };
+    await library.setModelConfig(job.slug, revised);
+    expect(
+      await library.setRuntimeValidation(
+        job.slug,
+        {
+          status: "ready",
+          error: null,
+          validatedAt: 2,
+          recipe: {
+            buildTag: "test",
+            backend: "cpu",
+            contextLength: 2048,
+            gpuLayers: 0,
+          },
+        },
+        config,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      await library.setBenchmark(
+        job.slug,
+        { tokensPerSec: 999, measuredAt: 2 },
+        config,
+      ),
+    ).toBe(false);
+    expect(await library.get(job.slug)).toMatchObject({
+      config: revised,
+      toolsCapable: false,
+      benchmark: null,
+      runtimeValidation: { status: "pending" },
+    });
+    const importRoot = path.join(root, "imports");
+    await fsp.mkdir(importRoot);
+    await fsp.writeFile(path.join(importRoot, "Import-Q4_K_M.gguf"), body);
+    const imported = await library.importDir(importRoot, config);
+    expect(imported[0]).toMatchObject({
+      config,
+      runtimeValidation: { status: "pending" },
+    });
+    const configuredAgain = await library.importDir(importRoot, revised);
+    expect(configuredAgain).toHaveLength(1);
+    expect(configuredAgain[0]).toMatchObject({
+      slug: imported[0]!.slug,
+      config: revised,
+    });
+    expect(await library.list()).toHaveLength(2);
+    const reopened = createTestLibrary(root).library;
+    expect(await reopened.get(job.slug)).toMatchObject({
+      config: revised,
+      runtimeValidation: { status: "pending" },
+    });
+  });
+
+  it("shares current metadata across libraries and processes without losing independent updates", async () => {
+    const root = await tempRoot();
+    const imports = path.join(root, "imports");
+    await fsp.mkdir(imports);
+    await fsp.writeFile(
+      path.join(imports, "First-Q4_K_M.gguf"),
+      modelBytes("first", 4096),
+    );
+    await fsp.writeFile(
+      path.join(imports, "Second-Q4_K_M.gguf"),
+      modelBytes("second", 4096),
+    );
+    const owner = createTestLibrary(root).library;
+    const attached = createTestLibrary(root).library;
+    expect(await owner.list()).toEqual([]);
+    const admitted = await attached.importDir(imports);
+    expect(await owner.list()).toHaveLength(2);
+    const first = admitted[0]!;
+    const second = admitted[1]!;
+    await Promise.all([
+      owner.setModelConfig(first.slug, { contextLength: 2048, gpuLayers: 0 }),
+      attached.setModelConfig(second.slug, {
+        contextLength: 1024,
+        gpuLayers: 3,
+      }),
+    ]);
+    expect(await attached.get(first.slug)).toMatchObject({
+      config: { contextLength: 2048, gpuLayers: 0 },
+    });
+    expect(await owner.get(second.slug)).toMatchObject({
+      config: { contextLength: 1024, gpuLayers: 3 },
+    });
+    const moduleUrl = new URL("./model-record-store.ts", import.meta.url).href;
+    const script = `import { modelRecordStore } from ${JSON.stringify(moduleUrl)}; modelRecordStore(${JSON.stringify(path.join(root, "models", "records.sqlite"))}).update(${JSON.stringify(first.slug)}, record => ({ ...record, config: { contextLength: 512, gpuLayers: 0 } }));`;
+    await promisify(execFile)(
+      process.execPath,
+      ["--experimental-strip-types", "--input-type=module", "-e", script],
+      { cwd: process.cwd() },
+    );
+    expect(await owner.get(first.slug)).toMatchObject({
+      config: { contextLength: 512, gpuLayers: 0 },
+    });
+    expect(await attached.get(second.slug)).toMatchObject({
+      config: { contextLength: 1024, gpuLayers: 3 },
+    });
+    const store = modelRecordStore(path.join(root, "models", "records.sqlite"));
+    const original = new Error("original metadata mutation failure");
+    expect(() =>
+      store.update(first.slug, () => {
+        throw original;
+      }),
+    ).toThrow(original);
+    expect(await owner.get(first.slug)).toMatchObject({
+      config: { contextLength: 512, gpuLayers: 0 },
+    });
+    expect(await fsp.readdir(path.join(root, "models"))).not.toContain(
+      "records.json",
+    );
+  });
+
+  it("preserves the original SQL failure when connection close also fails", async () => {
+    const root = await tempRoot();
+    const imports = path.join(root, "imports");
+    await fsp.mkdir(imports);
+    await fsp.writeFile(
+      path.join(imports, "Original-Q4_K_M.gguf"),
+      modelBytes("original", 4096),
+    );
+    const [record] = await createTestLibrary(root).library.importDir(imports);
+    if (!record) throw new Error("Expected actual imported model");
+    const store = modelRecordStore(path.join(root, "models", "records.sqlite"));
+    const cleanup = new Error("original connection close failure");
+    const close = DatabaseSync.prototype.close;
+    const spy = vi
+      .spyOn(DatabaseSync.prototype, "close")
+      .mockImplementationOnce(function (this: DatabaseSync) {
+        close.call(this);
+        throw cleanup;
+      });
+    let failure: unknown;
+    try {
+      store.put([{ ...record, slug: "conflicting-file" }]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      spy.mockRestore();
+    }
+    expect(failure).toBeInstanceOf(AggregateError);
+    if (!(failure instanceof AggregateError))
+      throw new Error("Expected retained SQL and close failures");
+    expect(failure.errors).toHaveLength(2);
+    expect(failure.errors[0]).toBeInstanceOf(Error);
+    expect(failure.errors[0].message).toContain("UNIQUE constraint failed");
+    expect(failure.errors[1]).toBe(cleanup);
+    expect(failure.cause).toBe(failure.errors[0]);
+    expect(store.list()).toEqual([record]);
+  });
+
+  it("publishes only actual observed tools capability with its current captured runtime admission", async () => {
+    const root = await tempRoot();
+    const imports = path.join(root, "imports");
+    await fsp.mkdir(imports);
+    await fsp.writeFile(
+      path.join(imports, "Hint-Q4_K_M.gguf"),
+      modelBytes("hint", 4096),
+    );
+    const { library } = createTestLibrary(root);
+    const config = { contextLength: 2048, gpuLayers: 0 };
+    const [record] = await library.importDir(imports, config);
+    if (!record) throw new Error("Expected actual admission");
+    expect(record.toolsCapable).toBe(false);
+    const recipe = {
+      buildTag: "test",
+      backend: "cpu" as const,
+      contextLength: 2048,
+      gpuLayers: 0,
+    };
+    await library.setRuntimeValidation(
+      record.slug,
+      { status: "ready", error: null, validatedAt: 1, recipe },
+      config,
+      false,
+    );
+    expect(await library.get(record.slug)).toMatchObject({
+      toolsCapable: false,
+      runtimeValidation: { status: "ready", recipe },
+    });
+    await library.setRuntimeValidation(
+      record.slug,
+      { status: "ready", error: null, validatedAt: 2, recipe },
+      config,
+      true,
+    );
+    expect((await library.get(record.slug))?.toolsCapable).toBe(true);
+    await library.setModelConfig(record.slug, {
+      contextLength: 4096,
+      gpuLayers: 0,
+    });
+    expect(
+      await library.setRuntimeValidation(
+        record.slug,
+        { status: "ready", error: null, validatedAt: 3, recipe },
+        config,
+        true,
+      ),
+    ).toBe(false);
+    expect(await library.get(record.slug)).toMatchObject({
+      toolsCapable: false,
+      runtimeValidation: { status: "pending" },
+    });
+    await expect(
+      library.setRuntimeValidation(
+        record.slug,
+        { status: "ready", error: null, validatedAt: 4 },
+        { contextLength: 4096, gpuLayers: 0 },
+      ),
+    ).rejects.toThrow("observed runtime recipe");
+  });
+
+  it("refuses conflicting runtime configuration on a shared model download", async () => {
+    const root = await tempRoot();
+    const body = modelBytes("shared", 32768);
+    const server = await startRangeServer(
+      { "Shared-Q4_K_M.gguf": body },
+      { chunkSize: 1024, chunkDelayMs: 5 },
+    );
+    const { library } = createTestLibrary(root, server);
+    const request = {
+      hfRepo: "Acme/Shared-GGUF",
+      file: "Shared-Q4_K_M.gguf",
+      runtimeConfig: { contextLength: 2048, gpuLayers: 0 },
+    };
+    await library.startDownloadJob(request);
+    await expect(
+      library.startDownload({
+        ...request,
+        runtimeConfig: { contextLength: 4096, gpuLayers: 0 },
+      }),
+    ).rejects.toThrow("different runtime configuration");
+    const job = await library.startDownload(request);
+    expect(await library.get(job.slug)).toMatchObject({
+      config: request.runtimeConfig,
+    });
+  });
+
   it("downloads a GGUF from an HF resolve URL and records trusted checksum metadata", async () => {
     const root = await tempRoot();
     const body = modelBytes("tiny", 64 * 1024);
@@ -163,7 +453,7 @@ describe("ModelLibrary", () => {
       paramCount: "1.2B",
       arch: "llama",
       trainedContextLength: 8192,
-      toolsCapable: true,
+      toolsCapable: false,
       sha256: sha256Hex(body),
       importedInPlace: false,
       config: { contextLength: null, gpuLayers: null },
@@ -175,7 +465,7 @@ describe("ModelLibrary", () => {
     const body = modelBytes("nonblocking", 1024 * 1024);
     const server = await startRangeServer(
       { "Async-Q4_K_M.gguf": body },
-      { chunkSize: 16 * 1024, chunkDelayMs: 5 }
+      { chunkSize: 16 * 1024, chunkDelayMs: 5 },
     );
     const { library } = createTestLibrary(root, server);
     const request = {
@@ -193,7 +483,10 @@ describe("ModelLibrary", () => {
       phase: "active",
       error: null,
     });
-    expect(library.listDownloads()[0]).toMatchObject({ id: job.id, slug: job.slug });
+    expect(library.listDownloads()[0]).toMatchObject({
+      id: job.id,
+      slug: job.slug,
+    });
 
     await expect(library.startDownload(request)).resolves.toMatchObject({
       id: job.id,
@@ -208,7 +501,7 @@ describe("ModelLibrary", () => {
     const body = modelBytes("resume", 1024 * 1024);
     const server = await startRangeServer(
       { "Resume-Q4_K_M.gguf": body },
-      { chunkSize: 16 * 1024, chunkDelayMs: 5 }
+      { chunkSize: 16 * 1024, chunkDelayMs: 5 },
     );
     const { library } = createTestLibrary(root, server);
 
@@ -226,7 +519,13 @@ describe("ModelLibrary", () => {
     await library.pauseDownload(active.id);
     await waitUntil(() => library.listDownloads()[0]?.phase === "paused");
 
-    const partPath = path.join(root, "models", "Acme", "Resume-GGUF", "Resume-Q4_K_M.gguf.part");
+    const partPath = path.join(
+      root,
+      "models",
+      "Acme",
+      "Resume-GGUF",
+      "Resume-Q4_K_M.gguf.part",
+    );
     const partialSize = (await fsp.stat(partPath)).size;
     expect(partialSize).toBeGreaterThan(0);
     expect(partialSize).toBeLessThan(body.byteLength);
@@ -237,7 +536,9 @@ describe("ModelLibrary", () => {
       receivedBytes: body.byteLength,
       error: null,
     });
-    expect(server.ranges.some((range) => /^bytes=\d+-$/.test(range))).toBe(true);
+    expect(server.ranges.some((range) => /^bytes=\d+-$/.test(range))).toBe(
+      true,
+    );
     expect(await pathExists(partPath)).toBe(false);
   });
 
@@ -252,10 +553,16 @@ describe("ModelLibrary", () => {
         hfRepo: "Acme/Bad-GGUF",
         file: "Bad-Q4_K_M.gguf",
         expectedSha256: "0".repeat(64),
-      })
+      }),
     ).rejects.toThrow(/Checksum mismatch/);
 
-    const partPath = path.join(root, "models", "Acme", "Bad-GGUF", "Bad-Q4_K_M.gguf.part");
+    const partPath = path.join(
+      root,
+      "models",
+      "Acme",
+      "Bad-GGUF",
+      "Bad-Q4_K_M.gguf.part",
+    );
     expect(await pathExists(partPath)).toBe(false);
     expect(await library.list()).toEqual([]);
     expect(library.listDownloads()).toEqual([
@@ -266,7 +573,9 @@ describe("ModelLibrary", () => {
     ]);
     expect(events.at(-1)).toEqual({
       kind: "download.progress",
-      job: expect.objectContaining({ error: expect.stringMatching(/Checksum mismatch/) }),
+      job: expect.objectContaining({
+        error: expect.stringMatching(/Checksum mismatch/),
+      }),
     });
 
     await expect(
@@ -274,7 +583,7 @@ describe("ModelLibrary", () => {
         hfRepo: "Acme/Bad-GGUF",
         file: "Bad-Q4_K_M.gguf",
         expectedSha256: sha256Hex(body),
-      })
+      }),
     ).resolves.toMatchObject({
       slug: "bad-q4-k-m",
       error: null,
@@ -287,7 +596,7 @@ describe("ModelLibrary", () => {
     const { library } = createTestLibrary(root);
 
     await expect(library.remove(FALLBACK_MODEL.slug)).rejects.toThrow(
-      /Refusing to remove fallback model/
+      /Refusing to remove fallback model/,
     );
   });
 
@@ -296,34 +605,30 @@ describe("ModelLibrary", () => {
     const body = modelBytes("current fallback", 64 * 1024);
     const server = await startRangeServer({ [FALLBACK_MODEL.file]: body });
     await fsp.mkdir(path.join(root, "models"), { recursive: true });
-    await fsp.writeFile(
-      path.join(root, "models", "records.json"),
-      `${JSON.stringify([
-        {
-          slug: FALLBACK_MODEL.slug,
-          displayName: FALLBACK_MODEL.displayName,
-          hfRepo: "LiquidAI/LFM2.5-1.2B-GGUF",
-          file: path.join(root, "models", "LiquidAI", "LFM2.5-1.2B-Q4_K_M.gguf"),
-          sizeBytes: 1,
-          quant: "Q4_K_M",
-          paramCount: "1.2B",
-          arch: "lfm2",
-          trainedContextLength: 32_768,
-          toolsCapable: true,
-          sha256: "a".repeat(64),
-          importedInPlace: false,
-          config: { contextLength: null, gpuLayers: null },
-          benchmark: null,
-          runtimeValidation: {
-            status: "ready",
-            error: null,
-            validatedAt: 1,
-          },
-          addedAt: 1,
+    modelRecordStore(path.join(root, "models", "records.sqlite")).put([
+      {
+        slug: FALLBACK_MODEL.slug,
+        displayName: FALLBACK_MODEL.displayName,
+        hfRepo: "LiquidAI/LFM2.5-1.2B-GGUF",
+        file: path.join(root, "models", "LiquidAI", "LFM2.5-1.2B-Q4_K_M.gguf"),
+        sizeBytes: 1,
+        quant: "Q4_K_M",
+        paramCount: "1.2B",
+        arch: "lfm2",
+        trainedContextLength: 32_768,
+        toolsCapable: true,
+        sha256: "a".repeat(64),
+        importedInPlace: false,
+        config: { contextLength: null, gpuLayers: null },
+        benchmark: null,
+        runtimeValidation: {
+          status: "ready",
+          error: null,
+          validatedAt: 1,
         },
-      ])}\n`,
-      "utf8"
-    );
+        addedAt: 1,
+      },
+    ]);
     const { library } = createTestLibrary(root, server, sha256Hex(body));
 
     await expect(library.ensureFallback()).resolves.toMatchObject({
@@ -360,7 +665,7 @@ describe("ModelLibrary", () => {
       importedInPlace: true,
       quant: "Q4_K_M",
       arch: "llama",
-      toolsCapable: true,
+      toolsCapable: false,
     });
     expect(events.some((event) => event.kind === "models.changed")).toBe(true);
     await expect(library.importDir(importRoot)).resolves.toEqual([]);
@@ -372,14 +677,20 @@ describe("ModelLibrary", () => {
     const importRoot = path.join(root, "imports");
     await fsp.mkdir(importRoot, { recursive: true });
     const file = path.join(importRoot, "Large-Vocabulary-Q4_K_M.gguf");
-    const largeTokenizerMetadata = Array.from({ length: 9 }, () => "x".repeat(1024 * 1024));
+    const largeTokenizerMetadata = Array.from({ length: 9 }, () =>
+      "x".repeat(1024 * 1024),
+    );
     await fsp.writeFile(
       file,
       buildGguf([
         ["general.architecture", { kind: "string", value: "qwen35" }],
         [
           "tokenizer.ggml.tokens",
-          { kind: "array", elementKind: "string", values: largeTokenizerMetadata },
+          {
+            kind: "array",
+            elementKind: "string",
+            values: largeTokenizerMetadata,
+          },
         ],
         ["general.size_label", { kind: "string", value: "2B" }],
         ["qwen35.context_length", { kind: "uint32", value: 262_144 }],
@@ -387,11 +698,12 @@ describe("ModelLibrary", () => {
           "tokenizer.chat_template",
           {
             kind: "string",
-            value: "{% if enable_thinking %}<think>{% endif %}{{ tools }}{{ tool_calls }}",
+            value:
+              "{% if enable_thinking %}<think>{% endif %}{{ tools }}{{ tool_calls }}",
           },
         ],
         ["general.file_type", { kind: "uint32", value: 15 }],
-      ])
+      ]),
     );
     const { library } = createTestLibrary(root);
 
@@ -400,7 +712,7 @@ describe("ModelLibrary", () => {
         file,
         arch: "qwen35",
         trainedContextLength: 262_144,
-        toolsCapable: true,
+        toolsCapable: false,
         reasoningCapable: true,
       }),
     ]);
@@ -410,11 +722,17 @@ describe("ModelLibrary", () => {
     const root = await tempRoot();
     const importRoot = path.join(root, "imports");
     await fsp.mkdir(importRoot, { recursive: true });
-    await fsp.writeFile(path.join(importRoot, "Bench-Q4_K_M.gguf"), modelBytes("bench", 4096));
+    await fsp.writeFile(
+      path.join(importRoot, "Bench-Q4_K_M.gguf"),
+      modelBytes("bench", 4096),
+    );
     const { library, events } = createTestLibrary(root);
 
     await library.importDir(importRoot);
-    await library.setBenchmark("bench-q4-k-m", { tokensPerSec: 42.5, measuredAt: 1234 });
+    await library.setBenchmark("bench-q4-k-m", {
+      tokensPerSec: 42.5,
+      measuredAt: 1234,
+    });
 
     await expect(library.get("bench-q4-k-m")).resolves.toMatchObject({
       benchmark: { tokensPerSec: 42.5, measuredAt: 1234 },
@@ -423,7 +741,9 @@ describe("ModelLibrary", () => {
     await expect(reloaded.get("bench-q4-k-m")).resolves.toMatchObject({
       benchmark: { tokensPerSec: 42.5, measuredAt: 1234 },
     });
-    expect(events.filter((event) => event.kind === "models.changed")).toHaveLength(2);
+    expect(
+      events.filter((event) => event.kind === "models.changed"),
+    ).toHaveLength(2);
   });
 });
 
@@ -453,7 +773,11 @@ function writeValue(chunks: Uint8Array[], value: EncodedValue): void {
   writeScalar(chunks, value.kind, value.value);
 }
 
-function writeScalar(chunks: Uint8Array[], kind: ScalarKind, value: ScalarValue): void {
+function writeScalar(
+  chunks: Uint8Array[],
+  kind: ScalarKind,
+  value: ScalarValue,
+): void {
   switch (kind) {
     case "uint8":
       pushUInt(chunks, value, 1);
@@ -502,7 +826,10 @@ function modelBytes(label: string, paddingBytes: number): Uint8Array {
       ["llama.context_length", { kind: "uint32", value: 8192 }],
       [
         "tokenizer.chat_template",
-        { kind: "string", value: `{{ tools }} {{ message.tool_calls }} ${label}` },
+        {
+          kind: "string",
+          value: `{{ tools }} {{ message.tool_calls }} ${label}`,
+        },
       ],
       ["general.file_type", { kind: "uint32", value: 15 }],
     ]),
@@ -536,7 +863,11 @@ function pushInt64(chunks: Uint8Array[], value: bigint): void {
   chunks.push(buffer);
 }
 
-function pushUInt(chunks: Uint8Array[], value: ScalarValue, bytes: 1 | 2 | 4): void {
+function pushUInt(
+  chunks: Uint8Array[],
+  value: ScalarValue,
+  bytes: 1 | 2 | 4,
+): void {
   const buffer = Buffer.alloc(bytes);
   if (bytes === 1) {
     buffer.writeUInt8(Number(value));
@@ -548,7 +879,11 @@ function pushUInt(chunks: Uint8Array[], value: ScalarValue, bytes: 1 | 2 | 4): v
   chunks.push(buffer);
 }
 
-function pushInt(chunks: Uint8Array[], value: ScalarValue, bytes: 1 | 2 | 4): void {
+function pushInt(
+  chunks: Uint8Array[],
+  value: ScalarValue,
+  bytes: 1 | 2 | 4,
+): void {
   const buffer = Buffer.alloc(bytes);
   if (bytes === 1) {
     buffer.writeInt8(Number(value));
@@ -560,7 +895,11 @@ function pushInt(chunks: Uint8Array[], value: ScalarValue, bytes: 1 | 2 | 4): vo
   chunks.push(buffer);
 }
 
-function pushFloat(chunks: Uint8Array[], value: ScalarValue, bytes: 4 | 8): void {
+function pushFloat(
+  chunks: Uint8Array[],
+  value: ScalarValue,
+  bytes: 4 | 8,
+): void {
   const buffer = Buffer.alloc(bytes);
   if (bytes === 4) {
     buffer.writeFloatLE(Number(value));
@@ -601,7 +940,10 @@ function hardwareProfile(input: {
   };
 }
 
-function modelSizeMB(sizeMB: number): { sizeBytes: number; trainedContextLength: number } {
+function modelSizeMB(sizeMB: number): {
+  sizeBytes: number;
+  trainedContextLength: number;
+} {
   return {
     sizeBytes: sizeMB * 1024 * 1024,
     trainedContextLength: 65536,
@@ -617,7 +959,7 @@ async function tempRoot(): Promise<string> {
 function createTestLibrary(
   root: string,
   server?: RangeServer,
-  fallbackSha256: string = FALLBACK_MODEL.sha256
+  fallbackSha256: string = FALLBACK_MODEL.sha256,
 ): {
   library: ReturnType<typeof createModelLibrary>;
   events: Array<Parameters<ModelLibraryDeps["emit"]>[0]>;
@@ -639,7 +981,10 @@ function createTestLibrary(
 }
 
 function fetchThrough(baseUrl: string): typeof fetch {
-  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  return ((
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
     const source = new URL(fetchInputUrl(input));
     const target = new URL(`${source.pathname}${source.search}`, baseUrl);
     return fetch(target, init);
@@ -658,17 +1003,19 @@ function fetchInputUrl(input: Parameters<typeof fetch>[0]): string {
 
 async function startRangeServer(
   files: Record<string, Uint8Array>,
-  options: { chunkSize?: number; chunkDelayMs?: number } = {}
+  options: { chunkSize?: number; chunkDelayMs?: number } = {},
 ): Promise<RangeServer> {
   const ranges: string[] = [];
   const sockets = new Set<Socket>();
   const server = createServer((req, res) => {
-    void serveRange(req, res, files, ranges, options).catch((error: unknown) => {
-      if (!res.headersSent) {
-        res.statusCode = 500;
-      }
-      res.end(error instanceof Error ? error.message : String(error));
-    });
+    void serveRange(req, res, files, ranges, options).catch(
+      (error: unknown) => {
+        if (!res.headersSent) {
+          res.statusCode = 500;
+        }
+        res.end(error instanceof Error ? error.message : String(error));
+      },
+    );
   });
   server.on("connection", (socket) => {
     sockets.add(socket);
@@ -720,9 +1067,12 @@ async function startRangeServer(
 function rangeFetch(
   files: Record<string, Uint8Array>,
   ranges: string[],
-  options: { chunkSize?: number; chunkDelayMs?: number }
+  options: { chunkSize?: number; chunkDelayMs?: number },
 ): typeof fetch {
-  return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  return (async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
     const source = new URL(fetchInputUrl(input));
     const file = decodeURIComponent(source.pathname.split("/").at(-1) ?? "");
     const body = files[file];
@@ -745,10 +1095,16 @@ function rangeFetch(
     });
     const status = start > 0 ? 206 : 200;
     if (start > 0) {
-      headers.set("content-range", `bytes ${start}-${body.byteLength - 1}/${body.byteLength}`);
+      headers.set(
+        "content-range",
+        `bytes ${start}-${body.byteLength - 1}/${body.byteLength}`,
+      );
     }
 
-    return new Response(rangeStream(body, start, options, init?.signal), { status, headers });
+    return new Response(rangeStream(body, start, options, init?.signal), {
+      status,
+      headers,
+    });
   }) as typeof fetch;
 }
 
@@ -756,7 +1112,7 @@ function rangeStream(
   body: Uint8Array,
   start: number,
   options: { chunkSize?: number; chunkDelayMs?: number },
-  signal?: AbortSignal | null
+  signal?: AbortSignal | null,
 ): ReadableStream<Uint8Array> {
   let offset = start;
   let aborted = false;
@@ -776,7 +1132,7 @@ function rangeStream(
           aborted = true;
           controller.error(new DOMException("Aborted", "AbortError"));
         },
-        { once: true }
+        { once: true },
       );
     },
     async pull(controller) {
@@ -788,7 +1144,10 @@ function rangeStream(
         return;
       }
       const chunkSize = options.chunkSize ?? body.byteLength;
-      const chunk = body.subarray(offset, Math.min(offset + chunkSize, body.byteLength));
+      const chunk = body.subarray(
+        offset,
+        Math.min(offset + chunkSize, body.byteLength),
+      );
       offset += chunk.byteLength;
       controller.enqueue(chunk);
       if (options.chunkDelayMs) {
@@ -803,7 +1162,7 @@ async function serveRange(
   res: ServerResponse,
   files: Record<string, Uint8Array>,
   ranges: string[],
-  options: { chunkSize?: number; chunkDelayMs?: number }
+  options: { chunkSize?: number; chunkDelayMs?: number },
 ): Promise<void> {
   const requestUrl = new URL(req.url ?? "/", "http://localhost");
   const file = decodeURIComponent(requestUrl.pathname.split("/").at(-1) ?? "");
@@ -828,7 +1187,10 @@ async function serveRange(
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Content-Length", body.byteLength - start);
   if (start > 0) {
-    res.setHeader("Content-Range", `bytes ${start}-${body.byteLength - 1}/${body.byteLength}`);
+    res.setHeader(
+      "Content-Range",
+      `bytes ${start}-${body.byteLength - 1}/${body.byteLength}`,
+    );
   }
 
   const chunkSize = options.chunkSize ?? body.byteLength;
@@ -836,7 +1198,10 @@ async function serveRange(
     if (res.destroyed) {
       return;
     }
-    const chunk = body.subarray(offset, Math.min(offset + chunkSize, body.byteLength));
+    const chunk = body.subarray(
+      offset,
+      Math.min(offset + chunkSize, body.byteLength),
+    );
     res.write(chunk);
     if (options.chunkDelayMs) {
       await sleep(options.chunkDelayMs);
@@ -851,7 +1216,7 @@ function sha256Hex(bytes: Uint8Array): string {
 
 async function waitUntil(
   predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 2000
+  timeoutMs = 2000,
 ): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {

@@ -40,10 +40,47 @@ try {
       await page.getByRole("button", { name: "Open settings" }).click();
       await page.getByRole("dialog", { name: "Settings" }).waitFor();
     },
-    { label: "open settings" }
+    { label: "open settings" },
   );
 } finally {
   await page.close();
+}
+```
+
+For a disposable authored browser page, encode the entire document before
+opening or navigating to a data URL; a raw `#` starts its fragment and cuts off
+the delivered HTML. The native page has no `setContent()` method. This small
+synchronous example checks the completed DOM value and reports the original
+mismatch rather than waiting forever for a handler that was not delivered:
+
+```ts
+import { openPanel } from "@workspace/runtime";
+const html = `<button>Run check</button><output>Ready</output>
+<script>document.querySelector('button').onclick = () => {
+  document.querySelector('output').textContent = 'Done';
+};</script>`;
+const handle = await openPanel(
+  `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
+);
+const session = await handle.cdp.session();
+try {
+  const page = session.page;
+  let finalState;
+  const report = await page.profile(
+    async () => {
+      await page
+        .getByRole("button", { name: "Run check", exact: true })
+        .click();
+      finalState = await page.locator("output").textContent();
+      if (finalState !== "Done")
+        throw new Error(`Unexpected rendered state: ${finalState}`);
+    },
+    { label: "one visible click" },
+  );
+  return { report, finalState };
+} finally {
+  await session.close();
+  await handle.archive();
 }
 ```
 
@@ -59,7 +96,7 @@ Acquire a fresh page afterward for browser interaction profiling:
 ```ts
 import { openPanel, profilePanelReload } from "@workspace/testkit";
 
-const handle = await openPanel("panels/tour");
+const handle = await openPanel("about/new");
 try {
   const result = await profilePanelReload(handle, {
     label: "panel reload",

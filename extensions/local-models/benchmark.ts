@@ -2,6 +2,7 @@ import type { ModelBenchmarkResult } from "@workspace/model-catalog/localModels"
 
 export interface ModelBenchmarkDeps {
   fetch: typeof fetch;
+  signal?: AbortSignal;
   ensureLoaded(slug: string): Promise<{ baseUrl: string }>;
   apiKey(): Promise<string>;
   setBenchmark(slug: string, result: ModelBenchmarkResult): Promise<void>;
@@ -15,50 +16,67 @@ const BENCHMARK_MESSAGES = [
 
 export async function runModelBenchmark(
   slug: string,
-  deps: ModelBenchmarkDeps
+  deps: ModelBenchmarkDeps,
 ): Promise<{ tokensPerSec: number } | null> {
   try {
-    const [{ baseUrl }, apiKey] = await Promise.all([deps.ensureLoaded(slug), deps.apiKey()]);
+    const [{ baseUrl }, apiKey] = await Promise.all([
+      deps.ensureLoaded(slug),
+      deps.apiKey(),
+    ]);
+    deps.signal?.throwIfAborted();
     const startedAt = deps.now();
-    const response = await deps.fetch(`${trimTrailingSlash(baseUrl)}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
+    const response = await deps.fetch(
+      `${trimTrailingSlash(baseUrl)}/chat/completions`,
+      {
+        method: "POST",
+        signal: deps.signal,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: slug,
+          messages: BENCHMARK_MESSAGES,
+          max_tokens: 128,
+          stream: false,
+        }),
       },
-      body: JSON.stringify({
-        model: slug,
-        messages: BENCHMARK_MESSAGES,
-        max_tokens: 128,
-        stream: false,
-      }),
-    });
+    );
     const elapsedSeconds = Math.max(0, (deps.now() - startedAt) / 1000);
 
     if (!response.ok) {
-      throw new Error(`benchmark completion failed with HTTP ${response.status}`);
+      throw new Error(
+        `benchmark completion failed with HTTP ${response.status}`,
+      );
     }
 
     const body = (await response.json()) as unknown;
     const tokensPerSec = parseBenchmarkThroughput(body, elapsedSeconds);
     if (tokensPerSec === null) {
-      throw new Error("benchmark completion did not include usable throughput metadata");
+      throw new Error(
+        "benchmark completion did not include usable throughput metadata",
+      );
     }
 
     const result: ModelBenchmarkResult = {
       tokensPerSec,
       measuredAt: deps.now(),
     };
+    deps.signal?.throwIfAborted();
     await deps.setBenchmark(slug, result);
     deps.log("benchmark complete", { slug, tokensPerSec });
     return { tokensPerSec };
   } catch (error) {
+    if (deps.signal?.aborted) throw deps.signal.reason;
     deps.log("benchmark failed", { slug, error: errorMessage(error) });
     return null;
   }
 }
 
-export function parseBenchmarkThroughput(body: unknown, elapsedSeconds: number): number | null {
+export function parseBenchmarkThroughput(
+  body: unknown,
+  elapsedSeconds: number,
+): number | null {
   const root = asRecord(body);
   const timings = asRecord(root?.["timings"]);
   const reported = numberValue(timings?.["predicted_per_second"]);
@@ -68,8 +86,13 @@ export function parseBenchmarkThroughput(body: unknown, elapsedSeconds: number):
 
   const usage = asRecord(root?.["usage"]);
   const completionTokens =
-    numberValue(usage?.["completion_tokens"]) ?? numberValue(usage?.["completionTokens"]);
-  if (completionTokens === null || completionTokens <= 0 || elapsedSeconds <= 0) {
+    numberValue(usage?.["completion_tokens"]) ??
+    numberValue(usage?.["completionTokens"]);
+  if (
+    completionTokens === null ||
+    completionTokens <= 0 ||
+    elapsedSeconds <= 0
+  ) {
     return null;
   }
   return completionTokens / elapsedSeconds;
@@ -80,7 +103,9 @@ function trimTrailingSlash(value: string): string {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return value !== null && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function numberValue(value: unknown): number | null {

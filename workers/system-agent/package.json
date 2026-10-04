@@ -145,7 +145,6 @@
   "dependencies": {
     "@workspace/agentic-do": "workspace:*",
     "@workspace/harness": "workspace:*",
-    "@workspace/pi-core": "workspace:*",
     "@workspace/pubsub": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "zod": "^3.25.76"

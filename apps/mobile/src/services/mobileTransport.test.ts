@@ -192,8 +192,15 @@ describe("MobileRpcClient Iroh transport", () => {
   it("exposes shell presentation handlers before connect and reattaches them after reconnect", async () => {
     const firstRpc = makeRpc();
     const secondRpc = makeRpc();
-    const firstConnection = makeConnection({ rpc: firstRpc });
-    const secondConnection = makeConnection({ rpc: secondRpc });
+    const workspaceRpc = makeRpc();
+    const firstConnection = makeConnection({
+      rpc: workspaceRpc,
+      hubControlRpc: firstRpc,
+    });
+    const secondConnection = makeConnection({
+      rpc: workspaceRpc,
+      hubControlRpc: secondRpc,
+    });
     mockReconnectMobileSession
       .mockResolvedValueOnce(firstConnection)
       .mockResolvedValueOnce(secondConnection);
@@ -214,6 +221,7 @@ describe("MobileRpcClient Iroh transport", () => {
       },
     );
 
+    expect(workspaceRpc.expose).not.toHaveBeenCalled();
     await client.close();
     await client.connectAndWait();
     expect(secondRpc.expose).toHaveBeenCalledWith(
@@ -817,6 +825,7 @@ describe("MobileRpcClient shared initial connection job", () => {
       const stopStatus = jest.fn();
       const invalid = makeConnection({
         rpc: invalidRpc,
+        ...(phase === "expose" ? { hubControlRpc: invalidRpc } : {}),
         ...(phase === "missing-control" ? { hubControlRpc: undefined } : {}),
         session: makeSession({ onStatusChange: () => stopStatus }),
         close: jest.fn(() => {

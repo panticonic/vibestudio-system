@@ -1,6 +1,10 @@
-import { AgentWorkerBase, type AgentToolExecutionContext } from "@workspace/agentic-do";
+import {
+  AgentWorkerBase,
+  type AgentToolExecutionContext,
+} from "@workspace/agentic-do";
 import type { ParticipantDescriptor } from "@workspace/harness";
-import type { AgentTool } from "@workspace/pi-core";
+import type { ToolRegistration } from "@panticonic/pi-durable";
+import { authorNativeTool } from "@workspace/harness";
 import { createRpcFs } from "@workspace/runtime/worker";
 import { SYSTEM_AGENT_EVAL_GUIDE, SYSTEM_AGENT_PROMPT } from "./prompts.js";
 
@@ -14,7 +18,7 @@ const SYSTEM_AGENT_PARTICIPANT_METHOD_NAMES = [
   "inspectMethodSuspensions",
 ] as const;
 const SYSTEM_AGENT_PARTICIPANT_METHODS = new Set<string>(
-  SYSTEM_AGENT_PARTICIPANT_METHOD_NAMES
+  SYSTEM_AGENT_PARTICIPANT_METHOD_NAMES,
 );
 
 /**
@@ -24,14 +28,17 @@ const SYSTEM_AGENT_PARTICIPANT_METHODS = new Set<string>(
 export class SystemAgentWorker extends AgentWorkerBase {
   static override schemaVersion = AgentWorkerBase.schemaVersion;
 
-  constructor(ctx: ConstructorParameters<typeof AgentWorkerBase>[0], env: unknown) {
+  constructor(
+    ctx: ConstructorParameters<typeof AgentWorkerBase>[0],
+    env: unknown,
+  ) {
     super(ctx, env);
     void this.setOwnTitle("System Agent");
   }
 
   protected override getParticipantInfo(
     _channelId: string,
-    _config?: unknown
+    _config?: unknown,
   ): ParticipantDescriptor {
     return {
       handle: "system-agent",
@@ -48,7 +55,9 @@ export class SystemAgentWorker extends AgentWorkerBase {
     return SYSTEM_AGENT_PARTICIPANT_METHODS.has(methodName);
   }
 
-  protected override async loadPromptResources(): Promise<{ workspacePrompt: string }> {
+  protected override async loadPromptResources(): Promise<{
+    workspacePrompt: string;
+  }> {
     return { workspacePrompt: SYSTEM_AGENT_EVAL_GUIDE };
   }
 
@@ -64,19 +73,26 @@ export class SystemAgentWorker extends AgentWorkerBase {
     return false;
   }
 
-  protected override async getLoopTools(
+  protected override async getTools(
     channelId: string,
-    execution?: AgentToolExecutionContext
-  ): Promise<AgentTool[]> {
+  ): Promise<ToolRegistration[]> {
     const { createEvalTool } = await import("@workspace/harness/tools/eval");
-    const toolRpc = execution?.rpc ?? this.rpc;
-    const fs = createRpcFs(toolRpc as never);
     return [
-      createEvalTool(
-        <T>(method: string, args: unknown[]) => toolRpc.call<T>("main", method, args),
-        { subKey: channelId }
+      createEvalTool({
+        execution: {
+          execute: (args, api, context) =>
+            this.executeNativeEval(args, api, context),
+          cancel: (args, api, context) =>
+            this.cancelNativeEval(args, api, context),
+        },
+      }),
+      authorNativeTool(
+        (execution: AgentToolExecutionContext | undefined) => {
+          const fs = createRpcFs((execution?.rpc ?? this.rpc) as never);
+          return this.createNotifyTool(channelId, fs, execution);
+        },
+        (api, context) => this.bindNativeToolExecution(api, context),
       ),
-      this.createNotifyTool(channelId, fs),
     ];
   }
 }
