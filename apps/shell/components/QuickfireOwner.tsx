@@ -120,6 +120,8 @@ const PANEL_SEARCH_LIMIT = 20;
 
 interface OverlayState {
   open: boolean;
+  /** Panel acquired by the opening gesture; independent of async chrome reads. */
+  panelId: string | null;
   mode: QuickfireMode;
   query: string;
   /** Bumped whenever the chrome deliberately overwrites the surface's input. */
@@ -145,6 +147,7 @@ interface OverlayState {
 
 const CLOSED: OverlayState = {
   open: false,
+  panelId: null,
   mode: "all",
   query: "",
   inputEpoch: 0,
@@ -202,6 +205,7 @@ export function QuickfireOwner() {
    * Escape, Ctrl/Cmd+K chord can briefly see no focused panel.
    */
   const focusRestoreRef = useRef<Promise<void> | null>(null);
+  const openingRef = useRef(0);
   /** Chat panels this shell opened for a promoted conversation, by channel id. */
   const promotedPanelIdsRef = useRef(new Map<string, string>());
 
@@ -320,9 +324,12 @@ export function QuickfireOwner() {
    */
   const resumeIntoConversation = useCallback(
     (slotId: string) => {
+      const opening = openingRef.current;
       const enter = () =>
         setState((current) =>
+          opening === openingRef.current &&
           current.open &&
+          current.panelId === slotId &&
           current.mode === "all" &&
           !current.argSession &&
           current.query === ""
@@ -351,6 +358,7 @@ export function QuickfireOwner() {
         prompt?: string;
       },
     ) => {
+      const opening = ++openingRef.current;
       setPanelLost(false);
       void (async () => {
         let focused: string | null = null;
@@ -367,10 +375,14 @@ export function QuickfireOwner() {
           // only the panel-scoped commands drop out.
         }
 
+        if (opening !== openingRef.current) return;
+        const target = options?.panelId ?? focused;
         returnFocusPanelIdRef.current = focused;
+        setChromeState(null);
         setState((current) => ({
           ...CLOSED,
           open: true,
+          panelId: target,
           mode,
           query: options?.prompt
             ? `${QUICKFIRE_MODE_PREFIX[mode]}${options.prompt}`
@@ -380,18 +392,7 @@ export function QuickfireOwner() {
         }));
         setFocusRequest((sequence) => sequence + 1);
 
-        try {
-          // Focus restore always names the panel the user was actually on, even
-          // when the overlay was opened *about* a different one (a context menu
-          // on a background tree node): dismissing must not move them.
-          const target = options?.panelId ?? focused;
-          if (mode === "all" && target) resumeIntoConversation(target);
-          setChromeState(target ? await panel.getChromeState(target) : null);
-        } catch {
-          // A palette that cannot describe the panel is still a working palette;
-          // only the panel-scoped commands drop out.
-          setChromeState(null);
-        }
+        if (mode === "all" && target) resumeIntoConversation(target);
         void panel
           .listPinnedPanelIds()
           .then(setPinnedPanelIds)
@@ -483,6 +484,7 @@ export function QuickfireOwner() {
    * would race that navigation and bounce the user back (§1.3/§2.3).
    */
   const close = useCallback((options?: { restoreFocus?: boolean }) => {
+    openingRef.current += 1;
     setState(CLOSED);
     setQuickfireConversations(null);
     const returnTo = returnFocusPanelIdRef.current;
@@ -495,18 +497,36 @@ export function QuickfireOwner() {
     }
   }, []);
 
+  // Chrome is a projection of this opening's target. A delayed response from
+  // an earlier opening or retarget must never change the session binding.
+  const refreshChrome = useCallback(() => {
+    const panelId = state.open ? state.panelId : null;
+    if (!panelId) return;
+    const opening = openingRef.current;
+    let live = true;
+    void panel.getChromeState(panelId).then(
+      (next) => {
+        if (live && opening === openingRef.current) setChromeState(next);
+      },
+      (error: unknown) => {
+        if (live && opening === openingRef.current) {
+          setChromeState(null);
+          reportCommandFailure(error);
+        }
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [reportCommandFailure, state.open, state.panelId]);
+  useEffect(refreshChrome, [refreshChrome]);
+
   // The bound slot can vanish under an open overlay (§4.4 `panel-lost`).
-  useShellEvent(
-    "panel-tree-invalidated",
-    useCallback(() => {
-      const panelId = chromeState?.panelId;
-      if (!state.open || !panelId) return;
-      void panel
-        .getChromeState(panelId)
-        .then((next) => setChromeState(next))
-        .catch(() => setPanelLost(true));
-    }, [chromeState?.panelId, state.open]),
-  );
+  useShellEvent("panel-tree-invalidated", (event) => {
+    if (!state.open || !state.panelId) return;
+    if (event.removedSlotIds.includes(state.panelId)) setPanelLost(true);
+    else refreshChrome();
+  });
 
   /**
    * The slot the conversation is bound to. Non-null only while the user is
@@ -515,7 +535,7 @@ export function QuickfireOwner() {
    */
   const quickfireSlotId =
     state.open && state.mode === "quickfire" && !state.argSession && !panelLost
-      ? (chromeState?.panelId ?? null)
+      ? state.panelId
       : null;
   const conversationBinding =
     state.open && state.mode === "quickfire" ? state.conversation : null;
@@ -939,8 +959,11 @@ export function QuickfireOwner() {
           if (state.retargeting) {
             // Rebind, do not navigate: the overlay stays put and starts talking
             // about the panel you picked.
+            openingRef.current += 1;
+            setChromeState(null);
             setState((current) => ({
               ...current,
+              panelId: target.panelId,
               retargeting: false,
               mode: "quickfire",
               query: "",
@@ -949,10 +972,6 @@ export function QuickfireOwner() {
               selectionTouched: false,
             }));
             setPanelLost(false);
-            void panel
-              .getChromeState(target.panelId)
-              .then(setChromeState)
-              .catch(() => setPanelLost(true));
             return;
           }
           navigateToId(target.panelId);
@@ -1475,7 +1494,7 @@ export function QuickfireOwner() {
                 ? conversation.view.error
                 : panelLost
                   ? "That panel closed. Reopen the Quickfire agent over another panel to keep going."
-                  : !chromeState
+                  : !state.panelId
                     ? "No panel is focused, so there is nothing to ask about."
                     : conversation.view.error,
               transcript: conversation.view.transcript,

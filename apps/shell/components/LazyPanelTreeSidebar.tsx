@@ -34,7 +34,7 @@ import {
   DrawingPinFilledIcon,
   PlusIcon,
 } from "@radix-ui/react-icons";
-import { Badge, Box, Button, Flex, IconButton, Text, Tooltip } from "@radix-ui/themes";
+import { Badge, Box, Button, Flex, IconButton, Text } from "@radix-ui/themes";
 import { VibestudioLogo } from "@workspace/ui/brand";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -485,7 +485,6 @@ const SortableTreeItem = memo(
           <Box style={getDropIndicatorStyle(projectedDepth, showIndicatorBelow ? "100%" : -1)} />
         )}
 
-        <Tooltip content={[panel.title, ownerDescription, trust.description].filter(Boolean).join(". ")}>
         <Flex
           {...attributes}
           {...listeners}
@@ -583,24 +582,22 @@ const SortableTreeItem = memo(
           </Text>
 
           {ownerLabel && (
-            <Text size="1" className="app-panel-tree-owner" title={ownerDescription}>
+            <Text size="1" className="app-panel-tree-owner">
               {ownerLabel}
             </Text>
           )}
 
           {/* Pin indicator — quiet glyph, only when pinned */}
           {isPinned && (
-            <Tooltip content="Pinned — exempt from auto-unload">
-              <DrawingPinFilledIcon
-                aria-label="Pinned"
-                style={{
-                  flexShrink: 0,
-                  color: "var(--gray-11)",
-                  width: 12,
-                  height: 12,
-                }}
-              />
-            </Tooltip>
+            <DrawingPinFilledIcon
+              aria-label="Pinned — exempt from auto-unload"
+              style={{
+                flexShrink: 0,
+                color: "var(--gray-11)",
+                width: 12,
+                height: 12,
+              }}
+            />
           )}
 
           {/* Build state indicator */}
@@ -643,7 +640,6 @@ const SortableTreeItem = memo(
                 variant="ghost"
                 color="gray"
                 aria-label="Archive panel"
-                title="Archive panel"
                 onClick={handleArchive}
                 className="app-tree-action app-tree-action-danger"
                 style={{
@@ -658,7 +654,6 @@ const SortableTreeItem = memo(
             </>
           )}
         </Flex>
-        </Tooltip>
 
         <TreeConnectors guides={guides} isSelected={isSelected} />
       </Box>
