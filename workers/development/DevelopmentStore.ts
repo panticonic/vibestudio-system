@@ -16,6 +16,17 @@ export type PreparedNativeBuild = z.infer<typeof preparedNativeBuildSchema>;
 type Owner = { runtimeId: string; userId: string | null };
 type CloseDisposition = "retain-context" | "destroy-context";
 
+// Exact v1 source schema, pinned before adding history indexes.
+export const DEVELOPMENT_V1_FINGERPRINT =
+  '[{"type":"index","name":"development_runs_owner","table":"development_runs","sql":"CREATE INDEX development_runs_owner ON development_runs(owner_user_id,owner_runtime_id,created_at DESC,run_id ASC)"},{"type":"index","name":"development_session_open_intent","table":"development_sessions","sql":"CREATE UNIQUE INDEX development_session_open_intent ON development_sessions(owner_runtime_id,COALESCE(owner_user_id,\'\'),idempotency_key)"},{"type":"table","name":"development_mutation_intents","table":"development_mutation_intents","sql":"CREATE TABLE development_mutation_intents ( run_id TEXT NOT NULL, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, intent_digest TEXT NOT NULL, PRIMARY KEY(run_id,operation,idempotency_key) )"},{"type":"table","name":"development_run_events","table":"development_run_events","sql":"CREATE TABLE development_run_events ( run_id TEXT NOT NULL, sequence INTEGER NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(run_id,sequence) )"},{"type":"table","name":"development_runs","table":"development_runs","sql":"CREATE TABLE development_runs ( run_id TEXT PRIMARY KEY, owner_runtime_id TEXT NOT NULL, owner_user_id TEXT, session_id TEXT NOT NULL, state TEXT NOT NULL, run_json TEXT NOT NULL, plan_json TEXT NOT NULL, start_intent_digest TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL )"},{"type":"table","name":"development_sessions","table":"development_sessions","sql":"CREATE TABLE development_sessions ( session_id TEXT PRIMARY KEY, owner_runtime_id TEXT NOT NULL, owner_user_id TEXT, idempotency_key TEXT NOT NULL, state TEXT NOT NULL, session_json TEXT NOT NULL, close_idempotency_key TEXT, close_disposition TEXT, repair_intents_json TEXT NOT NULL DEFAULT \'{}\', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL )"},{"type":"table","name":"development_test_faults","table":"development_test_faults","sql":"CREATE TABLE development_test_faults ( run_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, fault_id TEXT NOT NULL, armed_at INTEGER NOT NULL )"},{"type":"table","name":"state","table":"state","sql":"CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL)"}]';
+
+export const DEVELOPMENT_HISTORY_INDEXES = [
+  `CREATE INDEX development_sessions_user_page ON development_sessions(owner_user_id,created_at DESC,session_id ASC) WHERE owner_user_id IS NOT NULL`,
+  `CREATE INDEX development_sessions_runtime_page ON development_sessions(owner_runtime_id,created_at DESC,session_id ASC) WHERE owner_user_id IS NULL`,
+  `CREATE INDEX development_runs_user_page ON development_runs(owner_user_id,created_at DESC,run_id ASC) WHERE owner_user_id IS NOT NULL`,
+  `CREATE INDEX development_runs_session_state ON development_runs(session_id,state)`,
+] as const;
+
 const ACTIVE_RUN_STATES = new Set<DevelopmentRun["state"]>([
   "accepted",
   "materializing",
@@ -67,6 +78,7 @@ export class DevelopmentStore {
       `CREATE INDEX development_runs_owner
        ON development_runs(owner_user_id,owner_runtime_id,created_at DESC,run_id ASC)`
     );
+    for (const definition of DEVELOPMENT_HISTORY_INDEXES) this.sql.exec(definition);
     this.sql.exec(`CREATE TABLE development_run_events (
       run_id TEXT NOT NULL,
       sequence INTEGER NOT NULL,
@@ -120,26 +132,38 @@ export class DevelopmentStore {
       : null;
   }
 
-  listSessions(owner: Owner): DevelopmentSession[] {
-    const rows = owner.userId
-      ? this.sql
-          .exec(
-            `SELECT session_json FROM development_sessions
-             WHERE owner_user_id=? ORDER BY created_at DESC,session_id ASC`,
-            owner.userId
-          )
-          .toArray()
-      : this.sql
-          .exec(
-            `SELECT session_json FROM development_sessions
-             WHERE owner_user_id IS NULL AND owner_runtime_id=?
-             ORDER BY created_at DESC,session_id ASC`,
-            owner.runtimeId
-          )
-          .toArray();
-    return rows.map((row) =>
-      developmentSessionSchema.parse(JSON.parse(String(row["session_json"])))
-    );
+  listSessions(
+    owner: Owner,
+    page: {
+      cursor?: { createdAt: number; sessionId: string };
+      limit: number;
+    },
+  ): DevelopmentSession[] {
+    const clauses = [
+      owner.userId
+        ? "owner_user_id=?"
+        : "owner_user_id IS NULL AND owner_runtime_id=?",
+    ];
+    const bindings: unknown[] = [owner.userId ?? owner.runtimeId];
+    if (page.cursor) {
+      clauses.push("(created_at<? OR (created_at=? AND session_id>?))");
+      bindings.push(
+        page.cursor.createdAt,
+        page.cursor.createdAt,
+        page.cursor.sessionId,
+      );
+    }
+    bindings.push(page.limit);
+    return this.sql
+      .exec(
+        `SELECT session_json FROM development_sessions WHERE ${clauses.join(" AND ")}
+       ORDER BY created_at DESC,session_id ASC LIMIT ?`,
+        ...bindings,
+      )
+      .toArray()
+      .map((row) =>
+        developmentSessionSchema.parse(JSON.parse(String(row["session_json"]))),
+      );
   }
 
   putSession(session: DevelopmentSession): DevelopmentSession {
@@ -248,7 +272,16 @@ export class DevelopmentStore {
   }
 
   activeRunCount(sessionId: string): number {
-    return this.listRuns({ sessionId }).filter((run) => ACTIVE_RUN_STATES.has(run.state)).length;
+    return Number(
+      this.sql
+        .exec(
+          `SELECT COUNT(*) AS count FROM development_runs WHERE session_id=?
+       AND state IN (${[...ACTIVE_RUN_STATES].map(() => "?").join(",")})`,
+          sessionId,
+          ...ACTIVE_RUN_STATES,
+        )
+        .toArray()[0]!["count"],
+    );
   }
 
   getRun(runId: string): DevelopmentRun | null {
@@ -312,6 +345,8 @@ export class DevelopmentStore {
     owner?: Owner;
     sessionId?: string;
     state?: DevelopmentRun["state"];
+    cursor?: { createdAt: number; runId: string };
+    limit?: number;
   }): DevelopmentRun[] {
     const clauses: string[] = [];
     const bindings: unknown[] = [];
@@ -330,15 +365,26 @@ export class DevelopmentStore {
       clauses.push("state=?");
       bindings.push(input.state);
     }
+    if (input.cursor) {
+      clauses.push("(created_at<? OR (created_at=? AND run_id>?))");
+      bindings.push(
+        input.cursor.createdAt,
+        input.cursor.createdAt,
+        input.cursor.runId,
+      );
+    }
+    if (input.limit !== undefined) bindings.push(input.limit);
     const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
     return this.sql
       .exec(
         `SELECT run_json FROM development_runs${where}
-         ORDER BY created_at DESC,run_id ASC`,
-        ...bindings
+         ORDER BY created_at DESC,run_id ASC${input.limit !== undefined ? " LIMIT ?" : ""}`,
+        ...bindings,
       )
       .toArray()
-      .map((row) => developmentRunSchema.parse(JSON.parse(String(row["run_json"]))));
+      .map((row) =>
+        developmentRunSchema.parse(JSON.parse(String(row["run_json"]))),
+      );
   }
 
   transitionRun(input: {

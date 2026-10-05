@@ -16,7 +16,10 @@ import type {
 } from "@vibestudio/service-schemas/developmentNative";
 import { canonicalJson } from "@vibestudio/content-addressing";
 import type { z } from "zod";
-import { DevelopmentStore, developmentSessionId } from "./DevelopmentStore.js";
+import {
+  DevelopmentStore, developmentSessionId,
+  DEVELOPMENT_HISTORY_INDEXES, DEVELOPMENT_V1_FINGERPRINT
+} from "./DevelopmentStore.js";
 import { developmentRecipes } from "./recipes.js";
 
 type NativeReceipt = z.infer<typeof nativeDevelopmentSessionReceiptSchema>;
@@ -26,6 +29,7 @@ type PreparedBuild = z.infer<typeof preparedNativeBuildSchema>;
 const TERMINAL_RUN_STATES = new Set<DevelopmentRun["state"]>(["succeeded", "stopped", "failed", "cancelled"]);
 
 export class DevelopmentDO extends DurableObjectBase {
+  static override schemaVersion = 2;
   static override rpcMethods = developmentBuiltinMethods;
   private readonly store: DevelopmentStore;
 
@@ -48,12 +52,26 @@ export class DevelopmentDO extends DurableObjectBase {
     ];
   }
 
+  protected override schemaUpgrades() {
+    return [
+      {
+        fromVersion: 1,
+        fromFingerprint: DEVELOPMENT_V1_FINGERPRINT,
+        upgrade: () => {
+          for (const definition of DEVELOPMENT_HISTORY_INDEXES)
+            this.sql.exec(definition);
+        },
+      },
+    ];
+  }
+
   protected override schemaIndexDefinitions(): readonly string[] {
     return [
       `CREATE UNIQUE INDEX development_session_open_intent
        ON development_sessions(owner_runtime_id,COALESCE(owner_user_id,''),idempotency_key)`,
       `CREATE INDEX development_runs_owner
-       ON development_runs(owner_user_id,owner_runtime_id,created_at DESC,run_id ASC)`
+       ON development_runs(owner_user_id,owner_runtime_id,created_at DESC,run_id ASC)`,
+      ...DEVELOPMENT_HISTORY_INDEXES,
     ];
   }
 
@@ -180,24 +198,26 @@ export class DevelopmentDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  listSessions(input?: { cursor?: { createdAt: number; sessionId: string }; limit?: number }): {
+  listSessions(input?: {
+    cursor?: { createdAt: number; sessionId: string };
+    limit?: number;
+  }): {
     sessions: DevelopmentSession[];
     nextCursor: { createdAt: number; sessionId: string } | null;
   } {
     const limit = Math.max(1, Math.min(200, input?.limit ?? 50));
-    const ordered = this.store.listSessions(this.owner());
-    const remaining = input?.cursor
-      ? ordered.filter(
-          (session) =>
-            session.createdAt < input.cursor!.createdAt ||
-            (session.createdAt === input.cursor!.createdAt && session.sessionId > input.cursor!.sessionId)
-        )
-      : ordered;
+    const remaining = this.store.listSessions(this.owner(), {
+      cursor: input?.cursor,
+      limit: limit + 1,
+    });
     const sessions = remaining.slice(0, limit);
     const last = sessions.at(-1);
     return {
       sessions,
-      nextCursor: remaining.length > limit && last ? { createdAt: last.createdAt, sessionId: last.sessionId } : null
+      nextCursor:
+        remaining.length > limit && last
+          ? { createdAt: last.createdAt, sessionId: last.sessionId }
+          : null,
     };
   }
 
@@ -480,28 +500,24 @@ export class DevelopmentDO extends DurableObjectBase {
     runs: DevelopmentRun[];
     nextCursor: { createdAt: number; runId: string } | null;
   }> {
-    const reconciled = await Promise.all(
-      this.store
-        .listRuns({
-          owner: this.owner(),
-          ...(input?.sessionId ? { sessionId: input.sessionId } : {}),
-          ...(input?.state ? { state: input.state } : {})
-        })
-        .map((run) => this.reconcileRun(run))
-    );
-    const after = input?.cursor
-      ? reconciled.filter(
-          (run) =>
-            run.createdAt < input.cursor!.createdAt ||
-            (run.createdAt === input.cursor!.createdAt && run.runId > input.cursor!.runId)
-        )
-      : reconciled;
     const limit = Math.max(1, Math.min(200, input?.limit ?? 50));
-    const runs = after.slice(0, limit);
+    const after = this.store.listRuns({
+      owner: this.owner(),
+      ...(input?.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input?.state ? { state: input.state } : {}),
+      cursor: input?.cursor,
+      limit: limit + 1,
+    });
+    const runs = await Promise.all(
+      after.slice(0, limit).map((run) => this.reconcileRun(run)),
+    );
     const last = runs.at(-1);
     return {
       runs,
-      nextCursor: after.length > limit && last ? { createdAt: last.createdAt, runId: last.runId } : null
+      nextCursor:
+        after.length > limit && last
+          ? { createdAt: last.createdAt, runId: last.runId }
+          : null,
     };
   }
 
