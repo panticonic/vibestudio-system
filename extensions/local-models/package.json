@@ -10,9 +10,9 @@
     "@panticonic/builtin": "workspace:*",
     "@workspace-workers/pubsub-channel": "workspace:*",
     "@workspace/agentic-do": "workspace:*",
-    "@panticonic/pi-ai": "0.99.2-vibestudio.11",
-    "@panticonic/pi-chord": "0.99.2-vibestudio.11",
-    "@panticonic/pi-durable": "0.99.2-vibestudio.11",
+    "@panticonic/pi-ai": "0.99.2-vibestudio.12",
+    "@panticonic/pi-chord": "0.99.2-vibestudio.12",
+    "@panticonic/pi-durable": "0.99.2-vibestudio.12",
     "@vibestudio/rpc": "workspace:*"
   },
   "vibestudio": {
