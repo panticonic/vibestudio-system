@@ -151,6 +151,13 @@ function installReviewApproval(parts: InstallReviewPart[]): PendingApproval {
 }
 
 describe("ApprovalsOverlay — unit-install-review", () => {
+  it.each(["lucide:orbit", "orbit", "🎯 Mission", "./../icon.svg"])(
+    "renders a kind glyph instead of invalid identity text %s", (icon) => {
+      const text = renderToText(<ApprovalsOverlay pending={[installReviewApproval([part(0, { icon })])]} selectedIndex={0} />);
+      expect(text).not.toContain(icon);
+      expect(text).toContain("⚙");
+    }
+  );
   it("renders every part, never a truncated '…and N more' summary", () => {
     const parts = Array.from({ length: 37 }, (_, i) => part(i));
     const text = renderToText(

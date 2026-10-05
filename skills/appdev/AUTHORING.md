@@ -39,9 +39,11 @@ Fields:
 - `name`: stable app principal identity. Must use `@workspace-apps/<name>`.
 - `vibestudio.displayName`: user-facing name in approval and unit surfaces.
 - `vibestudio.icon`: one identity chosen with the shared
-  [icon guide](../workspace-dev/references/icons.md), usually a curated Lucide
-  concept, truthful brand mark, semantic emoji, or repo-local image path such as
-  `./assets/icon.svg` (maximum 1 MiB). It is shown in unit lists and approvals.
+  [icon guide](../workspace-dev/references/icons.md): one emoji or safe unit-relative
+  image path such as `./assets/icon.svg` (maximum 1 MiB). Use `prepareUnitIcon`
+  when preparing app files or `setUnitIcon` for an existing app. Catalog IDs
+  are authoring inputs only, never stored manifest values. It is shown in
+  unit lists and approvals.
 - `vibestudio.app.target`: one of `electron`, `react-native`, or `terminal`.
 - Target entry:
   - `electron`: `renderer`

@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe("PanelIcon", () => {
-  it.each(["target", "lucide:target", "🎯 Mission", "💬🎯"])(
+  it.each(["target", "lucide:target", "🎯 Mission", "💬🎯", "./../icon.svg"])(
     "uses the panel glyph instead of rendering invalid text icon %s",
     (icon) => {
       const { container } = render(<PanelIcon icon={icon} fallback="panel" />);

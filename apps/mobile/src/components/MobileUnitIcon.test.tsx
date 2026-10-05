@@ -4,6 +4,16 @@ import { SvgUri } from "react-native-svg";
 import { MobileUnitIcon } from "./MobileUnitIcon";
 
 describe("MobileUnitIcon", () => {
+  it.each(["lucide:orbit", "orbit", "./../icon.svg"])(
+    "uses the kind glyph for invalid identity %s", (icon) => {
+      const { queryByText, UNSAFE_queryByType } = render(
+        <MobileUnitIcon icon={icon} source="workers/news-agent" kind="worker" serverUrl="http://127.0.0.1:43100" color="#777" />
+      );
+      expect(queryByText(icon)).toBeNull();
+      expect(UNSAFE_queryByType(Image)).toBeNull();
+      expect(UNSAFE_queryByType(SvgUri)).toBeNull();
+    }
+  );
   it("renders a relative SVG manifest image through the authenticated local facade", () => {
     const { UNSAFE_getByType } = render(
       <MobileUnitIcon

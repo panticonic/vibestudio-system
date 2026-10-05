@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
+import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
 import {
   getApprovalCallerPresentation,
   getInstallReviewActionCopy,
@@ -78,7 +79,7 @@ function summarizeTitle(a: PendingApproval): string {
 }
 
 function terminalUnitIcon(icon: string | undefined, kind: string): string {
-  if (icon && !icon.startsWith("./") && !icon.startsWith("data:image/")) return icon;
+  if (isSemanticEmoji(icon)) return icon;
   if (kind === "panel") return "▦";
   if (kind === "app") return "▣";
   if (kind === "extension") return "◇";

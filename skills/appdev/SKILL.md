@@ -46,7 +46,9 @@ Read only references relevant to the target and change.
   there is an account system, no breadcrumbs if you can't navigate anything.
 - `@workspace-apps/<name>` maps to `apps/<name>`. Identity comes from the
   package manifest and approved build, not display path.
-- Give each app a semantic `vibestudio.icon` per the [icon
+- Give each app a `vibestudio.icon` containing one emoji or unit-relative image
+  path. Use `prepareUnitIcon` or `setUnitIcon` for catalog artwork; never store
+  catalog IDs in the manifest. Follow the [icon
   guide](../workspace-dev/references/icons.md). Use `@workspace/ui/icons` for
   host UI icons.
 - Declare only the capabilities the target requires; let the normal review flow

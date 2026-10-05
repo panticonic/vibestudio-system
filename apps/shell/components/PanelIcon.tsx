@@ -8,7 +8,7 @@ import {
 } from "@radix-ui/react-icons";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { PanelNavigationState } from "@vibestudio/shared/types";
-import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
+import { isSemanticEmoji, isUnitIconAssetPath } from "@vibestudio/shared/panel/icon";
 import { useWorkspaceIcons } from "../shell/workspaceIconsContext";
 
 const BrowserFavicon = lazy(async () => {
@@ -49,7 +49,7 @@ export function PanelIcon({
       : null;
   const [failedSource, setFailedSource] = useState<string | null>(null);
   useEffect(() => {
-    if (!unitIcons || !icon?.startsWith("./") || !source) return;
+    if (!unitIcons || !isUnitIconAssetPath(icon) || !source) return;
     let active = true;
     void unitIcons
       .load(source, icon, iconVersion, iconState)

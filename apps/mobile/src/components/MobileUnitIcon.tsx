@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { SvgUri } from "react-native-svg";
 import { unitIconTarget } from "@vibestudio/shared/panel/assetPathPolicy";
-import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
+import { isSemanticEmoji, isUnitIconAssetPath } from "@vibestudio/shared/panel/icon";
 import {
   Globe,
   LayoutGrid,
@@ -53,7 +53,7 @@ export function MobileUnitIcon(props: {
   const size = props.size ?? 18;
   const manifestImage = useMemo(() => {
     if (props.icon?.startsWith("data:image/")) return props.icon;
-    if (!props.icon?.startsWith("./") || !props.source || !props.serverUrl)
+    if (!isUnitIconAssetPath(props.icon) || !props.source || !props.serverUrl)
       return null;
     return `${props.serverUrl}/${unitIconTarget(props.source, props.icon, props.iconVersion, props.iconState)}`;
   }, [
