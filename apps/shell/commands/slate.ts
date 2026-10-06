@@ -211,7 +211,7 @@ function desktopRuns(client: ShellWorkspaceClient): Record<string, SlateRun> {
     "agent.new-chat": async ({ prompt }) => {
       await panel.createPanel("panels/chat", {
         focus: true,
-        ...(prompt ? { stateArgs: { initialPrompt: prompt } } : {}),
+        ...(prompt ? { stateArgs: { seed: { openingRequest: prompt } } } : {}),
       });
       return { close: true };
     },

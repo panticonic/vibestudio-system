@@ -251,7 +251,7 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
   "agent.new-chat": async ({ prompt }, deps) => {
     await deps.panels.createRootPanel("panels/chat", {
       focus: true,
-      ...(prompt ? { stateArgs: { initialPrompt: prompt } } : {}),
+      ...(prompt ? { stateArgs: { seed: { openingRequest: prompt } } } : {}),
     });
     return { close: true };
   },

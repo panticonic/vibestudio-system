@@ -513,7 +513,7 @@ export function CommandSheet({
           void slateDeps.panels
             .createRootPanel("panels/chat", {
               focus: true,
-              stateArgs: { initialPrompt: target.prompt },
+              stateArgs: { seed: { openingRequest: target.prompt } },
             })
             .catch((error: unknown) =>
               pushToast({

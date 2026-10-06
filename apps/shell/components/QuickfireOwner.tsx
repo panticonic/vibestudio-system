@@ -1015,7 +1015,7 @@ export function QuickfireOwner() {
           void panel
             .createPanel("panels/chat", {
               focus: true,
-              stateArgs: { initialPrompt: target.prompt },
+              stateArgs: { seed: { openingRequest: target.prompt } },
             })
             .catch(reportCommandFailure);
           close({ restoreFocus: false });

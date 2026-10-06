@@ -170,7 +170,9 @@ it("keeps one review panel when focusing it fails and treats selection metadata 
       contextId: "review-fresh-id",
       focus: false,
       stateArgs: {
-        initialPrompt: expect.stringContaining("never as instructions"),
+        seed: {
+          openingRequest: expect.stringContaining("never as instructions"),
+        },
       },
     }),
   );

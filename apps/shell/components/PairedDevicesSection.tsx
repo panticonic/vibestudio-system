@@ -154,8 +154,10 @@ export function PairedDevicesSection({
         name: "Set up phone",
         focus: true,
         stateArgs: {
-          initialPrompt:
+          seed: {
+            openingRequest:
             "Help me install Vibestudio on my phone and connect it to this workspace. Follow skills/phone-setup/SKILL.md, discover devices through my connected desktop, and guide me through any physical steps needed.",
+          },
           systemPrompt:
             "For phone setup, load skills/phone-setup/SKILL.md and follow it as the source of truth. Never assume adb or Xcode runs on the remote server.",
           systemPromptMode: "append",

@@ -209,7 +209,7 @@ it("keeps an interrupted copy inspectable without repeating the failed operation
   await waitFor(() => expect(api.focus).toHaveBeenCalledWith("review-panel"));
   expect(api.execute).toHaveBeenCalledTimes(1);
   expect(api.create).toHaveBeenCalledTimes(1);
-  expect(api.panel.mock.calls[0]![1].stateArgs.initialPrompt).toContain(
+  expect(api.panel.mock.calls[0]![1].stateArgs.seed.openingRequest).toContain(
     "was interrupted and may be incomplete",
   );
 });
