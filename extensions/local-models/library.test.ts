@@ -271,7 +271,7 @@ describe("ModelLibrary", () => {
     const script = `import { modelRecordStore } from ${JSON.stringify(moduleUrl)}; modelRecordStore(${JSON.stringify(path.join(root, "models", "records.sqlite"))}).update(${JSON.stringify(first.slug)}, record => ({ ...record, config: { contextLength: 512, gpuLayers: 0 } }));`;
     await promisify(execFile)(
       process.execPath,
-      ["--experimental-strip-types", "--input-type=module", "-e", script],
+      ["--import", "tsx", "--input-type=module", "-e", script],
       { cwd: process.cwd() },
     );
     expect(await owner.get(first.slug)).toMatchObject({
