@@ -3,8 +3,6 @@ import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { useCallback, useEffect, useRef } from "react";
 import type { PanelPresentationSnapshot } from "@vibestudio/shared/panel/presentation";
 
-
-import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 import { usePanelTree } from "../shell/hooks/PanelTreeContext";
 import { useShellEvent } from "../shell/useShellEvent";
 
@@ -69,7 +67,7 @@ export function NextPanelBuildWarmup() {
     [scheduleAfterReady],
   );
 
-  useDirectShellEvent("panel-local-presentation-changed", acceptPresentation);
+  useShellEvent("panel-local-presentation-changed", acceptPresentation);
 
   const inspectFocusedPanel = useCallback(() => {
     if (!initialized) return;
@@ -81,7 +79,10 @@ export function NextPanelBuildWarmup() {
       })
       .catch((error: unknown) => {
         if (!isRpcConnectionLost(error))
-          console.warn("[PanelApp] Could not inspect first-panel readiness:", error);
+          console.warn(
+            "[PanelApp] Could not inspect first-panel readiness:",
+            error,
+          );
       });
   }, [acceptPresentation, initialized]);
 

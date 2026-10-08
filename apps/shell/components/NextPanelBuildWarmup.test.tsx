@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   warmPanel: vi.fn(),
   getFocusedPanelId: vi.fn(),
   getLocalPresentation: vi.fn(),
-  directListener: null as ((value: unknown) => void) | null,
+  presentationListener: null as ((value: unknown) => void) | null,
   connectionListener: null as ((value: { status: string }) => void) | null,
 }));
 
@@ -24,14 +24,12 @@ vi.mock("../shell/client", () => ({
 vi.mock("../shell/hooks/PanelTreeContext", () => ({
   usePanelTree: () => ({ initialized: true }),
 }));
-vi.mock("../shell/useDirectShellEvent", () => ({
-  useDirectShellEvent: (_event: string, listener: (value: unknown) => void) => {
-    mocks.directListener = listener;
-  },
-}));
 vi.mock("../shell/useShellEvent", () => ({
-  useShellEvent: (_event: string, listener: (value: { status: string }) => void) => {
-    mocks.connectionListener = listener;
+  useShellEvent: (event: string, listener: (value: unknown) => void) => {
+    if (event === "panel-local-presentation-changed")
+      mocks.presentationListener = listener;
+    if (event === "server-connection-changed")
+      mocks.connectionListener = listener;
   },
 }));
 
@@ -48,7 +46,7 @@ describe("NextPanelBuildWarmup", () => {
       revision: 1,
       presentation: { state: "loading", slotId: "panel:initial" },
     });
-    mocks.directListener = null;
+    mocks.presentationListener = null;
     mocks.connectionListener = null;
     Object.assign(window, {
       requestIdleCallback: vi.fn((callback: () => void) => {
@@ -66,7 +64,7 @@ describe("NextPanelBuildWarmup", () => {
     expect(window.requestIdleCallback).not.toHaveBeenCalled();
 
     act(() => {
-      mocks.directListener?.({
+      mocks.presentationListener?.({
         revision: 2,
         presentation: { state: "ready", slotId: "panel:initial" },
       });
@@ -85,7 +83,9 @@ describe("NextPanelBuildWarmup", () => {
       presentation: { state: "ready", slotId: "panel:initial" },
     });
     render(<NextPanelBuildWarmup />);
-    await waitFor(() => expect(window.requestIdleCallback).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(window.requestIdleCallback).toHaveBeenCalledOnce(),
+    );
 
     act(() => mocks.connectionListener?.({ status: "connecting" }));
     expect(cancelIdleCallback).toHaveBeenCalledWith(41);

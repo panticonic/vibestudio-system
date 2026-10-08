@@ -11,14 +11,22 @@ import { isRpcConnectionLost } from "@vibestudio/rpc";
  */
 
 import { useEffect, useLayoutEffect, useRef } from "react";
-import type { EventName, EventPayloads, ShellWorkspaceClient } from "./workspaceClient";
+import type {
+  EventName,
+  EventPayloads,
+  ShellWorkspaceClient,
+} from "./workspaceClient";
 import { useShellWorkspaceClient } from "./workspaceContext";
 
 // Re-export for consumers
 export type { EventPayloads } from "./client.js";
 
 /** Refcount per event name. Shared across all hook instances. */
-const references = new WeakMap<ShellWorkspaceClient["events"], Map<EventName, number>>();
+type Subscription = { count: number; ready: Promise<void> };
+const references = new WeakMap<
+  ShellWorkspaceClient["events"],
+  Map<EventName, Subscription>
+>();
 function subscriptionsFor(events: ShellWorkspaceClient["events"]) {
   let refs = references.get(events);
   if (!refs) {
@@ -28,29 +36,36 @@ function subscriptionsFor(events: ShellWorkspaceClient["events"]) {
   return refs;
 }
 
-function addSubscription(events: ShellWorkspaceClient["events"], event: EventName): void {
-  const subscriptionRefcounts = subscriptionsFor(events);
-  const prev = subscriptionRefcounts.get(event) ?? 0;
-  subscriptionRefcounts.set(event, prev + 1);
-  if (prev === 0) {
-    void events.subscribe(event).catch((err: unknown) => {
-      if (!isRpcConnectionLost(err)) console.warn(`[useShellEvent] watch ${event} failed:`, err);
-    });
+function addSubscription(
+  events: ShellWorkspaceClient["events"],
+  event: EventName,
+): Promise<void> {
+  const refs = subscriptionsFor(events);
+  const existing = refs.get(event);
+  if (existing) {
+    existing.count += 1;
+    return existing.ready;
   }
+  const ready = events.subscribe(event);
+  refs.set(event, { count: 1, ready });
+  return ready;
 }
 
-function removeSubscription(events: ShellWorkspaceClient["events"], event: EventName): void {
+function removeSubscription(
+  events: ShellWorkspaceClient["events"],
+  event: EventName,
+): void {
   const subscriptionRefcounts = subscriptionsFor(events);
-  const prev = subscriptionRefcounts.get(event) ?? 0;
-  if (prev <= 0) return;
-  if (prev === 1) {
+  const subscription = subscriptionRefcounts.get(event);
+  if (!subscription) return;
+  if (subscription.count === 1) {
     subscriptionRefcounts.delete(event);
     void events.unsubscribe(event).catch((err: unknown) => {
       if (!isRpcConnectionLost(err))
         console.warn(`[useShellEvent] unsubscribe ${event} failed:`, err);
     });
   } else {
-    subscriptionRefcounts.set(event, prev - 1);
+    subscription.count -= 1;
   }
 }
 
@@ -69,7 +84,8 @@ function removeSubscription(events: ShellWorkspaceClient["events"], event: Event
  */
 export function useShellEvent<E extends EventName>(
   event: E,
-  callback: (data: EventPayloads[E]) => void
+  callback: (data: EventPayloads[E]) => void,
+  readSnapshot?: (signal: AbortSignal) => void | Promise<void>,
 ): void {
   const { events } = useShellWorkspaceClient();
   // Use ref to store the latest callback without triggering effect re-runs
@@ -83,11 +99,22 @@ export function useShellEvent<E extends EventName>(
 
   useEffect(() => {
     const cleanup = events.on(event, (payload) => callbackRef.current(payload));
-    addSubscription(events, event);
+    const lifetime = new AbortController();
+    // Read only after the watch is installed. Revisions at the consumer then
+    // close the event/query race, including updates during watch opening.
+    void addSubscription(events, event)
+      .then(() => {
+        if (!lifetime.signal.aborted) return readSnapshot?.(lifetime.signal);
+      })
+      .catch((error: unknown) => {
+        if (!lifetime.signal.aborted && !isRpcConnectionLost(error))
+          console.warn(`[useShellEvent] watch ${event} failed:`, error);
+      });
 
     return () => {
+      lifetime.abort();
       cleanup();
       removeSubscription(events, event);
     };
-  }, [events, event]); // Only depend on event, not callback
+  }, [events, event, readSnapshot]);
 }

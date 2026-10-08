@@ -4,8 +4,7 @@ import { Box, Button, Flex, Spinner, Text } from "@radix-ui/themes";
 import { VibestudioLogo } from "@workspace/ui/brand";
 import type { PanelPresentationSnapshot } from "@vibestudio/shared/panel/presentation";
 
-
-import { useDirectShellEvent } from "../shell/useDirectShellEvent";
+import { useShellEvent } from "../shell/useShellEvent";
 import { PanelSurface } from "./PanelSurface";
 import { nativeSlotIdForPane } from "../layout/types";
 
@@ -57,55 +56,72 @@ export function PaneContent({
 }: PaneContentProps) {
   const { panel: panelService, view } = useShellWorkspaceClient();
 
-  const [snapshot, setSnapshot] = useState<PanelPresentationSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<PanelPresentationSnapshot | null>(
+    null,
+  );
   const [takeoverBusy, setTakeoverBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [slow, setSlow] = useState(false);
 
-  useDirectShellEvent(
-    "panel-local-presentation-changed",
-    useCallback(
-      (next) => {
-        if (next.presentation.slotId !== panelId) return;
-        setSnapshot((current) => (!current || next.revision > current.revision ? next : current));
-      },
-      [panelId]
-    )
+  const acceptSnapshot = useCallback(
+    (next: PanelPresentationSnapshot) => {
+      if (next.presentation.slotId !== panelId) return;
+      setSnapshot((current) =>
+        !current || next.revision > current.revision ? next : current,
+      );
+    },
+    [panelId],
   );
-
+  const readSnapshot = useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        const next = await panelService.getLocalPresentation(panelId);
+        if (!signal.aborted) acceptSnapshot(next);
+      } catch (error) {
+        if (!signal.aborted)
+          setActionError(
+            error instanceof Error ? error.message : String(error),
+          );
+      }
+    },
+    [acceptSnapshot, panelId, panelService],
+  );
+  useShellEvent(
+    "panel-local-presentation-changed",
+    acceptSnapshot,
+    readSnapshot,
+  );
   useEffect(() => {
-    let live = true;
     setSnapshot(null);
-    // The event listener above is installed first. Revisions close the
-    // subscribe/query race without polling or a second readiness predicate.
-    void panelService
-      .getLocalPresentation(panelId)
-      .then((next) => {
-        if (!live) return;
-        setSnapshot((current) => (!current || next.revision > current.revision ? next : current));
-      })
-      .catch((error: unknown) => {
-        if (live) setActionError(error instanceof Error ? error.message : String(error));
-      });
-    return () => {
-      live = false;
-    };
   }, [panelId]);
 
-  const presentation = snapshot?.presentation ?? { state: "idle" as const, slotId: panelId };
+  const presentation = snapshot?.presentation ?? {
+    state: "idle" as const,
+    slotId: panelId,
+  };
 
   useEffect(() => {
     setActionError(null);
     setSlow(false);
     if (presentation.state !== "loading") return;
     const elapsed = Math.max(0, Date.now() - presentation.enteredAt);
-    const timer = window.setTimeout(() => setSlow(true), Math.max(0, 60_000 - elapsed));
+    const timer = window.setTimeout(
+      () => setSlow(true),
+      Math.max(0, 60_000 - elapsed),
+    );
     return () => window.clearTimeout(timer);
-  }, [presentation.state, presentation.state === "loading" ? presentation.attemptId : ""]);
+  }, [
+    presentation.state,
+    presentation.state === "loading" ? presentation.attemptId : "",
+  ]);
 
   if (!resident) {
     return (
-      <Box data-panel-content-state="parked" data-panel-id={panelId} style={{ flex: "1 1 0" }} />
+      <Box
+        data-panel-content-state="parked"
+        data-panel-id={panelId}
+        style={{ flex: "1 1 0" }}
+      />
     );
   }
 
@@ -117,7 +133,8 @@ export function PaneContent({
           This panel is not responding
         </Text>
         <Text size="2" color="gray" align="center">
-          Its renderer may be busy or stuck. You can wait, or force a clean reload.
+          Its renderer may be busy or stuck. You can wait, or force a clean
+          reload.
         </Text>
         <Flex gap="2">
           <Button variant="soft" onClick={() => onDismissUnresponsive(panelId)}>
@@ -149,7 +166,9 @@ export function PaneContent({
             void panelService
               .takeOver(panelId)
               .catch((error: unknown) =>
-                setActionError(error instanceof Error ? error.message : String(error))
+                setActionError(
+                  error instanceof Error ? error.message : String(error),
+                ),
               )
               .finally(() => setTakeoverBusy(false));
           }}
@@ -173,10 +192,15 @@ export function PaneContent({
           {presentation.message}
         </Text>
         <Flex gap="2">
-          <Button variant="soft" onClick={() => void panelService.reload(panelId)}>
+          <Button
+            variant="soft"
+            onClick={() => void panelService.reload(panelId)}
+          >
             Retry
           </Button>
-          <Button onClick={() => void panelService.rebuildPanel(panelId)}>Rebuild</Button>
+          <Button onClick={() => void panelService.rebuildPanel(panelId)}>
+            Rebuild
+          </Button>
         </Flex>
       </CenteredState>
     );
@@ -186,9 +210,15 @@ export function PaneContent({
         state={presentation.state === "loading" ? "preparing" : "loading"}
         panelId={panelId}
       >
-        {presentation.state === "idle" ? <VibestudioLogo size={56} variant="symbol" /> : null}
+        {presentation.state === "idle" ? (
+          <VibestudioLogo size={56} variant="symbol" />
+        ) : null}
         <Spinner size="3" />
-        <Text>{presentation.state === "loading" ? "Preparing panel..." : "Loading panel..."}</Text>
+        <Text>
+          {presentation.state === "loading"
+            ? "Preparing panel..."
+            : "Loading panel..."}
+        </Text>
         {slow ? (
           <Flex direction="column" align="center" gap="2">
             <Text size="2" color="amber">
@@ -198,11 +228,16 @@ export function PaneContent({
               <Button
                 size="1"
                 variant="soft"
-                onClick={() => void panelService.createAboutPanel("server-logs")}
+                onClick={() =>
+                  void panelService.createAboutPanel("server-logs")
+                }
               >
                 View server logs
               </Button>
-              <Button size="1" onClick={() => void panelService.reload(panelId)}>
+              <Button
+                size="1"
+                onClick={() => void panelService.reload(panelId)}
+              >
                 Retry
               </Button>
             </Flex>
