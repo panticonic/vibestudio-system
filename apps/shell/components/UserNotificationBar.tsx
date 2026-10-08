@@ -21,7 +21,10 @@ import {
   type ShellChannelInvite,
   type ShellUserNotification,
 } from "../shell/client";
-import type { AgentMessageNotificationData } from "@vibestudio/shared/userNotifications";
+import {
+  templateUpdateNotificationPrompt,
+  type AgentMessageNotificationData,
+} from "@vibestudio/shared/userNotifications";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
 
 import { openConversationSurfaceAtom } from "../state/commandAgentAtoms";
@@ -71,6 +74,7 @@ export function groupNotifications(
 export function UserNotificationBar() {
   const {
     userNotifications,
+    panel,
     events,
     notification: shellToast,
   } = useShellWorkspaceClient();
@@ -531,6 +535,42 @@ export function UserNotificationBar() {
     );
   };
 
+  const reviewTemplateUpdate = async (
+    entry: ShellUserNotification,
+    prompt: string,
+  ) => {
+    setBusyNotificationId(entry.id);
+    setError(null);
+    try {
+      await panel.createPanel("panels/chat", {
+        focus: true,
+        stateArgs: { seed: { openingRequest: prompt } },
+      });
+      await userNotifications.acknowledge(entry.id);
+      removeLocal(entry.id);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusyNotificationId(null);
+    }
+  };
+
+  const renderTemplateUpdateAction = (entry: ShellUserNotification) => {
+    const prompt = templateUpdateNotificationPrompt(entry);
+    if (!prompt) return null;
+    const isBusy = busyNotificationId === entry.id;
+    return (
+      <Button
+        size="1"
+        disabled={isBusy}
+        onClick={() => void reviewTemplateUpdate(entry, prompt)}
+      >
+        {isBusy ? <Spinner size="1" /> : null}
+        Review and merge with an agent
+      </Button>
+    );
+  };
+
   const renderRow = (
     entry: ShellUserNotification,
     options: { count?: number },
@@ -562,6 +602,7 @@ export function UserNotificationBar() {
             ×{options.count}
           </Badge>
         ) : null}
+        {renderTemplateUpdateAction(entry)}
         {rowInvite ? (
           <Button
             size="1"
@@ -637,6 +678,7 @@ export function UserNotificationBar() {
           {invite ? "Invitation" : agentMessage ? "Message" : "Notification"}
         </Badge>
         {renderSummary(notification)}
+        {renderTemplateUpdateAction(notification)}
         {groupSize > 1 ? (
           <Badge
             color="gray"

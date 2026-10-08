@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ShellUserNotification } from "../shell/client";
 
 const shellClient = vi.hoisted(() => ({
+  createPanel: vi.fn(),
   list: vi.fn(),
   openChannel: vi.fn(),
   acknowledge: vi.fn(),
@@ -24,6 +25,7 @@ const directEventHandlers = vi.hoisted(
 
 vi.mock("../shell/client", () => ({
   userNotifications: shellClient,
+  panel: { createPanel: shellClient.createPanel },
   notification: toastClient,
   events: {
     on: () => () => undefined,
@@ -152,6 +154,9 @@ describe("UserNotificationBar", () => {
   beforeEach(() => {
     watchedEventHandlers.clear();
     directEventHandlers.clear();
+    shellClient.createPanel
+      .mockReset()
+      .mockResolvedValue({ id: "review-chat" });
     shellClient.list.mockReset().mockResolvedValue([]);
     shellClient.openChannel.mockReset().mockResolvedValue({ id: "panel-chat" });
     shellClient.acknowledge.mockReset().mockResolvedValue(true);
@@ -159,6 +164,66 @@ describe("UserNotificationBar", () => {
       .mockReset()
       .mockResolvedValue({ contextId: "ctx-build", title: "Build channel" });
     toastClient.show.mockReset().mockResolvedValue("toast-1");
+  });
+
+  it("launches the parent-merge agent before acknowledging the durable update notice", async () => {
+    const notice = {
+      id: "parent-update",
+      userId: "usr_bob",
+      kind: "workspace.template-update",
+      title: "Parent template updates available",
+      data: {
+        prompt:
+          "Review exact parent commit, preserve local edits, and prepare a merge.",
+      },
+      createdAt: 30,
+      revision: 1,
+    };
+    shellClient.list.mockResolvedValue([notice]);
+    render(<UserNotificationBar />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Review and merge with an agent",
+      }),
+    );
+    await waitFor(() =>
+      expect(shellClient.acknowledge).toHaveBeenCalledWith(notice.id),
+    );
+    expect(shellClient.createPanel).toHaveBeenCalledWith("panels/chat", {
+      focus: true,
+      stateArgs: { seed: { openingRequest: notice.data.prompt } },
+    });
+    expect(shellClient.createPanel.mock.invocationCallOrder[0]).toBeLessThan(
+      shellClient.acknowledge.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("keeps the update notice actionable when launching its agent fails", async () => {
+    shellClient.list.mockResolvedValue([
+      {
+        id: "parent-update",
+        userId: "usr_bob",
+        kind: "workspace.template-update",
+        title: "Parent template updates available",
+        data: { prompt: "Prepare the parent merge" },
+        createdAt: 30,
+        revision: 1,
+      },
+    ]);
+    shellClient.createPanel.mockRejectedValueOnce(
+      new Error("Chat unavailable"),
+    );
+    render(<UserNotificationBar />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Review and merge with an agent",
+      }),
+    );
+    expect(await screen.findByText("Chat unavailable")).toBeTruthy();
+    expect(shellClient.acknowledge).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Review and merge with an agent" }),
+    ).toBeTruthy();
   });
 
   it("renders a channel invitation from the generic inbox", async () => {
