@@ -67,6 +67,7 @@ import {
   commandAgentRequestAtom,
   conversationSurfaceRequestAtom,
   type ConversationSurfaceRequest,
+  type CommandAgentOpenRequest,
 } from "../state/commandAgentAtoms";
 import { useNavigationActions } from "./NavigationContext";
 import {
@@ -426,48 +427,38 @@ export function QuickfireOwner() {
     "open-command-palette",
     useCallback(() => open("all"), [open]),
   );
-  // A panel or skill handing the user to the agent that sees a panel
-  // (`app.openShellSurface({ kind: "command-agent", … })`). A prompt lands in
-  // the compose box of the `/` surface; nothing is sent on the caller's behalf.
-  useShellEvent(
-    "open-command-agent",
-    useCallback(
-      (request) => {
-        const mode = request?.mode ?? (request?.prompt ? "quickfire" : "all");
-        const options = {
-          ...(request?.panelId ? { panelId: request.panelId } : {}),
-          ...(request?.prompt ? { prompt: request.prompt } : {}),
-        };
-        if (!request?.panelId) {
-          open(mode, options);
-          return;
-        }
-        // Coherence: the overlay is bound to the named panel, so that panel
-        // must be the one the user is looking at — otherwise the conversation
-        // would be "about" a panel they cannot see, and dismissal would return
-        // them to the wrong place. Focus first, then open; a panel that cannot
-        // be focused (gone, or not ours to focus) still gets the overlay bound
-        // to it, which the header names explicitly.
-        void panel
-          .focus(request.panelId)
-          .catch(() => {})
-          .then(() => open(mode, options));
-      },
-      [open],
-    ),
+  // Host entry points and chrome requests share targeting and compose behavior.
+  const openRequestedAgent = useCallback(
+    (
+      request?: Partial<
+        Pick<CommandAgentOpenRequest, "mode" | "panelId" | "prompt">
+      >,
+    ) => {
+      const mode = request?.mode ?? (request?.prompt ? "quickfire" : "all");
+      const options = {
+        ...(request?.panelId ? { panelId: request.panelId } : {}),
+        ...(request?.prompt ? { prompt: request.prompt } : {}),
+      };
+      if (!request?.panelId) {
+        open(mode, options);
+        return;
+      }
+      // Focus the panel this conversation is about before opening its overlay.
+      // If it has gone away, keep the named target so the header can explain it.
+      void panel
+        .focus(request.panelId)
+        .catch(() => {})
+        .then(() => open(mode, options));
+    },
+    [open],
   );
-  // Chrome-side requests (tree button, breadcrumb and tree context menus) come
-  // through an atom because a renderer cannot emit shell events.
+  useShellEvent("open-command-agent", openRequestedAgent);
+
+  // Chrome uses the workspace's existing atom; repeating an ask reopens it.
   const commandAgentRequest = useAtomValue(commandAgentRequestAtom);
   useEffect(() => {
-    if (!commandAgentRequest) return;
-    open(commandAgentRequest.mode, {
-      ...(commandAgentRequest.panelId
-        ? { panelId: commandAgentRequest.panelId }
-        : {}),
-    });
-    // `sequence` is the identity of the request: repeating the same ask reopens.
-  }, [commandAgentRequest, open]);
+    if (commandAgentRequest) openRequestedAgent(commandAgentRequest);
+  }, [commandAgentRequest, openRequestedAgent]);
   // A notification asking to talk to the agent that sent it (plan §4.8): the
   // same overlay, in `/` mode, bound to that conversation instead of a slot.
   const conversationRequest = useAtomValue(conversationSurfaceRequestAtom);

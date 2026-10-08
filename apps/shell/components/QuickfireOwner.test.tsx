@@ -2,6 +2,8 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickfireOwner } from "./QuickfireOwner";
+import { createStore, Provider } from "jotai";
+import { openCommandAgentAtom } from "../state/commandAgentAtoms";
 
 const api = vi.hoisted(() => ({
   events: new Map<string, (payload?: unknown) => void>(),
@@ -11,6 +13,8 @@ const api = vi.hoisted(() => ({
   chrome: vi.fn(),
   reportFailure: vi.fn(),
   list: vi.fn(async () => [] as Array<{ slotId: string; promotedAt: null }>),
+  focus: vi.fn(async () => {}),
+  surface: null as null | { props: { mode: string; inputValue: string } },
 }));
 vi.mock("../shell/workspaceContext", () => {
   const client = {
@@ -18,7 +22,7 @@ vi.mock("../shell/workspaceContext", () => {
     panel: {
       getFocusedPanelId: async () => api.focused,
       getChromeState: api.chrome,
-      focus: async () => {},
+      focus: api.focus,
       listPinnedPanelIds: async () => [],
       getRootGroups: async () => ({ groups: [] }),
     },
@@ -46,7 +50,11 @@ vi.mock("../shell/useShellEvent", async () => {
   };
 });
 vi.mock("../shell/useShellContentOverlay", () => ({
-  useShellContentOverlay: (_options: unknown, intent: typeof api.intent) => {
+  useShellContentOverlay: (
+    options: typeof api.surface,
+    intent: typeof api.intent,
+  ) => {
+    api.surface = options;
     api.intent = intent;
   },
 }));
@@ -108,10 +116,49 @@ beforeEach(() => {
   api.chrome.mockReset().mockImplementation(async (id: string) => chrome(id));
   api.list.mockReset().mockResolvedValue([]);
   api.reportFailure.mockReset();
+  api.focus.mockClear();
+  api.surface = null;
 });
 afterEach(cleanup);
 
 describe("Quickfire opening ownership", () => {
+  it("focuses a chrome request's source panel and opens its complete repair draft", async () => {
+    const store = createStore();
+    const host = document.createElement("div");
+    host.id = "app-quickfire-host:system";
+    host.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 900,
+      bottom: 800,
+      width: 900,
+      height: 800,
+      toJSON: () => ({}),
+    });
+    document.body.appendChild(host);
+    try {
+      render(
+        <Provider store={store}>
+          <QuickfireOwner />
+        </Provider>,
+      );
+      const prompt =
+        "Help me fix this error\n" + "full diagnostic\n".repeat(400);
+      act(() =>
+        store.set(openCommandAgentAtom, { panelId: "failed-panel", prompt }),
+      );
+      await waitFor(() =>
+        expect(api.surface?.props.inputValue).toBe("/" + prompt),
+      );
+      expect(api.surface?.props.mode).toBe("quickfire");
+      expect(api.focus).toHaveBeenCalledWith("failed-panel");
+      expect(api.bindings.at(-1)).toBe("failed-panel");
+    } finally {
+      host.remove();
+    }
+  });
   it("reopens on the new panel before its chrome read finishes, without binding the old session", async () => {
     render(<QuickfireOwner />);
     await open();
@@ -162,7 +209,9 @@ describe("Quickfire opening ownership", () => {
     render(<QuickfireOwner />);
     await open();
     act(() => {
-      api.events.get("panel-tree-invalidated")?.({ removedSlotIds: ["panel-a"] });
+      api.events.get("panel-tree-invalidated")?.({
+        removedSlotIds: ["panel-a"],
+      });
     });
     expect(api.bindings.at(-1)).toBe(null);
   });

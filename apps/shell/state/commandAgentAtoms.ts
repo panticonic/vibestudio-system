@@ -19,6 +19,8 @@ export interface CommandAgentOpenRequest {
   mode: QuickfireMode;
   /** Panel the request was made about; falls back to the focused panel. */
   panelId?: string;
+  /** Prepared compose text; the user reviews and sends it. */
+  prompt?: string;
   sequence: number;
 }
 
@@ -33,11 +35,16 @@ export const commandAgentRequestAtom = atom<CommandAgentOpenRequest | null>(
  */
 export const openCommandAgentAtom = atom(
   null,
-  (get, set, request?: { mode?: QuickfireMode; panelId?: string }) => {
+  (
+    get,
+    set,
+    request?: { mode?: QuickfireMode; panelId?: string; prompt?: string },
+  ) => {
     const previous = get(commandAgentRequestAtom);
     set(commandAgentRequestAtom, {
-      mode: request?.mode ?? "all",
+      mode: request?.mode ?? (request?.prompt ? "quickfire" : "all"),
       ...(request?.panelId ? { panelId: request.panelId } : {}),
+      ...(request?.prompt ? { prompt: request.prompt } : {}),
       sequence: (previous?.sequence ?? 0) + 1,
     });
   },

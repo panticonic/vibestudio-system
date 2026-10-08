@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
+import { createStore, Provider } from "jotai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EventName,
@@ -58,13 +59,18 @@ import { useShellEvent } from "../shell/useShellEvent";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 import { NotificationBar } from "./NotificationBar";
 import { WorkspaceNavigationHostContext } from "../shell/workspaceContext";
+import { commandAgentRequestAtom } from "../state/commandAgentAtoms";
 
 function renderBar() {
-  render(
-    <Theme>
-      <NotificationBar />
-    </Theme>,
+  const store = createStore();
+  const view = render(
+    <Provider store={store}>
+      <Theme>
+        <NotificationBar />
+      </Theme>
+    </Provider>,
   );
+  return { store, ...view };
 }
 
 function emitShellEvent<E extends EventName>(
@@ -111,30 +117,80 @@ describe("NotificationBar", () => {
     shellClient.dismiss.mockClear();
   });
 
+  it("opens a repair chat with the full collapsed diagnostics and preserves the error", () => {
+    const { store } = renderBar();
+    const payload: NotificationPayload = {
+      id: "failed-publication",
+      type: "error",
+      title: "Workspace update failed",
+      sourcePanelId: "panel:onboarding",
+      message: "Typecheck failed\n" + "diagnostic evidence\n".repeat(300),
+      details: [{ label: "Diagnostic 2", value: "Property roster is missing" }],
+      history: [
+        {
+          title: "Previous attempt",
+          message: "Original failure",
+          timestamp: 1,
+        },
+      ],
+    };
+    emitShellEvent("notification:show", payload);
+    expect(screen.queryByTestId("notification-details-pane")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fix with AI" }));
+
+    const request = store.get(commandAgentRequestAtom);
+    expect(request).toMatchObject({
+      mode: "quickfire",
+      panelId: "panel:onboarding",
+    });
+    const evidence = JSON.parse(
+      request!.prompt!.split("Notification details:\n\n")[1]!,
+    );
+    expect(evidence).toMatchObject(payload);
+    expect(request!.prompt!.length).toBeGreaterThan(4_000);
+    expect(screen.getByText("Workspace update failed")).toBeTruthy();
+    expect(shellClient.reportAction).not.toHaveBeenCalled();
+  });
+
+  it("offers repair chat for errors while leaving routine notifications alone", () => {
+    renderBar();
+    emitShellEvent("notification:show", {
+      id: "saved",
+      type: "success",
+      title: "Saved",
+      ttl: 0,
+    });
+    expect(screen.queryByRole("button", { name: "Fix with AI" })).toBeNull();
+  });
+
   it("shows a background workspace notification in the visible host and keeps its action", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const focus = vi.fn();
+    const store = createStore();
     const view = render(
-      <WorkspaceNavigationHostContext.Provider
-        value={{
-          element: null,
-          scrollElement: null,
-          titleBarHost: null,
-          notificationHost: host,
-          setNotificationHost: vi.fn(),
-          workspaceId: "personal",
-          workspaceLabel: "Personal",
-          workspaceNames: { personal: "Personal", system: "System" },
-          sidebarVisible: true,
-          toggleSidebar: vi.fn(),
-          focus,
-        }}
-      >
-        <div hidden>
-          <NotificationBar />
-        </div>
-      </WorkspaceNavigationHostContext.Provider>,
+      <Provider store={store}>
+        <WorkspaceNavigationHostContext.Provider
+          value={{
+            element: null,
+            scrollElement: null,
+            titleBarHost: null,
+            notificationHost: host,
+            setNotificationHost: vi.fn(),
+            workspaceId: "personal",
+            workspaceLabel: "Personal",
+            workspaceNames: { personal: "Personal", system: "System" },
+            sidebarVisible: true,
+            toggleSidebar: vi.fn(),
+            focus,
+          }}
+        >
+          <div hidden>
+            <NotificationBar />
+          </div>
+        </WorkspaceNavigationHostContext.Provider>
+      </Provider>,
     );
     try {
       emitDirectShellEvent("notification:show", {
@@ -167,6 +223,19 @@ describe("NotificationBar", () => {
         focus: true,
         stateArgs: undefined,
       });
+      emitDirectShellEvent("notification:show", {
+        id: "personal-error",
+        type: "error",
+        title: "Personal workspace failed",
+        sourcePanelId: "personal-panel",
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Fix with AI" }));
+      expect(focus).toHaveBeenCalledTimes(2);
+      expect(store.get(commandAgentRequestAtom)).toMatchObject({
+        mode: "quickfire",
+        panelId: "personal-panel",
+      });
+      expect(host.textContent).toContain("Personal workspace failed");
     } finally {
       view.unmount();
       host.remove();

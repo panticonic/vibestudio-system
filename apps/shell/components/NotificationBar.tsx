@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import { useSetAtom } from "jotai";
 import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 /**
  * NotificationBar — centralized notification display in the shell chrome area.
@@ -21,12 +22,15 @@ import {
   LockClosedIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ChatBubbleIcon,
 } from "@radix-ui/react-icons";
 import { useShellEvent } from "../shell/useShellEvent";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 
 import type { NotificationPayload } from "@vibestudio/shared/events";
 import { assertPresent } from "../utils/assertPresent";
+import { openCommandAgentAtom } from "../state/commandAgentAtoms";
+import { notificationFixPrompt } from "./notificationFixPrompt";
 
 /** Default TTLs by notification type (ms). 0 = no auto-dismiss. */
 const DEFAULT_TTLS: Record<NotificationPayload["type"], number> = {
@@ -95,6 +99,7 @@ function panelOpenInstruction(value: unknown): {
 
 export function NotificationBar() {
   const navigationHost = useWorkspaceNavigationHost();
+  const openCommandAgent = useSetAtom(openCommandAgentAtom);
   const { app, browserEnvironment, extensions, notification, panel, supervisedUnits } = useShellWorkspaceClient();
 
   const [notifications, setNotifications] = useState<Map<string, NotificationPayload>>(new Map());
@@ -308,6 +313,13 @@ export function NotificationBar() {
         onToggleExpanded={toggleExpanded}
         onAction={handleAction}
         onDismiss={dismissNotification}
+        onFix={(failure) => {
+          navigationHost?.focus();
+          openCommandAgent({
+            panelId: failure.sourcePanelId,
+            prompt: notificationFixPrompt(failure),
+          });
+        }}
       />
     </div>
   );
@@ -325,6 +337,7 @@ function ToastNotification({
   onToggleExpanded,
   onAction,
   onDismiss,
+  onFix,
 }: {
   notification: NotificationPayload;
   queuedNotifications: NotificationPayload[];
@@ -332,6 +345,7 @@ function ToastNotification({
   onToggleExpanded: (id: string) => void;
   onAction: (id: string, action: NonNullable<NotificationPayload["actions"]>[number]) => void;
   onDismiss: (id: string) => void;
+  onFix: (notification: NotificationPayload) => void;
 }) {
   const multilineMessage = notification.message?.includes("\n") ? notification.message : null;
   const summaryMessage = firstLine(notification.message);
@@ -379,6 +393,12 @@ function ToastNotification({
           )}
         </Flex>
         <Flex gap="2" align="center" style={{ flexShrink: 0 }}>
+          {notification.type === "error" && (
+            <Button size="1" variant="soft" onClick={() => onFix(notification)}>
+              <ChatBubbleIcon />
+              Fix with AI
+            </Button>
+          )}
           {hasExpandableContent && (
             <Button
               size="1"
