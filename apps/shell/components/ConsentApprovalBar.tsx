@@ -329,9 +329,7 @@ export function ConsentApprovalBar({
     current ? `${ownerKey}:${current.approvalId}` : "none",
   );
 
-  const minimized =
-    current != null &&
-    (!presentation.state.open || current.lifecycle?.state === "preparing");
+  const minimized = current != null && !presentation.state.open;
   const queueLength = presentation.entries.length;
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;

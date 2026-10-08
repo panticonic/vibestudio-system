@@ -782,10 +782,17 @@ describe("ConsentApprovalBar coordinator", () => {
     ]);
     mountBar();
 
-    await screen.findByRole("button", {
+    const review = await screen.findByRole("button", {
       name: "Review approval: Preparing workspace update…",
     });
     expect(overlay.options).toBeNull();
+    fireEvent.click(review);
+    await waitFor(() => expect(overlay.options?.open).toBe(true));
+    expect(overlay.options?.props?.approval?.approvalId).toBe("preparing");
+    emit({ type: "minimize", approvalId: "preparing" });
+    await screen.findByRole("button", {
+      name: "Review approval: Preparing workspace update…",
+    });
 
     const pendingChangedListener = shellClient.onEvent.mock.calls.find(
       ([event]) => event === "shell-approval:pending-changed",
@@ -805,6 +812,31 @@ describe("ConsentApprovalBar coordinator", () => {
     await waitFor(() =>
       expect(overlay.options?.props?.approval?.approvalId).toBe("preparing"),
     );
+  });
+
+  it("removes an inspected preparation when its owning operation ends", async () => {
+    shellClient.listPending.mockResolvedValueOnce([
+      capabilityApproval({
+        approvalId: "preparing-ended",
+        title: "Preparing workspace update…",
+        lifecycle: { state: "preparing" },
+      }),
+    ]);
+    mountBar();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Review approval: Preparing workspace update…",
+      }),
+    );
+    await waitFor(() => expect(overlay.options?.open).toBe(true));
+    const listener = shellClient.onEvent.mock.calls.find(
+      ([event]) => event === "shell-approval:pending-changed",
+    )?.[1];
+    act(() => listener?.({ pending: [] }));
+    await waitFor(() => expect(overlay.options).toBeNull());
+    expect(
+      screen.queryByRole("button", { name: /Review approval/ }),
+    ).toBeNull();
   });
 
   it("keeps actionable approvals in arrival order regardless of attention hint", async () => {
