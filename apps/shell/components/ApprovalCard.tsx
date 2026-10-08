@@ -287,6 +287,13 @@ export function ApprovalCard({
           values: secretConfigValues,
         });
       } else if (approval.kind === "credential-input") {
+        if (
+          approval.fields.some(
+            (field) =>
+              field.required && !secretConfigValues[field.name]?.trim(),
+          )
+        )
+          return;
         emitForApproval({
           type: "submit-credential-input",
           values: secretConfigValues,
@@ -827,16 +834,33 @@ export function ApprovalCard({
             {approval.kind === "client-config" ||
             approval.kind === "credential-input" ||
             approval.kind === "secret-input" ? (
-              <SecretConfigFields
-                approval={approval}
-                values={secretConfigValues}
-                onChange={(name, value) =>
-                  setSecretConfigValues((previous) => ({
-                    ...previous,
-                    [name]: value,
-                  }))
-                }
-              />
+              approval.kind === "credential-input" &&
+              approval.browserSignIn?.callbackExpected ? (
+                <details className="approval-details">
+                  <summary>Enter code or redirect URL</summary>
+                  <SecretConfigFields
+                    approval={approval}
+                    values={secretConfigValues}
+                    onChange={(name, value) =>
+                      setSecretConfigValues((previous) => ({
+                        ...previous,
+                        [name]: value,
+                      }))
+                    }
+                  />
+                </details>
+              ) : (
+                <SecretConfigFields
+                  approval={approval}
+                  values={secretConfigValues}
+                  onChange={(name, value) =>
+                    setSecretConfigValues((previous) => ({
+                      ...previous,
+                      [name]: value,
+                    }))
+                  }
+                />
+              )
             ) : null}
           </Flex>
         </Flex>
@@ -1353,27 +1377,42 @@ function CredentialInputActions({
   );
   return (
     <Flex align="center" className="approval-actions" gap="2" wrap="wrap">
-      <Tooltip
-        content={
-          missingRequired
-            ? HOST_APPROVAL_COPY.forms.missingSecret
-            : HOST_APPROVAL_COPY.forms.saveServiceDescription
-        }
-      >
-        <Button
-          size="1"
-          variant="solid"
-          disabled={missingRequired}
-          onClick={onSubmit}
+      {!approval.browserSignIn ||
+      Object.values(values).some((value) => value.trim()) ? (
+        <Tooltip
+          content={
+            missingRequired
+              ? HOST_APPROVAL_COPY.forms.missingSecret
+              : approval.browserSignIn
+                ? "Continue sign-in with this code."
+                : HOST_APPROVAL_COPY.forms.saveServiceDescription
+          }
         >
-          <CheckCircledIcon />
-          {HOST_APPROVAL_COPY.forms.saveService}
-        </Button>
-      </Tooltip>
+          <Button
+            size="1"
+            variant="solid"
+            disabled={missingRequired}
+            onClick={onSubmit}
+          >
+            <CheckCircledIcon />
+            {approval.browserSignIn
+              ? "Submit code"
+              : HOST_APPROVAL_COPY.forms.saveService}
+          </Button>
+        </Tooltip>
+      ) : null}
       <DecisionButton
         decision="deny"
-        label={HOST_APPROVAL_COPY.chrome.deny}
-        description={HOST_APPROVAL_COPY.forms.saveServiceDenied}
+        label={
+          approval.browserSignIn
+            ? "Cancel sign-in"
+            : HOST_APPROVAL_COPY.chrome.deny
+        }
+        description={
+          approval.browserSignIn
+            ? "Cancel this sign-in."
+            : HOST_APPROVAL_COPY.forms.saveServiceDenied
+        }
         color="red"
         icon={<CrossCircledIcon />}
         onClick={onDeny}
@@ -1752,11 +1791,13 @@ function SecretConfigFields({
 }) {
   return (
     <Flex direction="column" gap="2" pt="1" style={{ maxWidth: 620 }}>
-      <Text size="1" color="gray" style={{ lineHeight: 1.35 }}>
-        {approval.kind === "secret-input"
-          ? HOST_APPROVAL_COPY.forms.ephemeralSecretHelp
-          : HOST_APPROVAL_COPY.forms.storedSecretHelp}
-      </Text>
+      {!(approval.kind === "credential-input" && approval.browserSignIn) ? (
+        <Text size="1" color="gray" style={{ lineHeight: 1.35 }}>
+          {approval.kind === "secret-input"
+            ? HOST_APPROVAL_COPY.forms.ephemeralSecretHelp
+            : HOST_APPROVAL_COPY.forms.storedSecretHelp}
+        </Text>
+      ) : null}
       {approval.fields.map((field) => (
         <Flex key={field.name} direction="column" gap="1">
           <Flex align="center" gap="2" wrap="wrap">

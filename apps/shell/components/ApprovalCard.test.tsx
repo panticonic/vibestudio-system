@@ -13,6 +13,7 @@ import type {
   PendingCapabilityApproval,
   PendingClientConfigApproval,
   PendingCredentialApproval,
+  PendingCredentialInputApproval,
   PendingUnitInstallReviewApproval,
 } from "@vibestudio/shared/approvals";
 import type {
@@ -1638,6 +1639,90 @@ describe("ApprovalCard", () => {
       }),
     );
   });
+
+  it.each([
+    ["external", true],
+    ["internal", true],
+    ["external", false],
+  ] as const)(
+    "waits for %s browser sign-in with callback expected: %s",
+    (browser, callbackExpected) => {
+      const approval: PendingCredentialInputApproval = {
+        kind: "credential-input",
+        approvalId: "browser-login",
+        callerId: "panel:chat",
+        callerKind: "panel",
+        repoPath: "panels/chat",
+        effectiveVersion: "ev",
+        requestedAt: Date.now(),
+        title: "Claude",
+        credentialLabel: "Claude",
+        audience: [{ url: "https://api.anthropic.com", match: "origin" }],
+        injection: {
+          type: "header",
+          name: "Authorization",
+          valueTemplate: "Bearer {{token}}",
+        },
+        accountIdentity: { providerUserId: "claude-user" },
+        scopes: [],
+        browserSignIn: { browser, callbackExpected },
+        fields: [
+          {
+            name: "value",
+            type: "text",
+            label: "Authorization code or redirect URL",
+            required: true,
+          },
+        ],
+      };
+      const emit = vi.fn();
+      render(
+        <Theme>
+          <ApprovalCardSurface
+            props={{ approval, queue: null, decisionError: null }}
+            emitIntent={emit}
+          />
+        </Theme>,
+      );
+      expect(screen.getByText("Waiting for browser sign-in")).toBeTruthy();
+      expect(
+        screen.getByText(
+          browser === "external"
+            ? "A sign-in page has opened in your external browser. Complete sign-in there, then return here."
+            : "Complete sign-in in the workspace browser, then return here.",
+        ),
+      ).toBeTruthy();
+      const disclosure = screen
+        .queryByText("Enter code or redirect URL")
+        ?.closest("details");
+      if (callbackExpected) expect(disclosure?.open).toBe(false);
+      else {
+        expect(disclosure).toBeUndefined();
+        expect(screen.getByRole("textbox")).toBeTruthy();
+      }
+      expect(screen.queryByRole("button", { name: "Submit code" })).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Cancel sign-in" }),
+      ).toBeTruthy();
+      const card = screen.getByRole("dialog");
+      fireEvent.keyDown(card, { key: "Enter" });
+      expect(emit).not.toHaveBeenCalled();
+      if (disclosure) {
+        fireEvent.click(screen.getByText("Enter code or redirect URL"));
+        disclosure.open = true;
+      }
+      fireEvent.change(screen.getByRole("textbox"), {
+        target: { value: "callback-code" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Submit code" }));
+      expect(emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "submit-credential-input",
+          values: { value: "callback-code" },
+        }),
+      );
+    },
+  );
 
   it("remounts the overlay card when the approval changes so secret inputs reset", () => {
     const first = clientConfigApproval({
