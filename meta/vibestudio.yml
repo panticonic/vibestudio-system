@@ -2,8 +2,6 @@ apps:
   - source: apps/shell
   - source: apps/mobile
   - source: apps/remote-cli
-defaultAgentConfig:
-  model: openai-codex:gpt-6.1-sol
 extensions:
   - source: extensions/typecheck-service
   - source: extensions/mobile-debug
