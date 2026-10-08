@@ -1599,6 +1599,46 @@ describe("ApprovalCard", () => {
     expect(emit).toHaveBeenCalledWith({ type: "minimize", approvalId: "m" });
   });
 
+  it("offers provider login methods and submits the selected method identifier", () => {
+    const approval = clientConfigApproval({
+      approvalId: "provider-method",
+      configId: "anthropic",
+      fields: [
+        {
+          name: "value",
+          label: "Login method",
+          type: "select",
+          required: true,
+          options: [
+            { id: "browser", label: "Browser login" },
+            { id: "copy_code", label: "Copy code login" },
+          ],
+        },
+      ],
+    });
+    const emitIntent = vi.fn();
+    render(
+      <Theme>
+        <ApprovalCardSurface
+          props={{ approval, queue: null, decisionError: null }}
+          emitIntent={emitIntent}
+        />
+      </Theme>,
+    );
+    const select = screen.getByRole("combobox", { name: "Login method" });
+    expect((select as HTMLSelectElement).value).toBe("");
+    const submit = screen.getByRole("button", { name: "Save this connection" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(select, { target: { value: "copy_code" } });
+    fireEvent.click(submit);
+    expect(emitIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "submit-client-config",
+        values: { value: "copy_code" },
+      }),
+    );
+  });
+
   it("remounts the overlay card when the approval changes so secret inputs reset", () => {
     const first = clientConfigApproval({
       approvalId: "setup-a",

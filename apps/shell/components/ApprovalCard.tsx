@@ -1774,15 +1774,45 @@ function SecretConfigFields({
               </Badge>
             ) : null}
           </Flex>
-          <TextField.Root
-            size="2"
-            type={field.type === "secret" ? "password" : "text"}
-            value={values[field.name] ?? ""}
-            placeholder={field.label}
-            onChange={(event) =>
-              onChange(field.name, event.currentTarget.value)
-            }
-          />
+          {field.type === "select" ? (
+            <select
+              aria-label={field.label}
+              value={values[field.name] ?? ""}
+              onChange={(event) =>
+                onChange(field.name, event.currentTarget.value)
+              }
+              style={{
+                width: "100%",
+                minHeight: 32,
+                padding: "4px 8px",
+                color: "var(--gray-12)",
+                background: "var(--color-background)",
+                border: "1px solid var(--gray-7)",
+                borderRadius: "var(--radius-2)",
+                font: "inherit",
+              }}
+            >
+              <option value="" disabled>
+                Choose…
+              </option>
+              {field.options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                  {option.description ? ` — ${option.description}` : ""}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <TextField.Root
+              size="2"
+              type={field.type === "secret" ? "password" : "text"}
+              value={values[field.name] ?? ""}
+              placeholder={field.label}
+              onChange={(event) =>
+                onChange(field.name, event.currentTarget.value)
+              }
+            />
+          )}
           {field.description ? (
             <Text size="1" color="gray">
               {field.description}
