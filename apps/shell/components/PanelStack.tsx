@@ -84,7 +84,6 @@ import {
 import type { FocusedPaneChromeState, PaneChromeCommand } from "./paneChrome";
 
 interface PanelStackProps {
-  onTitleChange?: (title: string) => void;
   onChromeStateChange?: (state: PanelChromeState | null) => void;
   hostTheme: "light" | "dark";
   onRegisterDevToolsHandler?: (handler: () => void) => void;
@@ -155,7 +154,6 @@ function captureHostThemeCss(): string {
 }
 
 export const PanelStack = memo(function PanelStack({
-  onTitleChange,
   onChromeStateChange,
   hostTheme,
   onRegisterDevToolsHandler,
@@ -1170,13 +1168,6 @@ export const PanelStack = memo(function PanelStack({
     // Provide the actual handler so callers don't need to double-invoke
     onRegisterDevToolsHandler?.(openDevToolsForVisiblePanel);
   }, [onRegisterDevToolsHandler, openDevToolsForVisiblePanel]);
-
-  // Notify parent of title changes
-  useEffect(() => {
-    if (onTitleChange && visiblePanel) {
-      onTitleChange(visiblePanel.title);
-    }
-  }, [onTitleChange, visiblePanel]);
 
   useEffect(() => {
     if (!visiblePanel) {

@@ -53,7 +53,6 @@ function PanelAppContent() {
   }, [themeConfig]);
 
 
-  const [currentTitle, setCurrentTitle] = useState("Vibestudio");
   const [chromeState, setChromeState] = useState<PanelChromeState | null>(null);
   const [paneChromeState, setPaneChromeState] = useState<FocusedPaneChromeState | null>(null);
 
@@ -218,7 +217,6 @@ function PanelAppContent() {
       <NextPanelBuildWarmup />
       {visible && navigationHost?.titleBarHost && createPortal(
         <TitleBar
-          title={currentTitle}
           chromeState={chromeState}
           onChromeCommand={handleChromeCommand}
           onNavigateToId={navigateToId}
@@ -259,7 +257,6 @@ function PanelAppContent() {
           style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
         />
         <PanelStack
-          onTitleChange={setCurrentTitle}
           onChromeStateChange={setChromeState}
           hostTheme={effectiveTheme}
           onRegisterDevToolsHandler={registerPanelDevTools}

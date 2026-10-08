@@ -93,7 +93,6 @@ const isMac = /Mac|iPhone|iPad|iPod/i.test(
 const MACOS_TITLEBAR_CONTROL_RESERVE_PX = 68;
 
 interface TitleBarProps {
-  title: string;
   chromeState?: PanelChromeState | null;
   onChromeCommand?: (command: ChromeCommand) => void;
   onNavigateToId?: (panelId: string) => void;
@@ -106,7 +105,6 @@ interface TitleBarProps {
 }
 
 export function TitleBar({
-  title,
   chromeState,
   onChromeCommand,
   onNavigateToId,
@@ -268,7 +266,7 @@ export function TitleBar({
               truncate
               style={{ width: "100%", textAlign: "center" }}
             >
-              {title}
+              {navigationData?.currentTitle ?? "Vibestudio"}
             </Text>
           </Box>
 
@@ -466,9 +464,8 @@ export function TitleBar({
                 </IconButton>
               </Tooltip>
             </Flex>
-          ) : (
+          ) : navigationData && (
             <BreadcrumbBar
-              title={title}
               navigationData={navigationData}
               statusNavigation={statusNavigation}
               onNavigateToId={onNavigateToId}
@@ -488,8 +485,7 @@ export function TitleBar({
 }
 
 interface BreadcrumbBarProps {
-  title: string;
-  navigationData?: LazyTitleNavigationData | null;
+  navigationData: LazyTitleNavigationData;
   statusNavigation?: LazyStatusNavigationData | null;
   onNavigateToId?: (panelId: string) => void;
   onPanelContextMenu?: (
@@ -1620,7 +1616,6 @@ function partitionBreadcrumbSiblings(
 }
 
 function BreadcrumbBar({
-  title,
   navigationData,
   statusNavigation,
   onNavigateToId,
@@ -1631,8 +1626,8 @@ function BreadcrumbBar({
 }: BreadcrumbBarProps) {
   const { menu } = useShellWorkspaceClient();
 
-  const ancestors = navigationData?.ancestors ?? [];
-  const currentSiblings = navigationData?.currentSiblings ?? [];
+  const ancestors = navigationData.ancestors;
+  const currentSiblings = navigationData.currentSiblings;
   const descendantGroups = statusNavigation?.descendantGroups ?? [];
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [maxVisibleSiblings, setMaxVisibleSiblings] = useState(
@@ -1683,7 +1678,7 @@ function BreadcrumbBar({
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      scrollBreadcrumbIdIntoView(scrollRef.current, navigationData?.currentId);
+      scrollBreadcrumbIdIntoView(scrollRef.current, navigationData.currentId);
       refreshScrollState();
     });
     return () => window.cancelAnimationFrame(frame);
@@ -1691,7 +1686,7 @@ function BreadcrumbBar({
     currentSiblings.length,
     descendantGroups.length,
     maxVisibleSiblings,
-    navigationData?.currentId,
+    navigationData.currentId,
     refreshScrollState,
   ]);
 
@@ -1706,8 +1701,7 @@ function BreadcrumbBar({
 
   const handleCurrentPanelContextMenu = (e: MouseEvent<HTMLSpanElement>) => {
     e.preventDefault();
-    const currentId = navigationData?.currentId;
-    if (!currentId) return;
+    const currentId = navigationData.currentId;
     const rect = e.currentTarget.getBoundingClientRect();
     void onPanelContextMenu?.(currentId, getWindowPositionFromRect(rect));
   };
@@ -2058,25 +2052,22 @@ function BreadcrumbBar({
         {currentSiblings.length > 0 ? (
           renderSiblingGroup(
             currentSiblings,
-            navigationData?.currentId ?? null,
+            navigationData.currentId,
             true,
           )
         ) : (
           <span style={groupStyle}>
             <HoverableBreadcrumbItem
-              panelId={navigationData?.currentId ?? "current-panel"}
-              title={navigationData?.currentTitle ?? title}
-              hasChildren={(navigationData?.currentChildCount ?? 0) > 0}
+              panelId={navigationData.currentId}
+              title={navigationData.currentTitle}
+              hasChildren={navigationData.currentChildCount > 0}
               isActive={true}
               isCurrent={true}
-              onNavigate={() => {
-                if (navigationData?.currentId)
-                  onNavigateToId?.(navigationData.currentId);
-              }}
+              onNavigate={() => onNavigateToId?.(navigationData.currentId)}
               onContextMenu={handleCurrentPanelContextMenu}
               onEditAddress={onEditAddress}
               {...(closablePanePanelId &&
-              closablePanePanelId === navigationData?.currentId &&
+              closablePanePanelId === navigationData.currentId &&
               onClosePane
                 ? { onClosePane }
                 : {})}
