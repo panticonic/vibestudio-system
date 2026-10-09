@@ -1,7 +1,8 @@
 # App Testing
 
-App changes can affect startup, trust, pairing, and host UX. Use focused tests
-for the target you changed, then run broader smoke checks for shared code.
+App changes can affect startup, trust, pairing, and host UX. Run focused tests
+for the target you changed, then broader smoke checks if you changed shared
+code.
 
 ## Focused Local Commands
 
@@ -31,17 +32,17 @@ pnpm vitest run \
   packages/unit-host/src/index.test.ts
 ```
 
-Host target selection changes should also cover:
+Host target selection changes should also test that:
 
-- selected target state persists per workspace and is not written to
+- the selected target persists per workspace and is not written to
   `meta/vibestudio.yml`
-- missing or incompatible selected apps report an invalid selection
-- Electron ignores unselected app availability events once a desktop target is
-  selected
+- a missing or incompatible selected app reports an invalid selection
+- once a desktop target is selected, Electron ignores availability events for
+  other apps
 - React Native bootstrap and grants use the selected `apps/<name>` source
 - pinned builds/commits stay active when newer approved builds arrive
-- terminal selections start/restart the selected process and do not leave a
-  different terminal app running
+- selecting a terminal app starts/restarts that process and leaves no other
+  terminal app running
 
 Build artifact/provider changes:
 
@@ -74,7 +75,7 @@ Verify:
 
 - clean install can consume `vibestudio://connect`
 - bootstrap shows the target server URL and requires Pair/Cancel confirmation
-- native bootstrap pairs before workspace app bundle exists
+- native bootstrap pairs before the workspace app bundle exists
 - active workspace bundle registers the native root component name requested by
   Android/iOS
 - native host fetches only the current platform artifact
@@ -84,14 +85,14 @@ Verify:
   use `app:apps/<name>:<device-id>`
 - approval notifications and in-app approval sheet still work
 - app remains recoverable when no active mobile bootstrap exists
-- shared shell identities and states agree across desktop and mobile: title
+- desktop and mobile agree on shared shell identities and states: title
   bar/AppBar, panel tree/drawer, approval callers and install parts,
   launcher/about/new flows, browser favicons, and loading/error/empty states
 
-For a user-facing change in either first-party shell, identify the paired
-surface in the other client and run its smallest behavioral test. If no paired
-surface exists, record that fact in the handoff; do not infer parity from a
-desktop-only screenshot or test.
+For a user-facing change in either first-party shell, find the matching
+feature in the other client and run its smallest behavioral test. If there is
+no matching feature, say so in the handoff. A desktop-only screenshot or test
+does not show parity.
 
 ## Terminal Smoke Checklist
 
@@ -101,13 +102,14 @@ Verify:
 - `apps:available` includes `launchMode: "terminal-process"`
 - status is `available` before launch and `running` after the runner starts it
 - `runtime.supervision.activate({ kind: "app", releaseId: appName })` starts an
-  available process; `restart(identity)` replaces an exact live process
-- stdout/stderr are visible through `runtime.supervision.logs(identity)`
-- rollback switches to a retained terminal build and returns the app to
-  `available` or `running` according to whether the process is launched
+  available process; `restart(identity)` replaces the identified live process
+- stdout/stderr are visible through
+  `runtime.supervision.logs({ kind: "app", releaseId: appName })`
+- rollback switches to a retained terminal build, and the app returns to
+  `available` or `running` depending on whether the process is launched
 
-Run the packaged smoke when terminal runtime, app host, pairing, or process
-supervision changes:
+Run the packaged smoke when you change terminal runtime, app host, pairing, or
+process supervision:
 
 ```bash
 pnpm test:terminal-app-smoke
@@ -124,13 +126,13 @@ When capabilities or dependency identity change, test:
 - capability denial surfaces clearly
 - the user's designated System workspace admits its native client app through
   the normal launch review
-- new ordinary workspaces surface their extension and panel/worker reviews;
-  retained native app source never creates orphan app launch reviews or runtime
-  principals in those workspaces
+- new non-System workspaces show their extension and panel/worker reviews, and
+  native app source they contain never creates orphan app launch reviews or
+  runtime principals there
 
 ## Regression Areas
 
-Pay special attention to:
+Watch for regressions in:
 
 - shell app identity: app principal vs shell host authority
 - layout model: host chrome vs panel content

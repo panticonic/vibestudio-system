@@ -1,7 +1,6 @@
 # App Targets
 
-Vibestudio app targets define how a trusted workspace app is built, delivered,
-and activated.
+An app's target determines how it is built, delivered, and activated.
 
 ## Electron Target
 
@@ -19,30 +18,29 @@ Manifest:
 }
 ```
 
-The Electron target is built as a browser app and loaded into an Electron
-`WebContentsView` with the app preload. It is not a panel, even though it uses
-the same low-level view infrastructure.
+An Electron app is built as a browser app and loaded into an Electron
+`WebContentsView` with the app preload. It is not a panel, although it uses the
+same low-level view infrastructure.
 
-Important behavior:
+Behavior:
 
 - App IPC identity is `callerKind: "app"` and `callerId` is the app package
   name.
 - Host capabilities are derived from the approved app manifest.
-- Camera, microphone, and location requests require both the matching manifest
-  capability and a site-origin permission approval. Declaring a capability
-  makes the request eligible; it does not grant device access by itself.
+- Camera, microphone, and location requests need both the matching manifest
+  capability and a site-origin permission approval. The capability alone does
+  not grant device access.
 - Updates to an already-loaded Electron app use `adoptionPolicy: "prompt"`.
   The existing view stays loaded until the user chooses `Load update` from a
   notification or the App updates settings section.
-- `panel-hosting` app views are full-window host chrome and are not panel
-  content. They must not be sized to the panel content rectangle.
-- Ordinary Electron apps should not declare `panel-hosting`; otherwise they get
-  host-view authority.
+- `panel-hosting` app views are full-window host chrome, not panel content.
+  Do not size them to the panel content rectangle.
+- Declaring `panel-hosting` grants host-view authority, so use it only for
+  shell apps that own panel layout and host chrome.
 - Shell app changes can break core UX: panel layout, title bar, overlays,
   pairing links, menus, notifications, and app event subscriptions.
 
-Use `panel-hosting` only for shell-like apps that own panel layout and host
-chrome. The built-in shell currently declares:
+The built-in shell currently declares:
 
 ```json
 [
@@ -66,33 +64,37 @@ Manifest:
       "target": "react-native",
       "renderer": "App.tsx",
       "rnComponentName": "Vibestudio",
-      "rnHostAbi": "rn-host-3",
+      "rnHostAbi": "<RN_HOST_ABI>",
       "capabilities": ["notifications", "open-external"]
     }
   }
 }
 ```
 
-The React Native target is built through a registered build provider. The
-server exposes an app bootstrap to the native host; the native host selects the
-artifact for its current platform, verifies integrity, writes it to native-owned
-storage, and reloads React Native onto that bundle.
+`rnHostAbi` must equal the host's `RN_HOST_ABI` (`@vibestudio/shared/buildProvider`);
+the build fails with the expected value otherwise.
 
-Important behavior:
+A React Native app is built through a registered build provider. The server
+exposes an app bootstrap to the native host. The native host picks the artifact
+for its platform, verifies its integrity, writes it to native storage, and
+reloads React Native onto that bundle.
+
+Behavior:
 
 - The shipped native bootstrap must be able to pair a clean install before a
   workspace app bundle exists.
-- Native code owns durable device credentials.
-- The workspace mobile app uses a short-lived principal grant, not the long-lived
-  refresh token.
-- The bootstrap may contain one platform artifact or multiple platform
-  artifacts. The native host selects the current platform.
+- Native code holds the persistent device credentials.
+- The workspace mobile app uses a short-lived principal grant, not the
+  long-lived refresh token.
+- The bootstrap may contain one or several platform artifacts; the native host
+  picks the one for its platform.
 - Platform primary artifacts must have `platform: "android"` or `platform:
 "ios"` and an integrity string.
-- Provider identity is part of trust. Missing provider identity fails closed.
-- Updates are installed through a native prompt. Choosing `Install` prepares and
-  activates the current trusted bundle; choosing `Roll back` switches the server
-  to the previous trusted build, then activates that bundle.
+- Provider identity is part of the trusted identity. If it is missing, the
+  build is rejected.
+- Updates are installed through a native prompt. `Install` prepares and
+  activates the current trusted bundle; `Roll back` switches the server to the
+  previous trusted build, then activates that bundle.
 
 ## Terminal Target
 
@@ -109,15 +111,16 @@ Manifest:
 }
 ```
 
-The terminal target builds a Node ESM entry artifact and can be launched by the
-System workspace server as a supervised app process. All three native app
-targets require the protected System designation for hosting; declaring an app
-in another workspace preserves authoring source without offering a native launch.
-The server emits `apps:available` with
-`launchMode: "terminal-process"`. Disabled or stopped terminal apps report
-`available`; launched terminal apps report `running`.
+A terminal app builds to a Node ESM entry artifact that the System workspace
+server can launch as a supervised app process. All three targets are hosted
+only in the protected System workspace; an app declared in another workspace
+keeps its source for authoring but is never offered for native launch.
 
-Important behavior:
+The server emits `apps:available` with `launchMode: "terminal-process"`.
+Disabled or stopped terminal apps report `available`; launched ones report
+`running`.
+
+Behavior:
 
 - The runner starts the approved primary `.mjs` artifact with Node.
 - The app authenticates over `/rpc` with a one-time app principal grant.
@@ -130,16 +133,17 @@ Important behavior:
   `VIBESTUDIO_TERMINAL_APP_GATEWAY_URL`,
   `VIBESTUDIO_TERMINAL_APP_RPC_TOKEN`, and
   `VIBESTUDIO_TERMINAL_APP_CONNECTION_ID`.
-- Terminal builds remain available after activation until the host target is
-  launched or `runtime.supervision.activate({ kind: "app", releaseId: appName })`
-  starts the process.
-- Push updates and rollback replace the process if it is already running.
-- stdout/stderr are available through `runtime.supervision.logs(identity)` using
-  the exact live app identity returned by `runtime.supervision.list({ kind: "app" })`.
+- After activation, a terminal build stays `available` until the host target
+  is launched or
+  `runtime.supervision.activate({ kind: "app", releaseId: appName })` starts
+  the process.
+- Pushed updates and rollback replace the process if it is running.
+- Read stdout/stderr with
+  `runtime.supervision.logs({ kind: "app", releaseId: appName })`.
 
 Use terminal apps for trusted CLI clients, remote-server setup helpers, and
-pairing/client-management flows that should run with app capabilities rather
-than shell authority.
+pairing/client-management flows that should run with app capabilities instead
+of shell authority.
 
 ## Target Selection
 
@@ -149,16 +153,15 @@ Use:
 - `react-native` for mobile client UI delivered to the native host.
 - `terminal` for trusted CLI/client processes.
 
-Do not use apps for ordinary user panels. Apps carry stronger trust and approval
-implications than panels.
+Use panels, not apps, for user-facing workspace UI. Apps carry more trust and
+heavier approval than panels.
 
-Host target selection is intentionally local operational state, not workspace
-configuration. A workspace may contain multiple apps for the same target under
-`apps/*`. Desktop and mobile choose their client implementation from the acting
-user's designated System workspace and apply the ordinary approved host-target
-selection there. Focusing another workspace does not select its app as native
-chrome or reload the client. Host-target selection is stored under workspace
-state; do not write these bindings into `meta/vibestudio.yml`.
+Host target selection is local state, not workspace configuration. It is
+stored in workspace state; do not write it into `meta/vibestudio.yml`. A
+workspace may contain several apps for the same target under `apps/*`. Desktop
+and mobile pick their client implementation from the acting user's System
+workspace, using the approved host-target selection there. Focusing another
+workspace neither selects its app as native chrome nor reloads the client.
 
 Selection modes:
 
@@ -168,22 +171,21 @@ Selection modes:
 - `pinned-ref`: the host asks the GAD-backed build system to materialize a
   specific ref, then pins the resulting build key.
 
-Pinned selections are recovery tools as well as dev tools. If a newer state update is
-approved while a target is pinned, the server records the newer build in
-rollback history and restores the pinned build as the active host target. The
-user can return to normal update adoption by switching that target back to
-`follow-ref`.
+Pinning serves both recovery and development. If a newer update is approved
+while a target is pinned, the server records the newer build in rollback
+history and keeps the pinned build active. Switch the target back to
+`follow-ref` to resume normal updates.
 
-Host-target management RPC is restricted to host principals (`shell`, `server`).
-Panels, workers, extensions, and ordinary apps should not change which trusted
-app a native host executes. They may still receive app lifecycle events and
-should honor `selectedForHost` when deciding whether a notification applies to
-the current host.
+Only host principals (`shell`, `server`) can call host-target management RPC.
+Panels, workers, extensions, and other apps cannot change which app a native
+host runs. They still receive app lifecycle events and should check
+`selectedForHost` to decide whether a notification applies to the current
+host.
 
 ## Lifecycle Status Semantics
 
-All app targets use the same workspace-unit status vocabulary, with
-target-specific meaning at the activation edge:
+All targets use the same workspace-unit statuses; what "running" means
+depends on the target:
 
 | Status             | Meaning                                                                  |
 | ------------------ | ------------------------------------------------------------------------ |
@@ -196,16 +198,15 @@ target-specific meaning at the activation edge:
 
 Target-specific notes:
 
-- Electron shell apps usually report `running` because the host view is loaded.
-  Electron updates are prompt-adopted so an already loaded view can continue to
-  use the old trusted build until the user selects `Load`.
-- React Native apps report the active trusted bundle from the server
-  perspective. The native host still owns whether that bundle has been fetched
-  and installed on a particular device.
+- Electron shell apps usually report `running` because the host view is
+  loaded. Electron updates are adopted on prompt, so a loaded view keeps using
+  the old trusted build until the user selects `Load`.
+- React Native apps report the server's active trusted bundle. Whether a given
+  device has fetched and installed it is up to that device's native host.
 - Terminal apps report `available` after build activation and `running` only
   while the supervised Node process is alive.
 
-`apps:lifecycle` carries the cross-target event stream:
+`apps:lifecycle` carries events for all targets:
 
 - `available`: first trusted build became active
 - `update-available`: a newer trusted build replaced the active build, or is
@@ -214,6 +215,6 @@ Target-specific notes:
   the effective version
 - `rolled-back`: the active build was switched to a retained previous build
 
-Clients should use `target`, `source`, `appId`, `buildKey`, `canRollback`, and
-`selectedForHost` from lifecycle payloads to decide whether a prompt applies to
-the current host.
+Clients use `target`, `source`, `appId`, `buildKey`, `canRollback`, and
+`selectedForHost` from the payload to decide whether a prompt applies to the
+current host.

@@ -5,12 +5,13 @@ description: Inspect local-model readiness, install a one-click local model when
 
 # Local models
 
-Use the local-models extension for lifecycle and the ordinary agent runtime for
-inference. Never request loopback credentials or call a model server directly.
+Use the local-models extension to install and manage models, and the normal
+agent runtime to run them. Never ask for loopback credentials or call a model
+server directly.
 
-## Inspect availability
+## Check availability
 
-From agent eval, inspect the extension's own state:
+From agent eval, read the extension's state:
 
 ```ts
 const extension = "@workspace-extensions/local-models";
@@ -21,54 +22,56 @@ const [status, models] = await Promise.all([
 return { status, models };
 ```
 
-The preferred local model is `local:qwen3.8-27b` on hardware where `listModels`
-offers it. `status.fallback.modelRef` is the compact emergency floor, not the
-quality default. A model row is usable when `state` is `startable` or `ready`;
-`ready` means warm, while `startable` is a healthy downloaded-but-cold state.
-Report `downloading`, `starting`, and `error` honestly rather than treating
-absence of readiness as a generic failure. Use `getHardwareProfile` only when
-selection or performance depends on the machine.
+The preferred local model is `local:qwen3.8-27b`, on hardware where
+`listModels` offers it. `status.fallback.modelRef` is a small emergency
+fallback, not the recommended default. A model row is usable when its `state`
+is `startable` (downloaded and healthy, but not running) or `ready` (running).
+Report `downloading`, `starting`, and `error` as they are; don't lump them
+together as a generic failure. Call `getHardwareProfile` only when model choice
+or performance depends on the machine.
 
-## Install only on user intent
+## Install only when the user asks
 
-Downloading model weights is a large persistent effect. Do it only when the
-user asked to install, download, prepare, or run a model that is not installed.
-Complete an offered one-click model's idempotent installation with its exact ref:
+Model weights are a large, persistent download. Install only when the user
+asked to install, download, prepare, or run a model that is not yet installed.
+Install an offered one-click model by its ref; the call is idempotent:
 
 ```ts
-await services.extensions.invoke("@workspace-extensions/local-models", "installModel", [
-  "local:qwen3.8-27b",
-]);
+await services.extensions.invoke(
+  "@workspace-extensions/local-models",
+  "installModel",
+  ["local:qwen3.8-27b"],
+);
 ```
 
-The call waits for transfer and executable validation. A returned job records
-the completed transfer; `null` means the current artifact was already present
-and its validation succeeded. Installation failures reject the call. `listModels`
-and `status` expose progress during installation; raw download jobs started by
-other clients remain in progress until their transfer completes. Do not start
-parallel duplicate downloads, invent a catalog slug, or remove a successfully
-installed model as cleanup.
+The call returns after the download finishes and the executable has been
+validated. It returns a job record for a completed download, or `null` if the
+current artifact was already present and passed validation. Installation
+failures reject the call. During installation, `listModels` and `status` show
+progress; a download started by another client stays in progress until its
+transfer completes. Don't start a duplicate download, make up a catalog slug,
+or remove a successfully installed model as cleanup.
 
-Before spawning a local-model child, confirm that its exact row is `startable`
-or `ready`. A download job is not an executable model: check its progress through
-`listModels`, and report a failed or incomplete installation honestly. Do not
-delegate to a downloading model and suspend expecting that child to install it.
+Before spawning a child agent on a local model, confirm that model's row is
+`startable` or `ready`. A model that is still downloading cannot run: track its
+progress through `listModels` and report a failed or incomplete installation.
+Don't delegate to a downloading model and suspend in the hope that the child
+will finish installing it.
 
-## Run a task on the local model
+## Run a task on a local model
 
-Model execution belongs to a real agent turn. For a bounded delegated task,
-spawn a normal `pi` subagent with `config.model` set to the exact installed
-`local:<slug>` reference. Prefer `mode: "fresh"` when the task and exact paths
-are self-contained; the child's durable workspace context still derives from
-the parent. Use `mode: "fork"` only when the local child needs the parent's
-conversation trajectory. A local child cannot reuse a cloud provider's context
-cache, so forking across that model boundary carries input without the cache
-savings of a compatible same-model fork. The runtime starts the installed
-model's server and injects loopback authentication
-at the trusted execution edge.
+Models run inside agent turns. For a bounded delegated task, spawn a normal
+`pi` subagent with `config.model` set to the installed `local:<slug>` ref.
+Prefer `mode: "fresh"` when the task description and paths are
+self-contained; the child still gets its workspace context from the parent.
+Use `mode: "fork"` only when the child needs the parent's conversation history.
+A local model cannot reuse a cloud provider's context cache, so a fork from a
+cloud model sends the full history without the cache savings a same-model fork
+would get. The runtime starts the model's server and injects loopback
+authentication for the child.
 
-Continue useful foreground work, then suspend while the child runs. Do not poll
-the child. Its terminal delivery proves that the configured local-model agent
-completed or failed the task; retain inspection-only results without merging.
-If startup fails, inspect the local-model row and bounded server-log tail and
-report the concrete failure.
+Do any useful work in the meantime, then suspend while the child runs. Don't
+poll the child. When it delivers its result, the task has completed or failed
+on the local model; keep inspection-only results without merging them. If the
+model fails to start, check its row in `listModels` and a bounded server-log
+tail, and report the specific failure.

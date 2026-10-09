@@ -6,13 +6,13 @@ description: Query, summarize, or live-follow the workspace server's structured 
 # Server logs
 
 `serverLog` covers the workspace server process: startup, builds, RPC,
-supervision, Git, reconnects, and other host subsystems. For one exact panel,
-app, extension, worker, or Durable Object incarnation, use
+supervision, Git, reconnects, and other host subsystems. For the logs of one
+specific panel, app, extension, worker, or Durable Object instance, use
 `runtime.supervision.logs(identity)` instead.
 
-The service is read-only and redacts known secrets at capture time, but callers
-still use its normal authority contract. Use live docs for current filters,
-fields, bounds, and event schemas.
+The service is read-only and redacts known secrets when records are captured,
+but normal access checks still apply to callers. See the live docs for the
+current filters, fields, limits, and event schemas.
 
 ## Bounded inspection
 
@@ -23,10 +23,10 @@ const warnings = await services.serverLog.query({
   sinceSeq: snapshot.latestSeq,
   limit: 100,
 });
-// Return the snapshot's identity and the records that carry the finding, not
-// the buffers themselves. A whole tail of full records is tens of thousands of
-// characters and comes back windowed into `scope.$lastLargeReturn`, which
-// leaves the identity you were told to preserve out of your own answer.
+// Return the snapshot's identity and the records that support the finding, not
+// the whole buffers. A full tail of complete records runs to tens of thousands
+// of characters and is returned windowed into `scope.$lastLargeReturn`, which
+// drops the identity fields from your own answer.
 const brief = (record) => ({
   seq: record.seq,
   level: record.level,
@@ -41,30 +41,30 @@ return {
 };
 ```
 
-Use `stats()` to discover active subsystem tags before filtering. Compose level,
-time, sequence, tag, and text filters instead of fetching the whole buffer.
-Responses include a boot identity and latest sequence; reset the cursor when
-boot identity changes.
+Call `stats()` to see which subsystem tags are active before filtering. Combine
+level, time, sequence, tag, and text filters rather than fetching the whole
+buffer. Every response includes a boot ID and the latest sequence number; reset
+your cursor when the boot ID changes.
 
 ## Live following
 
-For short investigations, prefer repeated bounded queries with `sinceSeq`. A
-real live viewer should subscribe to `server-log:append`, establish the watch
-before catching up from its last sequence, deduplicate by sequence, and cancel
-during teardown. Never leave an unowned background follower.
+For short investigations, repeat bounded queries with `sinceSeq`. A real live
+viewer should subscribe to `server-log:append` before catching up from its last
+sequence number, deduplicate by sequence number, and cancel the subscription on
+teardown. Don't leave a background follower running that nothing will cancel.
 
-The `about/server-logs` panel already provides live viewing and is usually
-better than dumping raw records into chat.
+The `about/server-logs` panel already shows live logs and is usually a better
+choice than dumping raw records into chat.
 
 ## Offline and remote logs
 
-Server state keeps structured JSONL logs for post-mortem inspection after
-process exit. Desktop supervisors and remote service managers may retain their
-own stdout/stderr or journal. Use the remote-access CLI's log command for
-deployed servers. Never assume a workspace agent can read host filesystem paths
-directly.
+The server also writes structured JSONL logs to its state directory, so they
+can be inspected after the process exits. Desktop supervisors and remote
+service managers may keep their own stdout/stderr or journal. For deployed
+servers, use the remote-access CLI's log command. Don't assume a workspace agent
+can read host filesystem paths directly.
 
-Treat the in-memory ring as a current-boot diagnostic surface, not an archive.
-Keep queries bounded. In every report, preserve the snapshot's exact
-`serverBootId` and `latestSeq` so the evidence can be located again, and quote
-only the records needed to explain the incident.
+The in-memory ring buffer only covers the current boot; it is not an archive.
+Keep queries bounded. In every report, include the snapshot's `serverBootId`
+and `latestSeq` so the evidence can be found again, and quote only the records
+needed to explain the incident.

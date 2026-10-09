@@ -5,12 +5,13 @@ description: Measure and optimize panel, app, worker, DO, build, startup, Electr
 
 # Performance profiling
 
-Measure one user-visible boundary at a time. Keep cold/warm states explicit,
-optimize only measured bottlenecks, and repeat the same experiment afterward.
+Measure one user-visible boundary at a time. Say explicitly whether each run is
+cold or warm, optimize only measured bottlenecks, and repeat the same experiment
+afterward.
 
-## Choose the evidence surface
+## Choose what to measure
 
-| Question                          | Surface                                             |
+| Question                          | Tool                                                |
 | --------------------------------- | --------------------------------------------------- |
 | Panel action/reload latency       | `profilePanelInteraction`, `profilePanelReload`     |
 | Panel CPU or retained objects     | `profilePanel`, `heapSnapshot`                      |
@@ -20,20 +21,21 @@ optimize only measured bottlenecks, and repeat the same experiment afterward.
 | Worker or DO isolate CPU          | `profileWorkerd`, `profileDO`                       |
 | Electron process resources        | `electronPerformanceSnapshot` via `client_eval`     |
 | Android build and readiness       | `mobile-debug.buildAndroid`, `verifyWorkspaceReady` |
-| Agent/chat e2e latency            | system-test evidence + panel/host profiling         |
+| Agent/chat end-to-end latency     | system-test evidence + panel/host profiling         |
 
-These helpers come from `@workspace/testkit`. Use its public exports and live
-docs for exact signatures. They return bounded summaries or artifact references,
-not raw profiles over RPC.
+These helpers are exported by `@workspace/testkit`; check its exports and docs
+for signatures. They return bounded summaries or artifact references, not raw
+profiles over RPC.
 
 ## Panel and app measurements
 
-Reuse one panel handle and one CDP page per runtime incarnation. Measure the
-real action and await semantic completion inside the callback:
+Reuse one panel handle and one stable CDP session across runtime incarnations. Perform the
+real action and wait for its visible result inside the callback:
 
 ```ts
 const handle = panelTree.get(panelId);
-const page = await handle.cdp.page();
+const session = await handle.cdp.session();
+const page = session.page;
 try {
   return await page.profile(
     async () => {
@@ -43,28 +45,26 @@ try {
     { label: "open settings" },
   );
 } finally {
-  await page.close();
+  await session.close();
 }
 ```
 
-For a disposable authored browser page, encode the entire document before
-opening or navigating to a data URL; a raw `#` starts its fragment and cuts off
-the delivered HTML. The native page has no `setContent()` method. This small
-synchronous example checks the completed DOM value and reports the original
-mismatch rather than waiting forever for a handler that was not delivered:
+To profile a throwaway HTML page, open a browser panel at `about:blank` and
+give it the document with `page.setContent(html)`. The example below checks
+the final DOM value synchronously and throws on a mismatch instead of waiting
+forever for a handler that never ran:
 
 ```ts
 import { openPanel } from "@workspace/runtime";
-const html = `<button>Run check</button><output>Ready</output>
-<script>document.querySelector('button').onclick = () => {
-  document.querySelector('output').textContent = 'Done';
-};</script>`;
-const handle = await openPanel(
-  `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
-);
+
+await using handle = await openPanel("about:blank"); // archived on block exit
 const session = await handle.cdp.session();
 try {
   const page = session.page;
+  await page.setContent(`<button>Run check</button><output>Ready</output>
+<script>document.querySelector("button").onclick = () => {
+  document.querySelector("output").textContent = "Done";
+};</script>`);
   let finalState;
   const report = await page.profile(
     async () => {
@@ -80,18 +80,18 @@ try {
   return { report, finalState };
 } finally {
   await session.close();
-  await handle.archive();
 }
 ```
 
-Use the lifecycle handle for workspace-panel reloads, `page.goto` only for
-browser pages. Cache disabling affects Chromium's HTTP cache, not application
-state, service workers, DOs, or server build caches — reset only the layer the
-experiment calls cold.
+Reload workspace panels through the panel handle; use `page.goto` only for
+browser pages. Disabling the cache affects only Chromium's HTTP cache, not
+application state, service workers, DOs, or server build caches. Reset only the
+layer your experiment treats as cold.
 
-For a workspace-panel reload, use the canonical helper. It profiles the host
-across renderer replacement; CDP profiles cannot span two page incarnations.
-Acquire a fresh page afterward for browser interaction profiling:
+To profile a workspace-panel reload, use `profilePanelReload`. It profiles the
+host while the renderer is replaced, which a CDP profile cannot do because it is
+tied to one page. Afterwards, keep using the panel's session page for
+interaction profiling; it rebinds at its next operation:
 
 ```ts
 import { openPanel, profilePanelReload } from "@workspace/testkit";
@@ -110,13 +110,13 @@ try {
 }
 ```
 
-Run JS coverage separately from latency (coverage changes profiler overhead).
-After navigation, rebuild, or runtime replacement, discard the stale page and
-acquire one for the active incarnation.
+Collect JS coverage in a separate run from latency, because coverage changes
+profiler overhead. After navigation, a rebuild, or runtime replacement, discard
+the old page and get one for the current incarnation.
 
 ## Build measurements
 
-Profile the exact semantic context:
+Profile the context you are actually working in:
 
 ```ts
 import { contextId } from "@workspace/runtime";
@@ -128,153 +128,162 @@ return profileBuild("panels/chat", {
 });
 ```
 
-Call a run cold only when the receipt proves it built during the profile. Treat
-a repeat as verified-cache evidence only when build keys match. Keep initial,
-lazy, and total bytes distinct — don't add emitted artifact bytes to sealed
-source bytes as one total.
+Call a run cold only when the receipt shows it built during the profile. Count
+a repeat as a verified cache hit only when the build keys match. Report initial,
+lazy, and total bytes separately, and don't add emitted artifact bytes to sealed
+source bytes.
 
-Use bundle attribution before splitting code. Confirm allegedly unused imports
-with coverage or ownership evidence. Request executable module contents only in
-a separate, justified source-attribution investigation.
+Check bundle attribution before splitting code. Confirm that an import is
+unused with coverage or ownership evidence. Request executable module contents
+only in a separate, justified source-attribution investigation.
 
-Retain the baseline profile before editing, then repeat the same profiling
-options on the exact edited context, including `verifyCache: true`. Compare
-the same target's initial payload rather than a changed artifact count or
-dependency count. Keep required runtime peers even when the panel source does
-not import them directly. Verify the final candidate, commit its complete
-application chain, and reobserve clean status at that exact event before
-reporting the optimization as saved.
+Keep the baseline profile from before your edit, then rerun with the same
+options (including `verifyCache: true`) on the edited context. Compare the same
+target's initial payload, not artifact or dependency counts. Keep required
+runtime peers even if the panel source does not import them directly. Before
+reporting an optimization as saved, verify the final version, commit the whole
+change, and confirm the status is clean after that commit.
 
 ## Host, worker, and startup measurements
 
-Wrap the canonical operation with `profileHost`; don't create a profiling-only
-path. CPU, RSS, heap, and event-loop deltas describe the bounded interval, not
-retained allocation by themselves. Use a heap snapshot only when object
-attribution is required.
+Wrap the real operation in `profileHost`; don't build a separate profiling-only
+code path. CPU, RSS, heap, and event-loop deltas describe the measured interval;
+on their own they don't show retained allocations. Take a heap snapshot only
+when you need to attribute objects.
 
-Read the startup profile before raw server logs. Use supervision health and logs
-for one exact runtime identity. Use durable-work diagnostics for queue, claim,
+Read the startup profile before raw server logs. Look at supervision health and
+logs for one specific runtime. Use durable-work diagnostics for queue, claim,
 execution, settlement, and recovery timing.
 
-For isolate CPU, inspect available targets and run the real workload inside
+For isolate CPU, list the available targets and run the real workload inside
 `profileWorkerd` or `profileDO`. Regular workers may share a host target; DOs
-usually provide narrower attribution. Pair CPU evidence with wall time, build
-metadata, supervision, and durable-work timing — a CPU profile doesn't explain
-time spent in storage, RPC, queues, or another process.
+usually give narrower attribution. Combine CPU profiles with wall time, build
+metadata, supervision, and durable-work timing: a CPU profile doesn't show time
+spent in storage, RPC, queues, or other processes.
 
-Raw CDP or V8 inspector sessions are a last resort. Close them in `finally`,
-disable profiling after the bounded operation, and store large artifacts by
-reference.
+Use raw CDP or V8 inspector sessions only as a last resort. Close them in
+`finally`, turn profiling off after the measured operation, and store large
+artifacts by reference.
 
 ## Electron and mobile
 
-Electron metrics are client-affine. Capture before/after
-`electronPerformanceSnapshot()` in the same desktop client and use panel CDP for
-panel attribution. Report Electron, server, and workerd resources separately.
+Electron metrics belong to one desktop client. Take
+`electronPerformanceSnapshot()` before and after in the same client, and use
+panel CDP to attribute cost to panels. Report Electron, server, and workerd
+resources separately.
 
-Mobile builds are extension-owned. Select the attached device or explicit
-architectures, then pair the build receipt with `verifyWorkspaceReady` from the
-same start time. Process liveness ≠ app readiness. Use native or WebView tooling
-only for attribution the extension doesn't provide.
+Mobile builds go through the `mobile-debug` extension. Select the attached
+device or explicit architectures, then pair the build receipt with
+`verifyWorkspaceReady` from the same start time. A running process does not
+mean the app is ready. Use native or WebView tooling only for attribution the
+extension doesn't provide.
 
 ## Agent and chat latency
 
-Measure two boundaries:
+Measure two things:
 
-1. In the real chat panel, profile submit → first visible completed response.
-2. Run the smallest exact managed system test and inspect its bounded model,
-   tool, suspension, delivery, and cleanup evidence.
+1. In the real chat panel, profile from submit to the first visible completed
+   response.
+2. Run the smallest matching managed system test and inspect its model, tool,
+   suspension, delivery, and cleanup evidence.
 
-If trajectory work completes promptly but the panel is slow, investigate
-delivery, projection, or rendering. If model/tool phases dominate without
-browser long tasks, investigate the workflow. Compare recorded durations or
-shared durable coordinates; don't subtract unrelated monotonic clocks.
+If the trajectory finishes promptly but the panel is slow, investigate
+delivery, projection, or rendering. If model or tool phases dominate and the
+browser shows no long tasks, investigate the workflow. Compare recorded
+durations or shared durable timestamps; don't subtract readings from unrelated
+monotonic clocks.
 
 ## Repository-managed instances
 
-No running server? Create one uniquely named managed instance:
+If no server is running, create a uniquely named managed instance:
 
 ```bash
 pnpm system-test --instance <id> doctor
 ```
 
-Use that instance ID for every CLI/test call and stop it in cleanup:
+Pass that instance ID to every CLI and test call, and stop it during cleanup:
 
 ```bash
 pnpm system-test --instance <id> stop
 ```
 
-When a direct server is required, own a named `pnpm server:live --instance <id>
---ephemeral` process, wait for readiness, use only the matching CLI instance,
-then terminate and await it after closing inspectors and pages. Never reuse,
-restart, or stop another person's instance.
+If you need a direct server, start a named
+`pnpm server:live --instance <id> --ephemeral` process yourself, wait until it
+is ready, and use only the matching CLI instance. When done, close inspectors
+and pages, then terminate the process and wait for it to exit. Never reuse,
+restart, or stop someone else's instance.
 
-Inspect the supervisor log if isolated bootstrap fails before reporting a
+If isolated bootstrap fails, inspect the supervisor log before reporting a
 blocker.
 
-## Profiling data ownership
+## Cleaning up profiling data
 
-Instance shutdown retires its instance root, but does not own derived/npm cache
-overrides or review worktrees allocated by the investigator. Those paths need
-the same explicit ownership and cleanup as the workloads using them.
+Stopping an instance removes its instance root. It does not remove derived/npm
+cache overrides or review worktrees you created; you must track and clean those
+up yourself, along with the workloads that use them.
 
-Before allocating bulky profiling data, inspect the backing filesystem (on
-Linux, `findmnt -T PATH`, using an existing parent if necessary). `/tmp`,
-`/run/user`, and `/dev/shm` can be RAM-backed: files left there consume memory
-even after every process exits. Use a private disk-backed directory, such as
-`${XDG_CACHE_HOME:-~/.cache}/vibestudio-performance`, after checking its backing
-filesystem. Keep review worktrees and installed toolchains there too.
+Before writing bulky profiling data, check the backing filesystem (on Linux,
+`findmnt -T PATH`, using an existing parent directory if needed). `/tmp`,
+`/run/user`, and `/dev/shm` can be RAM-backed, so files left there consume
+memory after every process exits. Use a private disk-backed directory such as
+`${XDG_CACHE_HOME:-~/.cache}/vibestudio-performance` (check it too). Put review
+worktrees and installed toolchains there as well.
 
-Separate retained evidence from regenerable scratch. Create unique, initially
-empty derived and npm caches for each cold experiment; record their paths and
-the workload that owns them. In a `finally`-equivalent cleanup path, close
-inspectors and stop and join that experiment's exact workloads before removing
-its caches and temporary checkpoints. An immediate warm comparison can reuse
-the same caches within that lifetime; retire them before the next cold sample.
-Remove an owned review worktree once its changes are integrated. Never delete
-an inherited/shared cache or another operation's worktree.
+Keep evidence you want to retain apart from regenerable scratch data:
 
-If workload or scratch retirement fails, preserve bounded diagnostic evidence
-on disk and repair that failure before creating another experiment. Check both
-live process owners and remaining owned scratch paths before reporting cleanup
-complete. Retain profiles, logs, and receipts, rather than entire dependency
-trees or build caches. Observe memory and scratch usage between samples; elapsed
-time alone never authorizes cleanup of an active workload.
+- Create new, empty derived and npm caches for each cold experiment. Record
+  their paths and which workload uses them.
+- In a `finally`-style cleanup step, close inspectors, then stop that
+  experiment's workloads and wait for them to exit, then delete its caches and
+  temporary checkpoints.
+- An immediate warm comparison may reuse the same caches; delete them before
+  the next cold sample.
+- Remove a review worktree you created once its changes are integrated.
+- Never delete an inherited or shared cache, or another operation's worktree.
 
-## Performance by construction
+If stopping a workload or deleting scratch data fails, save bounded diagnostic
+evidence to disk and fix the failure before starting another experiment. Before
+reporting cleanup complete, check that none of your processes are still running
+and none of your scratch paths remain. Keep profiles, logs, and receipts, not
+whole dependency trees or build caches. Watch memory and scratch usage between
+samples. Never clean up an active workload just because it has run for a long
+time.
 
-- Publish usable readiness before optional history, suggestions, indexing, or
-  diagnostics.
-- Put expensive operation-specific code behind the operation that needs it.
+## Writing fast code from the start
+
+- Report the app as ready before loading optional history, suggestions,
+  indexing, or diagnostics.
+- Load expensive operation-specific code only in the operation that needs it.
 - Keep shared entry points, package barrels, React module evaluation, worker
-  constructors, and DO entry modules small and side-effect-free.
-- Run independent I/O concurrently when semantics allow; own deduplication at
-  the data boundary.
-- Use bounded collections, logs, queues, caches, and diagnostics.
-- Verify lazy boundaries survive the builder and runtime loader — source syntax
-  alone isn't evidence.
-- Preserve one implementation. Split into a small kernel and lazy features
-  rather than adding a lightweight parallel path.
+  constructors, and DO entry modules small and free of side effects.
+- Run independent I/O concurrently when semantics allow; deduplicate requests
+  in the data layer.
+- Bound the size of collections, logs, queues, caches, and diagnostics.
+- Verify that lazy boundaries survive the builder and runtime loader; the
+  source syntax alone doesn't prove it.
+- Keep one implementation. Split it into a small core plus lazily loaded
+  features rather than adding a lightweight parallel version.
 
-Turn static suspicions — eager imports, serialized independent work, repeated
-builds, polling, unstable React effects, unbounded data, optional startup work —
-into a focused measurement before claiming a result.
+Before claiming a result from code reading (eager imports, serialized
+independent work, repeated builds, polling, unstable React effects, unbounded
+data, optional startup work), confirm it with a focused measurement.
 
 ## Optimization workflow
 
-1. Define the top-level behavior and completion condition.
-2. Capture comparable baselines; include cold and warm only when both are real
-   user paths.
+1. Define the top-level behavior and when it counts as complete.
+2. Capture comparable baselines. Include both cold and warm only when users
+   actually hit both.
 3. Rank contributors: CPU, serialized dependencies, I/O, bytes, render churn,
    queueing, unnecessary work.
-4. Remove or move work at its owner. Prefer batching, single-flight, narrow
-   subscriptions, lazy evaluation, and async/coalesced persistence when
-   invariants fit.
-5. Run focused tests and repeat the same profile. Expand only across the
-   plausible blast radius.
+4. Remove or move work in the code that owns it. Prefer batching,
+   single-flight, narrow subscriptions, lazy evaluation, and async or coalesced
+   persistence where invariants allow.
+5. Run focused tests and repeat the same profile. Widen testing only to code
+   the change could plausibly affect.
 
-Close every raw page/inspector, archive every opened panel, retire every opened
-entity, stop every managed test instance, and terminate every owned ephemeral
-server. Report before/after values, exact boundary, state, and
-remaining bottlenecks. A faster internal phase isn't a win unless the
-user-visible completion boundary improves without changing behavior.
+When finished, close every raw page and inspector, archive every panel you
+opened, retire every entity you opened, stop every managed test instance, and
+terminate every ephemeral server you started. Report before/after values, the
+boundary measured, the cold/warm state, and remaining bottlenecks. A faster
+internal phase is not a win unless the user-visible completion time improves
+without changing behavior.
