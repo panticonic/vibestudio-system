@@ -17,70 +17,11 @@ hostTargets:
   terminal:
     app: apps/remote-cli
 services:
-  - action: generate and manage reusable image assets
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-        - website
-        - session
-        - mission
-    description: Generate durable image assets, manage art direction, and read retained image content.
-    durableObject:
-      className: ImagesDO
-    name: images
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: manage
-    protocols:
-      - vibestudio.images.v1
-    source: workers/images
-    title: Generated image assets
-  - action: manage connected phones
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-    description: Discover, install, and pair phones through a connected desktop.
-    durableObject:
-      className: PhoneProvisioningDO
-    name: phone.provisioning
-    notability: headline
-    presentation:
-      domain: people
-      verb: manage
-    protocols:
-      - vibestudio.phone-provisioning.v1
+  - name: phone.provisioning
     source: workers/phone-provisioning
-    title: Connected phones
-  - action: manage development sessions
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-    description: Build and test workspace changes before they're saved.
-    durableObject:
-      className: DevelopmentDO
-    name: development
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: manage
-    protocols:
-      - vibestudio.development.v1
+  - name: development
     source: workers/development
-    title: Development
 singletonObjects:
-  - className: ImagesDO
-    key: workspace-images
-    source: workers/images
   - className: PhoneProvisioningDO
     key: workspace-phone-provisioning
     source: workers/phone-provisioning
@@ -93,38 +34,6 @@ template:
     - url: git+https://github.com/panticonic/vibestudio-base.git
   description: Your private client applications and device settings.
   name: System
-  repositories:
-    - about/about
-    - about/adblock
-    - about/automations
-    - about/credentials
-    - about/keyboard-shortcuts
-    - about/local-models
-    - about/permissions
-    - about/server-logs
-    - about/workspace-history
-    - apps/mobile
-    - apps/remote-cli
-    - apps/shell
-    - apps/terminal-browser
-    - extensions/local-models
-    - extensions/mobile-debug
-    - extensions/react-native
-    - extensions/typecheck-service
-    - meta
-    - packages/mobile-navigation
-    - packages/terminal-host-protocol
-    - packages/terminal-shim
-    - packages/workspace-transfer
-    - skills/appdev
-    - skills/local-models
-    - skills/performance
-    - skills/remote-access
-    - skills/server-logs
-    - workers/development
-    - workers/images
-    - workers/phone-provisioning
-    - workers/system-agent
 trust:
   chromeApps:
     - apps/shell

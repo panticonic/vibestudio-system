@@ -52,7 +52,34 @@
         }
       ],
       "requests": []
-    }
+    },
+    "services": [
+      {
+        "action": "manage connected phones",
+        "authority": {
+          "binding": "declared",
+          "principals": [
+            "host",
+            "user",
+            "code"
+          ]
+        },
+        "description": "Discover, install, and pair phones through a connected desktop.",
+        "durableObject": {
+          "className": "PhoneProvisioningDO"
+        },
+        "name": "phone.provisioning",
+        "notability": "headline",
+        "presentation": {
+          "domain": "people",
+          "verb": "manage"
+        },
+        "protocols": [
+          "vibestudio.phone-provisioning.v1"
+        ],
+        "title": "Connected phones"
+      }
+    ]
   },
   "dependencies": {
     "@vibestudio/service-schemas": "workspace:*",
