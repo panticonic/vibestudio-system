@@ -97,8 +97,8 @@ export interface CommandSheetProps {
     panelId: string;
     commands: Array<Parameters<typeof commandSpecFromWire>[0]>;
   }>;
-  /** Dispatch a contributed command back to its panel; false when unreachable. */
-  runContributedCommand: (panelId: string, commandId: string) => boolean;
+  /** Dispatch a contributed command back to its panel; rejects when unreachable. */
+  runContributedCommand: (panelId: string, commandId: string) => Promise<void>;
 }
 
 interface RowSection {
@@ -396,19 +396,16 @@ export function CommandSheet({
         return;
       }
       if (!command.panelId) return;
-      const delivered = runContributedCommand(
+      void runContributedCommand(
         command.panelId,
         command.id.slice(command.panelId.length + 1),
-      );
-      if (!delivered) {
+      ).then(close, () =>
         pushToast({
           title: "Panel command is not ready",
           message: "Open the panel and try again.",
           tone: "warning",
-        });
-        return;
-      }
-      close();
+        }),
+      );
     },
     [
       applyOutcome,
@@ -739,7 +736,7 @@ export function CommandSheet({
                 <Pressable
                   onPress={close}
                   accessibilityRole="button"
-                  accessibilityLabel="Close commands"
+                  accessibilityLabel="Close"
                   style={styles.closeButton}
                 >
                   <X size={17} color={colors.textTertiary} />

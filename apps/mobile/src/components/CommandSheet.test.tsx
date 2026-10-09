@@ -79,7 +79,7 @@ function renderSheet(options?: {
           },
         ]}
         contributedCommands={[]}
-        runContributedCommand={jest.fn(() => true)}
+        runContributedCommand={jest.fn(async () => {})}
       />
     </Provider>,
   );

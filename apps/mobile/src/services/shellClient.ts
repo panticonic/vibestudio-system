@@ -128,10 +128,10 @@ import {
 } from "./shellStartupSnapshot";
 import type { Panel } from "@vibestudio/shared/types";
 import {
-  HOST_COMMAND_CONTRIBUTION_EVENT,
-  type HostCommand,
+  createHostCommandRegistry,
+  HOST_COMMAND_RUN_EVENT,
+  type HostCommandRegistry,
 } from "@vibestudio/shared/hostCommands";
-import { HostCommandRegistry } from "@vibestudio/shell-core/panelCommandRegistry";
 import {
   createWorkspacePresentationClient,
   type WorkspacePresentationClient,
@@ -303,6 +303,14 @@ export class MobileHostTargetApprovalRequiredError extends Error {
   }
 }
 
+/** The UI layer's handle on its live panel WebViews. */
+export interface MobilePanelWebViewSink {
+  /** Deliver an inbound RPC envelope; false when the panel has no live WebView. */
+  deliverEnvelope(panelId: string, envelope: unknown): boolean;
+  /** Dispatch a host event; false when the panel has no live WebView. */
+  dispatchHostEvent(panelId: string, event: string, payload: unknown): boolean;
+}
+
 class MobilePanels implements PanelHost {
   private websiteHost: WebsiteDocumentHost | null = null;
   private panelManager: PanelManager | null = null;
@@ -311,14 +319,13 @@ class MobilePanels implements PanelHost {
     null;
   readonly treeCache: PanelTreeCache;
   // Set by the UI (MainScreen) so the panel-RPC relay can push server replies +
-  // events into the right panel's webview. A mutable field (not a constructor
-  // dep) because the webview refs live in the UI, which mounts after init().
-  private deliverToPanelFn:
-    | ((panelId: string, envelope: unknown) => boolean)
-    | null = null;
+  // events, and the shell its host events, into the right panel's webview. A
+  // mutable field (not a constructor dep) because the webview refs live in the
+  // UI, which mounts after init().
+  private webViewSink: MobilePanelWebViewSink | null = null;
   // Host→panel envelopes that arrived before the UI registered its delivery sink
   // (init() completes before MainScreen mounts). Bounded per panel; flushed in
-  // order by setDeliverToPanel so relay replies/events never silently vanish.
+  // order by attachWebViews so relay replies/events never silently vanish.
   private readonly pendingDeliveries = new Map<string, unknown[]>();
   private static readonly MAX_PENDING_DELIVERIES_PER_PANEL = 256;
   private readonly panelRuntime: PanelRuntimeClient;
@@ -464,11 +471,17 @@ class MobilePanels implements PanelHost {
 
   async loadTreeForPaint(): Promise<void> {
     const panelManager = this.requireManager();
-    smokePhase("workspace-tree-load-start", { workspaceId: this.registry.workspaceId });
+    smokePhase("workspace-tree-load-start", {
+      workspaceId: this.registry.workspaceId,
+    });
     await this.ensureRegistered();
-    smokePhase("workspace-tree-client-registered", { workspaceId: this.registry.workspaceId });
+    smokePhase("workspace-tree-client-registered", {
+      workspaceId: this.registry.workspaceId,
+    });
     const groups = await this.treeCache.loadRootGroups(true);
-    smokePhase("workspace-tree-groups-loaded", { workspaceId: this.registry.workspaceId });
+    smokePhase("workspace-tree-groups-loaded", {
+      workspaceId: this.registry.workspaceId,
+    });
     await Promise.all(
       groups.groups.map((group) =>
         this.treeCache.loadFirst({
@@ -862,11 +875,11 @@ class MobilePanels implements PanelHost {
   async notifyFocused(panelId: string): Promise<void> {
     await this.requireManager().notifyFocused(asPanelSlotId(panelId));
   }
-  async updateStateArgs(
+  async patchStateArgs(
     panelId: string,
     updates: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.requireManager().updateStateArgs(
+    return this.requireManager().patchStateArgs(
       asPanelSlotId(panelId),
       updates,
     );
@@ -1079,21 +1092,32 @@ class MobilePanels implements PanelHost {
     if (!this.bridgeAdapterInstance) throw new Error("Panels not initialized");
     return this.bridgeAdapterInstance.handle(panelId, method, args);
   }
-  /** Register the host→panel envelope delivery sink (called by the UI layer). */
-  setDeliverToPanel(fn: (panelId: string, envelope: unknown) => boolean): void {
-    this.deliverToPanelFn = fn;
+  /** Register the host→panel WebView delivery sink (called by the UI layer). */
+  attachWebViews(sink: MobilePanelWebViewSink): void {
+    this.webViewSink = sink;
     this.flushPanelDeliveries();
+  }
+  /**
+   * Dispatch a host event (such as a host-command run) to the live WebView
+   * in `panelId`'s slot. Unlike RPC envelopes these are not buffered: an event
+   * for a panel with no live WebView is an error for the caller to present.
+   */
+  dispatchHostEvent(panelId: string, event: string, payload: unknown): void {
+    if (!this.webViewSink?.dispatchHostEvent(panelId, event, payload)) {
+      throw new Error(`Panel ${panelId} has no live view to receive ${event}`);
+    }
   }
   /** Retry replies/events that arrived while their native WebView ref was absent. */
   flushPanelDeliveries(panelId?: string): void {
     const targets = panelId ? [panelId] : [...this.pendingDeliveries.keys()];
     for (const target of targets) {
       const queue = this.pendingDeliveries.get(target);
-      if (!queue?.length || !this.deliverToPanelFn) continue;
+      const sink = this.webViewSink;
+      if (!queue?.length || !sink) continue;
       let delivered = 0;
       while (
         delivered < queue.length &&
-        this.deliverToPanelFn(target, queue[delivered])
+        sink.deliverEnvelope(target, queue[delivered])
       ) {
         delivered += 1;
       }
@@ -1110,7 +1134,7 @@ class MobilePanels implements PanelHost {
    * oldest with a warning rather than growing without limit.
    */
   private deliverToPanel(panelId: string, envelope: unknown): void {
-    if (this.deliverToPanelFn?.(panelId, envelope)) {
+    if (this.webViewSink?.deliverEnvelope(panelId, envelope)) {
       return;
     }
     let queue = this.pendingDeliveries.get(panelId);
@@ -1346,29 +1370,14 @@ export class ShellClient {
   serverUrl: string;
   private facade: PanelAssetFacade | null = null;
   private statusUnsub: (() => void) | null = null;
-  private readonly hostCommandRegistry = new HostCommandRegistry();
-  private readonly localShellEventHandlers = new Map<
-    string,
-    (panelId: string, payload: unknown) => void
-  >([
-    [
-      HOST_COMMAND_CONTRIBUTION_EVENT,
-      (panelId, payload) => {
-        this.hostCommandRegistry.accept({
-          caller: {
-            callerId: panelId,
-            callerKind: "panel",
-            callerPanelId: panelId,
-          },
-          payload,
-        });
-      },
-    ],
-  ]);
-  readonly hostCommands: {
-    get(panelId: string): HostCommand[];
-    clear(panelId: string): void;
-  };
+  /**
+   * Panel-contributed commands. The shared registry owns attribution,
+   * replacement, and run dispatch; mobile only renders them natively.
+   */
+  readonly hostCommands: HostCommandRegistry = createHostCommandRegistry({
+    dispatchRun: (panelId, payload) =>
+      this.panels.dispatchHostEvent(panelId, HOST_COMMAND_RUN_EVENT, payload),
+  });
   private navigationListeners = new Set<(panelId: string) => void>();
   private readonly browserPrivacyPresentation =
     new BrowserPrivacyPresentationState();
@@ -1458,10 +1467,6 @@ export class ShellClient {
         ({ args }) => this.browserPrivacyPresentation.accept(args[0]),
       );
     }
-    this.hostCommands = {
-      get: (panelId) => this.hostCommandRegistry.get(panelId),
-      clear: (panelId) => this.hostCommandRegistry.clear(panelId),
-    };
     this.accountProfileClient = new MobileAccountProfileClient(this.transport);
     if (config.onStatusChange) {
       this.statusUnsub = this.transport.onStatusChange(config.onStatusChange);
@@ -1489,7 +1494,7 @@ export class ShellClient {
         for (const listener of this.navigationListeners) listener(panelId);
       },
       deliverToShell: (panelId, envelope) =>
-        this.deliverToLocalShell(panelId, envelope),
+        this.hostCommands.deliverShellEnvelope(panelId, envelope),
       openShellSurface: (target) => this.openShellSurface(target),
     });
     const userNotificationStore = createGadServiceClient(this.transport);
@@ -2122,24 +2127,8 @@ export class ShellClient {
     })();
     this.statusUnsub?.();
     this.statusUnsub = null;
-    this.hostCommandRegistry.clear();
+    this.hostCommands.release();
     return this.closing;
-  }
-
-  private deliverToLocalShell(panelId: string, envelope: RpcEnvelope): void {
-    if (envelope.message.type !== "event") {
-      throw new Error(
-        `The local mobile shell accepts events only (from ${panelId})`,
-      );
-    }
-    const handler = this.localShellEventHandlers.get(envelope.message.event);
-    if (!handler) {
-      console.warn(
-        `[mobile-shell] Ignored unsupported local shell event ${envelope.message.event} from ${panelId}`,
-      );
-      return;
-    }
-    handler(panelId, envelope.message.payload);
   }
 }
 export type MobilePanelsClient = InstanceType<typeof MobilePanels>;

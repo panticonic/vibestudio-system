@@ -89,7 +89,6 @@ import {
   contributedHostCommandId,
   presentMobileHostCommands,
 } from "../shellCore/mobilePanelCommands";
-import { HOST_COMMAND_RUN_EVENT } from "@vibestudio/shared/hostCommands";
 import { PANEL_UI_IDLE_SWEEP_MS } from "@vibestudio/shared/constants";
 import { parseHostConfig } from "../services/panelUrls";
 import {
@@ -481,11 +480,19 @@ export function MainScreen({
   // because the webview handles live in the UI layer.
   useEffect(() => {
     if (!shellClient) return;
-    shellClient.panels.setDeliverToPanel((panelId, envelope) => {
-      const webView = webViewRefsMap.current.get(panelId);
-      if (!webView) return false;
-      webView.deliverEnvelope(envelope);
-      return true;
+    shellClient.panels.attachWebViews({
+      deliverEnvelope: (panelId, envelope) => {
+        const webView = webViewRefsMap.current.get(panelId);
+        if (!webView) return false;
+        webView.deliverEnvelope(envelope);
+        return true;
+      },
+      dispatchHostEvent: (panelId, event, payload) => {
+        const webView = webViewRefsMap.current.get(panelId);
+        if (!webView) return false;
+        webView.dispatchHostEvent(event, payload);
+        return true;
+      },
     });
   }, [shellClient]);
   useEffect(() => {
@@ -518,7 +525,7 @@ export function MainScreen({
     (panelId: string) => {
       webViewRefsMap.current.delete(panelId);
       webViewThemeSignaturesRef.current.delete(panelId);
-      shellClient?.hostCommands.clear(panelId);
+      shellClient?.hostCommands.release(panelId);
       if (
         shellClient &&
         webViewUnmountNeedsUnload(webViewStackRef.current, panelId)
@@ -1458,16 +1465,13 @@ export function MainScreen({
             performPanelCommand(id as PanelCommandId, panelId);
             return;
           }
-          const webView = webViewRefsMap.current.get(panelId);
-          if (!webView) {
+          void shellClient.hostCommands.run(panelId, commandId).catch(() =>
             pushToast({
               title: "Panel command is not ready",
               message: "Wait for the panel to finish loading, then try again.",
               tone: "warning",
-            });
-            return;
-          }
-          webView.dispatchHostEvent(HOST_COMMAND_RUN_EVENT, { commandId });
+            }),
+          );
         },
       });
     },
@@ -1522,20 +1526,26 @@ export function MainScreen({
     shellClient,
   ]);
 
+  const [hostCommandRevision, setHostCommandRevision] = useState(0);
+  useEffect(
+    () =>
+      shellClient?.hostCommands.subscribe(() =>
+        setHostCommandRevision((revision) => revision + 1),
+      ),
+    [shellClient],
+  );
   const contributedCommandContributions = useMemo(() => {
     if (!shellClient || !activePanelId) return [];
     const commands = shellClient.hostCommands.get(activePanelId);
     return commands.length ? [{ panelId: activePanelId, commands }] : [];
-  }, [activePanelId, panelTreeRevision, shellClient]);
+  }, [activePanelId, hostCommandRevision, shellClient]);
 
   const dispatchContributedCommand = useCallback(
     (panelId: string, commandId: string) => {
-      const webView = webViewRefsMap.current.get(panelId);
-      if (!webView) return false;
-      webView.dispatchHostEvent(HOST_COMMAND_RUN_EVENT, { commandId });
-      return true;
+      if (!shellClient) throw new Error("The workspace is not connected");
+      return shellClient.hostCommands.run(panelId, commandId);
     },
-    [],
+    [shellClient],
   );
 
   /**
