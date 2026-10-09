@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useEffect, useState } from "react";
 import {
   Badge,
@@ -38,21 +39,26 @@ export function WorkspaceMembersSection({
   const [role, setRole] = useState<"admin" | "member">("member");
   const [review, setReview] = useState<Change | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
     if (workspace.privateRole) return;
     let active = true;
+    setLoadFailed(false);
     hubControl
       .listWorkspaceMembers({ workspace: workspace.name })
       .then((value) => {
         if (active) setRoster(value);
       })
       .catch((cause: unknown) => {
-        if (active) setError(String(cause));
+        if (!active) return;
+        setError(userFacingError(cause));
+        setLoadFailed(true);
       });
     return () => {
       active = false;
     };
-  }, [hubControl, workspace]);
+  }, [hubControl, workspace, loadAttempt]);
   const canManage =
     roster?.members.some(
       (member) => member.userId === userId && member.role === "admin",
@@ -80,7 +86,7 @@ export function WorkspaceMembersSection({
       setReview(null);
       setHandle("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(userFacingError(cause));
     } finally {
       setBusy(false);
     }
@@ -105,6 +111,11 @@ export function WorkspaceMembersSection({
             Members use this workspace together. Workspace admins also manage
             people and connection rules.
           </Text>
+          {!roster && !loadFailed ? (
+            <Text size="2" color="gray" role="status">
+              Loading people…
+            </Text>
+          ) : null}
           {roster?.members.map((member) => (
             <Flex
               key={member.userId}
@@ -213,6 +224,19 @@ export function WorkspaceMembersSection({
       {error ? (
         <Callout.Root color="red" role="alert">
           <Callout.Text>{error}</Callout.Text>
+          {loadFailed ? (
+            <Button
+              size="1"
+              variant="soft"
+              mt="2"
+              onClick={() => {
+                setError(null);
+                setLoadAttempt((attempt) => attempt + 1);
+              }}
+            >
+              Retry
+            </Button>
+          ) : null}
         </Callout.Root>
       ) : null}
       {review ? (

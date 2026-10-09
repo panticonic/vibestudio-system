@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import {
   submitWorkspaceCreation,
   readWorkspaceCreationSubmission,
@@ -32,6 +33,7 @@ export function WorkspaceChooser() {
   const pending = useRef(false);
   const [restoring, setRestoring] = useState(true);
   const [recoveryNotice, setRecoveryNotice] = useState("");
+  const [creatingName, setCreatingName] = useState<string | null>(null);
   const [recoveredInput, setRecoveredInput] =
     useState<ReturnType<typeof readWorkspaceCreationSubmission>>(null);
   useEffect(() => {
@@ -42,19 +44,23 @@ export function WorkspaceChooser() {
         if (!live) return;
         if (!profile)
           throw new Error("The authenticated account is unavailable.");
-        const saved = readWorkspaceCreationSubmission(
-          localStorage.getItem(`workspace-creation:${profile.userId}`),
-        );
+        let stored: string | null = null;
+        try {
+          stored = localStorage.getItem(`workspace-creation:${profile.userId}`);
+        } catch {
+          // Storage can be unavailable; there is then nothing to recover.
+        }
+        const saved = readWorkspaceCreationSubmission(stored);
         if (saved) {
           setRecoveredInput(saved);
           setTemplate(saved.rootTemplate ?? null);
           setRecoveryNotice(
-            `A previous creation of ${saved.workspace} may have completed. Continue to check its result before submitting anything again.`,
+            `Creating “${saved.workspace}” may have been interrupted. Check whether it finished.`,
           );
         }
       })
       .catch((error) => {
-        if (live) setError(String(error));
+        if (live) setError(userFacingError(error));
       })
       .finally(() => {
         if (live) setRestoring(false);
@@ -72,7 +78,7 @@ export function WorkspaceChooser() {
       setSourceUrl(null);
       close(false);
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(userFacingError(error));
     } finally {
       setBusy(false);
     }
@@ -84,6 +90,7 @@ export function WorkspaceChooser() {
   ) => {
     if (pending.current || restoring) return;
     pending.current = true;
+    setCreatingName(workspace);
     setBusy(true);
     setError(null);
     try {
@@ -101,9 +108,9 @@ export function WorkspaceChooser() {
         },
         {
           key: `workspace-creation:${profile.userId}`,
-          getItem: (key) => localStorage.getItem(key),
-          setItem: (key, value) => localStorage.setItem(key, value),
-          removeItem: (key) => localStorage.removeItem(key),
+          getItem: (key) => storage(() => localStorage.getItem(key), null),
+          setItem: (key, value) => storage(() => localStorage.setItem(key, value), undefined),
+          removeItem: (key) => storage(() => localStorage.removeItem(key), undefined),
           newOperationId: () => crypto.randomUUID(),
         },
       );
@@ -116,9 +123,10 @@ export function WorkspaceChooser() {
       setCreated(entry);
       await open(entry.workspaceId);
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(userFacingError(error));
     } finally {
       pending.current = false;
+      setCreatingName(null);
       setBusy(false);
     }
   };
@@ -135,6 +143,11 @@ export function WorkspaceChooser() {
             <Callout.Text>{error}</Callout.Text>
           </Callout.Root>
         ) : null}
+        {creatingName ? (
+          <Callout.Root role="status">
+            <Callout.Text>Creating “{creatingName}”…</Callout.Text>
+          </Callout.Root>
+        ) : null}
         {created ? (
           <Button
             size="3"
@@ -144,7 +157,7 @@ export function WorkspaceChooser() {
             Open workspace
           </Button>
         ) : restoring ? (
-          <Spinner />
+          <Spinner aria-label="Checking for an interrupted creation" />
         ) : recoveredInput ? (
           <Button
             disabled={busy}
@@ -175,7 +188,7 @@ export function WorkspaceChooser() {
                 })
                 .catch((cause: unknown) => {
                   setError(
-                    cause instanceof Error ? cause.message : String(cause),
+                    userFacingError(cause),
                   );
                 });
             }}
@@ -184,4 +197,12 @@ export function WorkspaceChooser() {
       </Flex>
     </Box>
   );
+}
+
+function storage<T>(access: () => T, fallback: T): T {
+  try {
+    return access();
+  } catch {
+    return fallback;
+  }
 }

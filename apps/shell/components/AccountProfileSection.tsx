@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Box, Button, Callout, Flex, Spinner, Text, TextField } from "@radix-ui/themes";
@@ -19,10 +20,6 @@ import { type ShellAccountProfile } from "../shell/client";
 
 interface AccountProfileSectionProps {
   active: boolean;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 async function avatarDataUriFromFile(file: File): Promise<string> {
@@ -104,7 +101,7 @@ export function AccountProfileSection({ active }: AccountProfileSectionProps) {
       if (!next) throw new Error("The connected session has no active workspace account.");
       if (request === requestRef.current) applyProfile(next);
     } catch (loadError) {
-      if (request === requestRef.current) setError(errorMessage(loadError));
+      if (request === requestRef.current) setError(userFacingError(loadError));
     } finally {
       if (request === requestRef.current) setLoading(false);
     }
@@ -145,7 +142,7 @@ export function AccountProfileSection({ active }: AccountProfileSectionProps) {
       applyProfile(next);
       setSuccess("Profile saved.");
     } catch (saveError) {
-      setError(errorMessage(saveError));
+      setError(userFacingError(saveError));
     } finally {
       setSaving(false);
     }
@@ -267,7 +264,7 @@ export function AccountProfileSection({ active }: AccountProfileSectionProps) {
                 setSuccess(null);
                 void avatarDataUriFromFile(file)
                   .then((avatar) => setAvatarDraft(avatar))
-                  .catch((avatarError) => setError(errorMessage(avatarError)));
+                  .catch((avatarError) => setError(userFacingError(avatarError)));
               }}
             />
             <Button

@@ -1,3 +1,4 @@
+import { userFacingError } from "../../utils/userFacingError";
 import { useShellWorkspaceClient } from "../workspaceContext";
 import { useEffect, useMemo, useState } from "react";
 import { isRpcConnectionLost } from "@vibestudio/rpc";
@@ -9,10 +10,6 @@ export interface CurrentAccountProfileState {
   profile: ShellAccountProfile | null;
   settled: boolean;
   error: string | null;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function currentAccountProfileFailure(
@@ -28,7 +25,7 @@ export function currentAccountProfileFailure(
   return {
     profile: previous.profile,
     settled: true,
-    error: errorMessage(error),
+    error: userFacingError(error),
   };
 }
 

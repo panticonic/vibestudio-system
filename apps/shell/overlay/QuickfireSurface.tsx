@@ -276,7 +276,7 @@ function QuickfireCard(
                 <button
                   type="button"
                   className="quickfire-header-control"
-                  aria-label="‹ Commands"
+                  aria-label="Back to commands"
                   title="Back to commands"
                   onClick={() => emit({ type: "mode", mode: "all" })}
                 >
@@ -290,8 +290,8 @@ function QuickfireCard(
                 <button
                   type="button"
                   className="quickfire-header-control"
-                  aria-label="Close Quickfire"
-                  title="Close Quickfire"
+                  aria-label="Close"
+                  title="Close"
                   onClick={() => emit({ type: "dismiss" })}
                 >
                   <X size={15} />
@@ -310,7 +310,7 @@ function QuickfireCard(
           <button
             type="button"
             className="quickfire-dismiss"
-            aria-label="Close commands"
+            aria-label="Close"
             onClick={() => emit({ type: "dismiss" })}
           >
             <X size={18} />
@@ -395,7 +395,7 @@ function QuickfireCard(
           <button
             type="button"
             className="quickfire-stop"
-            aria-label="Stop the turn in flight"
+            aria-label="Stop generating"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => emit({ type: "stop" })}
           >

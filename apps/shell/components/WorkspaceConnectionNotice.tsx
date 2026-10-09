@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { Button, Flex, Spinner, Text } from "@radix-ui/themes";
 import { CrossCircledIcon, ReloadIcon } from "@radix-ui/react-icons";
 import { useEffect, useState } from "react";
@@ -80,7 +81,7 @@ export function WorkspaceConnectionNotice({
       if (terminal) await remoteCred.relaunch();
       else await remoteCred.reconnectNow();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(userFacingError(cause));
     } finally {
       setBusy(false);
     }

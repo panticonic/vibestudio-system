@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { ProblemReportingSection } from "./ProblemReporting";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useState } from "react";
@@ -23,6 +24,7 @@ import {
 import { type RemoteCredCurrent } from "../shell/client";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
+import { connectionStatusCopy } from "./connectionStatusCopy";
 import { PairedDevicesSection } from "./PairedDevicesSection";
 import { AppUpdatesSection } from "./AppUpdatesSection";
 import { AccountProfileSection } from "./AccountProfileSection";
@@ -91,7 +93,7 @@ export function ConnectionSettingsDialog({
         }),
       )
       .catch((error) => {
-        setError(error instanceof Error ? error.message : String(error));
+        setError(userFacingError(error));
       });
   }, [open]);
 
@@ -138,19 +140,8 @@ export function ConnectionSettingsDialog({
       .then((c) => {
         setCurrent(c);
       })
-      .catch((err) => setError(String(err)));
+      .catch((err) => setError(userFacingError(err)));
   }, [open]);
-
-  const onPasteLink = () => {
-    const raw = window.prompt("Paste Vibestudio pairing link");
-    if (!raw) return;
-    const parsed = parseConnectLink(raw);
-    if (parsed.kind === "error") {
-      setError(parsed.reason);
-      return;
-    }
-    setPairLink(raw);
-  };
 
   const savePairing = async () => {
     setError(null);
@@ -169,7 +160,7 @@ export function ConnectionSettingsDialog({
         return;
       }
     } catch (err) {
-      setError((err as Error).message);
+      setError(userFacingError(err));
       setBusy(false);
     }
   };
@@ -180,7 +171,7 @@ export function ConnectionSettingsDialog({
       await remoteCred.clear();
       await remoteCred.relaunch();
     } catch (err) {
-      setError((err as Error).message);
+      setError(userFacingError(err));
       setBusy(false);
     }
   };
@@ -276,11 +267,12 @@ export function ConnectionSettingsDialog({
               // A transient blip — calm, reassuring, NOT the scary re-pair banner.
               <Callout.Root size="1" color="blue" mb="3">
                 <Callout.Text>
-                  Reconnecting to your server
-                  {live.reconnect?.attempt
-                    ? ` — attempt ${live.reconnect.attempt}`
-                    : ""}
-                  …
+                  {connectionStatusCopy({
+                    status: live.status,
+                    isRemote: true,
+                    hasConnected: true,
+                    attempt: live.reconnect?.attempt,
+                  })}
                 </Callout.Text>
               </Callout.Root>
             ) : current?.configured &&
@@ -288,8 +280,13 @@ export function ConnectionSettingsDialog({
               live.status === "disconnected" ? (
               <Callout.Root size="1" color="amber" mb="3">
                 <Callout.Text>
-                  Disconnected — Vibestudio will reconnect automatically when
-                  your server is reachable.
+                  {connectionStatusCopy({
+                    status: live.status,
+                    isRemote: true,
+                    hasConnected: true,
+                  })}
+                  . Vibestudio will reconnect automatically when your server is
+                  reachable.
                 </Callout.Text>
               </Callout.Root>
             ) : current?.configured ? (
@@ -337,24 +334,17 @@ export function ConnectionSettingsDialog({
                   </Text>
                 )}
                 <Box>
-                  <Flex justify="between" align="end">
-                    <Text as="label" size="2" weight="medium">
-                      Pairing link
-                    </Text>
-                    <Button
-                      size="1"
-                      variant="soft"
-                      disabled={busy}
-                      onClick={onPasteLink}
-                    >
-                      Paste link
-                    </Button>
-                  </Flex>
+                  <Text as="div" size="2" weight="medium">
+                    Pairing link
+                  </Text>
                   <TextField.Root
                     aria-label="Pairing link"
                     placeholder="https://vibestudio.app/p#…"
                     value={pairLink}
                     onChange={(e) => setPairLink(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !busy && pairLink.trim()) void savePairing();
+                    }}
                   />
                 </Box>
               </Flex>
@@ -381,7 +371,7 @@ export function ConnectionSettingsDialog({
                         .reconnectNow()
                         .catch((err) =>
                           setError(
-                            err instanceof Error ? err.message : String(err),
+                            userFacingError(err),
                           ),
                         );
                     }}

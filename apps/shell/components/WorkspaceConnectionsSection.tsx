@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { WorkspaceMembersSection } from "./WorkspaceMembersSection";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { workspaceLabel } from "../shell/workspaceLabel";
@@ -71,7 +72,7 @@ export function WorkspaceConnectionsSection({
       })
       .catch((error: unknown) => {
         if (!active) return;
-        setError(error instanceof Error ? error.message : String(error));
+        setError(userFacingError(error));
         setLoading(false);
       });
     return () => {
@@ -215,7 +216,7 @@ function WorkspaceIdentityEditor({
         }),
       );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(userFacingError(cause));
     } finally {
       setBusy(false);
     }
@@ -228,7 +229,7 @@ function WorkspaceIdentityEditor({
       await hubControl.deleteWorkspace({ workspace: workspace.name });
       onDeleted();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(userFacingError(cause));
       setBusy(false);
     }
   };
@@ -364,7 +365,7 @@ function WorkspacePolicyEditor({
       })
       .catch((error: unknown) => {
         if (active)
-          setError(error instanceof Error ? error.message : String(error));
+          setError(userFacingError(error));
       });
     return () => {
       active = false;
@@ -408,7 +409,7 @@ function WorkspacePolicyEditor({
           : "Permission saved. Resource approval is still required.",
       );
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(userFacingError(error));
     } finally {
       setBusy(false);
     }
@@ -428,7 +429,7 @@ function WorkspacePolicyEditor({
             size="1"
             disabled={busy}
             onClick={() =>
-              void load().catch((error: unknown) => setError(String(error)))
+              void load().catch((error: unknown) => setError(userFacingError(error)))
             }
           >
             Reload settings
@@ -735,7 +736,7 @@ function PermissionForm({
         <Select.Content>
           <Select.Item value="call">Request an operation</Select.Item>
           <Select.Item value="discover">
-            Discover operation metadata
+            Look up what an operation does
           </Select.Item>
         </Select.Content>
       </Select.Root>

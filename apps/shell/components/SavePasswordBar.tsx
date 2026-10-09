@@ -1,7 +1,9 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Flex, Text, Button, Callout } from "@radix-ui/themes";
 import { useShellEvent } from "../shell/useShellEvent";
+import { confirmAction } from "./ConfirmDialog";
 
 
 interface PasswordSavePrompt {
@@ -166,7 +168,7 @@ export function SavePasswordBar({ visiblePanelId }: SavePasswordBarProps) {
       setConfirmation(prompt.kind === "password" ? "Password saved" : "Form-fill values saved");
     } catch (err) {
       console.error("[SavePasswordBar] Save failed:", err);
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(userFacingError(err));
     } finally {
       setSaving(false);
     }
@@ -174,12 +176,12 @@ export function SavePasswordBar({ visiblePanelId }: SavePasswordBarProps) {
 
   const handleNever = async () => {
     if (prompt.kind !== "password") return;
-    if (
-      !window.confirm(
-        `Never offer to save passwords for ${hostname}? This preference remains until you remove it from Credentials.`
-      )
-    )
-      return;
+    const confirmed = await confirmAction({
+      title: `Never offer to save passwords for ${hostname}?`,
+      description: "This preference remains until you remove it from Credentials.",
+      confirmLabel: "Never save",
+    });
+    if (!confirmed) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -187,7 +189,7 @@ export function SavePasswordBar({ visiblePanelId }: SavePasswordBarProps) {
       removePrompt(prompt.panelId);
     } catch (err) {
       console.warn("[SavePasswordBar] Never-save failed:", err);
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(userFacingError(err));
     } finally {
       setSaving(false);
     }

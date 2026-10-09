@@ -79,7 +79,7 @@ function AboutPage() {
           <Flex direction="column" align="center" gap="1">
             <Heading size="7">Vibestudio</Heading>
             <Text color="gray" size="2" align="center">
-              Your personal vibe computer
+              Build and share AI-infused apps
             </Text>
           </Flex>
 

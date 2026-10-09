@@ -11,8 +11,8 @@ import { Badge, IconButton, Tooltip } from "@radix-ui/themes";
 import { CrossCircledIcon, GlobeIcon, UpdateIcon } from "@radix-ui/react-icons";
 
 import { useShellEvent } from "../shell/useShellEvent";
+import { connectionStatusCopy, type ConnectionStatus } from "./connectionStatusCopy";
 
-type ConnectionStatus = "connected" | "connecting" | "disconnected";
 type ConnectionMode = "local" | "remote";
 interface RemoteTransport {
   path: "direct" | "relay";
@@ -97,48 +97,46 @@ export function ConnectionStatusBadge({
     ),
   );
 
-  if (!snap) return null;
-
-  let tooltip =
-    snap.status === "disconnected"
-      ? `Disconnected from ${snap.mode === "remote" ? `remote server ${snap.remoteHost ?? ""}` : "local server"}`
-      : snap.status === "connecting"
-        ? hasConnected
-          ? "Reconnecting to server…"
-          : "Connecting to server…"
-        : snap.mode === "remote"
-          ? `Connected to ${snap.remoteHost ?? "remote server"}`
-          : "Connected locally — open connection settings and pair devices";
+  // Until the first status arrives, keep the slot occupied so the title bar
+  // does not shift when the badge appears.
+  const status = snap?.status ?? "connecting";
+  const mode = snap?.mode ?? "local";
+  const summary = snap
+    ? connectionStatusCopy({
+        status,
+        isRemote: mode === "remote",
+        remoteHost: snap.remoteHost,
+        hasConnected,
+      })
+    : "Checking connection…";
 
   // Relay fallback is expected behavior; surface the active path without
   // presenting it as a security downgrade.
   const isRelayed =
-    snap.status === "connected" &&
-    snap.mode === "remote" &&
-    snap.remoteTransport?.path === "relay";
-  if (
-    snap.status === "connected" &&
-    snap.mode === "remote" &&
-    snap.remoteTransport
-  ) {
+    status === "connected" && mode === "remote" && snap?.remoteTransport?.path === "relay";
+  let tooltip = summary;
+  if (status === "connected" && mode === "remote" && snap?.remoteTransport) {
     tooltip += isRelayed
-      ? `\nRelayed${snap.remoteTransport.relayUrl ? ` via ${snap.remoteTransport.relayUrl}` : ""}.`
-      : "\nDirect Iroh connection.";
+      ? `\nConnected through a relay${snap.remoteTransport.relayUrl ? ` (${snap.remoteTransport.relayUrl})` : ""}.`
+      : "\nConnected directly.";
   }
 
-  const badgeColor =
-    snap.status === "disconnected"
+  const badgeColor = !snap
+    ? "gray"
+    : status === "disconnected"
       ? "red"
-      : snap.status === "connecting"
+      : status === "connecting"
         ? "amber"
-        : snap.mode === "remote"
+        : mode === "remote"
           ? "green"
           : "gray";
 
   const icon =
-    snap.status === "disconnected" ? (
+    !snap ? (
+      <GlobeIcon />
+    ) : status === "disconnected" ? (
       <CrossCircledIcon />
-    ) : snap.status === "connecting" ? (
+    ) : status === "connecting" ? (
       <UpdateIcon />
     ) : (
       <GlobeIcon />
@@ -149,7 +147,7 @@ export function ConnectionStatusBadge({
       <IconButton
         variant="ghost"
         size="1"
-        aria-label={tooltip}
+        aria-label={summary}
         onClick={onOpenSettings}
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
@@ -160,7 +158,7 @@ export function ConnectionStatusBadge({
           style={{ padding: "2px 6px" }}
         >
           {icon}
-          {snap.mode === "remote" && snap.remoteHost ? (
+          {mode === "remote" && snap?.remoteHost ? (
             <span style={{ marginLeft: 4 }}>{snap.remoteHost}</span>
           ) : null}
           {isRelayed ? (

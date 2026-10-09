@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useReportingSetup, useReportingReady } from "./ProblemReporting";
 import {
   isRpcConnectionLost,
@@ -251,7 +252,7 @@ export function ConsentApprovalBar({
         setPendingAccess(pending);
       },
       onError: (err, phase) => {
-        setQueueError(err instanceof Error ? err.message : String(err));
+        setQueueError(userFacingError(err));
         if (!isRpcConnectionLost(err))
           console.warn(
             `[ConsentApprovalBar] approval state ${phase} failed:`,
@@ -617,7 +618,7 @@ export function ConsentApprovalBar({
       console.error("[ConsentApprovalBar] approval action failed:", error);
       setDecisionError({
         approvalId: approval.approvalId,
-        message: error instanceof Error ? error.message : String(error),
+        message: userFacingError(error),
       });
       return;
     }
@@ -627,7 +628,7 @@ export function ConsentApprovalBar({
     // won, and nothing is left for anyone to act on.
     console.info(
       "[ConsentApprovalBar] approval already resolved elsewhere; queue reconciled:",
-      error instanceof Error ? error.message : String(error),
+      userFacingError(error),
     );
   };
   // Diff-review escape hatch: reuse Workspace History if one exists

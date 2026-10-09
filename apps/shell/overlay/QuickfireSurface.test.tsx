@@ -415,7 +415,7 @@ describe("QuickfireSurface conversation", () => {
     const emitIntent = renderSurface({ streaming: true });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Stop the turn in flight" }),
+      screen.getByRole("button", { name: "Stop generating" }),
     );
     expect(emitIntent).toHaveBeenCalledWith({ type: "stop" });
   });
@@ -558,7 +558,7 @@ describe("Quickfire redesigned controls", () => {
     expect((send as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(input, { target: { value: "Focus on the first issue" } });
     expect(
-      screen.getByRole("button", { name: "Stop the turn in flight" }),
+      screen.getByRole("button", { name: "Stop generating" }),
     ).toBeTruthy();
     fireEvent.click(send);
     expect(emit).toHaveBeenCalledWith({
@@ -579,7 +579,7 @@ describe("Quickfire redesigned controls", () => {
   });
   it("returns to commands without clearing the conversation", () => {
     const emit = renderSurface();
-    fireEvent.click(screen.getByRole("button", { name: "‹ Commands" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to commands" }));
     expect(emit).toHaveBeenCalledWith({ type: "mode", mode: "all" });
     expect(emit).not.toHaveBeenCalledWith({ type: "clear" });
   });

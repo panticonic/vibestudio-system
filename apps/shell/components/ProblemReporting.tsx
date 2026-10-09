@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { problemReportingConversation } from "@vibestudio/shared/problemReportingConversation";
 import {
   createContext,
@@ -201,7 +202,7 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
     setBusy(true);
     void setup
       .save()
-      .catch((cause) => setError(String(cause)))
+      .catch((cause) => setError(userFacingError(cause)))
       .finally(() => setBusy(false));
   }, [setup.ready, setup.required, setup.firstUse, busy, error, manualChoice]);
   useShellOverlay(open);
@@ -213,7 +214,7 @@ export function ReportingFirstUse({ children }: { children: ReactNode }) {
       await setup.save(state);
       setManualChoice(null);
     } catch (cause) {
-      setError(String(cause));
+      setError(userFacingError(cause));
     } finally {
       setBusy(false);
     }
@@ -298,7 +299,7 @@ export function ProblemReportingSection() {
     setIncidents(observations);
   }, [problemReports]);
   useEffect(() => {
-    void refresh().catch((error) => setError(String(error)));
+    void refresh().catch((error) => setError(userFacingError(error)));
   }, [refresh]);
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -307,7 +308,7 @@ export function ProblemReportingSection() {
       await action();
       await refresh();
     } catch (error) {
-      setError(String(error));
+      setError(userFacingError(error));
     } finally {
       setBusy(false);
     }
@@ -344,11 +345,17 @@ export function ProblemReportingSection() {
       <Text size="4" weight="bold">
         Local incidents
       </Text>
+      {incidents.length === 0 && (
+        <Text size="2" color="gray">
+          No problems recorded on this device.
+        </Text>
+      )}
       {incidents.map((incident) => (
         <Flex key={String(incident["id"])} gap="2" wrap="wrap">
           <Text>
-            {String(incident["last_at"])} · {String(incident["count"])}{" "}
-            observations · {String(incident["value"])}
+            {formatWhen(incident["last_at"])} · {String(incident["count"])}{" "}
+            {Number(incident["count"]) === 1 ? "time" : "times"} ·{" "}
+            {String(incident["value"])}
           </Text>
           <Button
             size="1"
@@ -356,7 +363,7 @@ export function ProblemReportingSection() {
             onClick={() =>
               void run(async () => {
                 const draft = await problemReports.create(
-                  JSON.parse(String(incident["value"])),
+                  parseIncidentValue(incident["value"]),
                 );
                 const updated = await problemReports.update(
                   draft.id,
@@ -402,10 +409,15 @@ export function ProblemReportingSection() {
       >
         Refresh history
       </Button>
+      {history.length === 0 && (
+        <Text size="2" color="gray">
+          No reports yet.
+        </Text>
+      )}
       {history.map((row, index) => (
         <Flex key={`${row["id"]}-${index}`} gap="2" wrap="wrap">
           <Text>
-            {String(row["updated_at"])} · {String(row["state"] ?? "draft")}{" "}
+            {formatWhen(row["updated_at"])} · {String(row["state"] ?? "draft")}{" "}
             {String(row["reason"] ?? "")}
           </Text>
           <Button
@@ -581,4 +593,17 @@ export function ProblemReportingSection() {
       )}
     </Flex>
   );
+}
+
+function formatWhen(value: unknown): string {
+  const date = new Date(typeof value === "number" ? value : String(value));
+  return Number.isNaN(date.getTime()) ? String(value ?? "") : date.toLocaleString();
+}
+
+function parseIncidentValue(value: unknown): ReturnType<typeof JSON.parse> {
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    throw new Error("This problem's details could not be read, so it can't be reported.");
+  }
 }

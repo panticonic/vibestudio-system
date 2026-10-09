@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { createPortal } from "react-dom";
 import { useSetAtom } from "jotai";
 import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
@@ -8,7 +9,7 @@ import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/wo
  * measured native panel surface below it.
  *
  * Supports notification types: info/success/warning/error as auto-dismissing
- * toast banners. Consent prompts are handled by ConsentDialog.
+ * toast banners.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -163,7 +164,7 @@ export function NotificationBar() {
           await notification.show({
             type: "error",
             title,
-            message: error instanceof Error ? error.message : String(error),
+            message: userFacingError(error),
             ttl: 0,
           });
         } catch (notificationError) {

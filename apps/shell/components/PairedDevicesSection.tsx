@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -18,6 +19,7 @@ import QRErrorCorrectLevel from "qrcode-terminal/vendor/QRCode/QRErrorCorrectLev
 import {
   type DeviceRecord,
   type PairingInvite,
+  type PairingOutcome,
   type ShellAccountProfile,
 } from "../shell/client";
 
@@ -30,7 +32,7 @@ export function PairedDevicesSection({
   onStartPhoneSetup?: () => void;
   showHeading?: boolean;
 }) {
-  const { panel, account, hubControl, remoteCred } = useShellWorkspaceClient();
+  const { panel, account, hubControl } = useShellWorkspaceClient();
 
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [owners, setOwners] = useState<Record<string, ShellAccountProfile>>({});
@@ -42,9 +44,7 @@ export function PairedDevicesSection({
   const [copyLabel, setCopyLabel] = useState("Copy link");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [connectOpen, setConnectOpen] = useState(false);
-  const [knownDeviceIds, setKnownDeviceIds] = useState<Set<string>>(new Set());
-  const [pairedDevice, setPairedDevice] = useState<DeviceRecord | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [pairing, setPairing] = useState<PairingOutcome | null>(null);
 
   const load = async () => {
     try {
@@ -57,7 +57,7 @@ export function PairedDevicesSection({
         ]),
       );
     } catch (err) {
-      setError((err as Error).message);
+      setError(userFacingError(err));
     }
   };
 
@@ -65,57 +65,36 @@ export function PairedDevicesSection({
     void load();
   }, []);
 
+  // The hub settles the wait when this invite is redeemed, expires, or is
+  // cancelled; the dialog only reflects that lifecycle.
   useEffect(() => {
-    if (!connectOpen || !invite) return;
-    const tick = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(tick);
-  }, [connectOpen, invite]);
-
-  useEffect(() => {
-    if (
-      !connectOpen ||
-      !invite ||
-      pairedDevice ||
-      Date.now() >= invite.expiresAt
-    )
-      return;
+    if (!invite) return;
     let cancelled = false;
-    const poll = async () => {
-      // Stop polling once the invite has expired — the QR is no longer scannable,
-      // so continuing to hammer listDevices is pointless (the UI shows "Expired").
-      if (!invite || Date.now() >= invite.expiresAt) return;
-      try {
-        const { devices: next } = await hubControl.listDevices();
+    void hubControl.awaitPairing({ code: invite.code }).then(
+      (outcome) => {
         if (cancelled) return;
-        setDevices(next);
-        const joined = next.find(
-          (device) => !knownDeviceIds.has(device.deviceId),
-        );
-        if (joined) setPairedDevice(joined);
-      } catch {
-        // The main error callout already covers explicit user-triggered failures.
-      }
-    };
-    const timer = window.setInterval(() => void poll(), 2000);
-    void poll();
+        setPairing(outcome);
+        if (outcome.status === "paired") void load();
+      },
+      (err: unknown) => {
+        if (!cancelled) setError(userFacingError(err));
+      },
+    );
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
     };
-  }, [connectOpen, invite, knownDeviceIds, pairedDevice]);
+  }, [invite]);
 
   const revoke = async (deviceId: string) => {
     setBusyId(deviceId);
     try {
       const result = await hubControl.revokeDevice(deviceId);
-      if (result.revoked && currentDeviceId === deviceId) {
-        await remoteCred.clear();
-        await remoteCred.relaunch();
-        return;
-      }
+      // Revoking this device ends its session with the token-revoked close;
+      // the host forgets the credential and relaunches on that close.
+      if (result.revoked && currentDeviceId === deviceId) return;
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      setError(userFacingError(err));
     } finally {
       setBusyId(null);
       setConfirmId(null);
@@ -125,16 +104,14 @@ export function PairedDevicesSection({
   const createInvite = async () => {
     setInviteBusy(true);
     setCopyLabel("Copy link");
-    setPairedDevice(null);
+    setPairing(null);
     try {
       setError(null);
-      setKnownDeviceIds(new Set(devices.map((device) => device.deviceId)));
       const result = await hubControl.pairDevice();
       setInvite(result.pairing);
-      setNow(Date.now());
       setConnectOpen(true);
     } catch (err) {
-      setError((err as Error).message);
+      setError(userFacingError(err));
     } finally {
       setInviteBusy(false);
     }
@@ -156,7 +133,7 @@ export function PairedDevicesSection({
         stateArgs: {
           seed: {
             openingRequest:
-            "Help me install Vibestudio on my phone and connect it to this workspace. Follow skills/phone-setup/SKILL.md, discover devices through my connected desktop, and guide me through any physical steps needed.",
+              "Help me install Vibestudio on my phone and connect it to this workspace. Follow skills/phone-setup/SKILL.md, discover devices through my connected desktop, and guide me through any physical steps needed.",
           },
           systemPrompt:
             "For phone setup, load skills/phone-setup/SKILL.md and follow it as the source of truth. Never assume adb or Xcode runs on the remote server.",
@@ -165,22 +142,16 @@ export function PairedDevicesSection({
       });
       onStartPhoneSetup?.();
     } catch (err) {
-      setError(
-        `Could not start phone setup: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      setError(`Could not start phone setup: ${userFacingError(err)}`);
     } finally {
       setPhoneSetupBusy(false);
     }
   };
 
-  const remainingMs = invite ? Math.max(0, invite.expiresAt - now) : 0;
-  const remainingSeconds = Math.ceil(remainingMs / 1000);
-  const remaining = `${Math.floor(remainingSeconds / 60)}:${String(
-    remainingSeconds % 60,
-  ).padStart(2, "0")}`;
-  // Expired = the countdown reached 0 with nobody paired yet. The QR is stale, so
-  // present a clear "Expired — regenerate" instead of a dead-but-scannable code.
-  const expired = !!invite && remainingMs <= 0 && !pairedDevice;
+  const pairedDevice = pairing?.status === "paired" ? pairing.device : null;
+  // An invite that ended unredeemed leaves a stale QR, so present a clear
+  // "Expired — regenerate" instead of a dead-but-scannable code.
+  const expired = !!pairing && pairing.status !== "paired";
 
   return (
     <Flex direction="column" gap="2">
@@ -265,14 +236,21 @@ export function PairedDevicesSection({
                   ) : (
                     <>
                       <Text size="2">
-                        Expires in <Code>{remaining}</Code>
+                        Expires at{" "}
+                        <Code>
+                          {new Date(invite.expiresAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </Code>
                       </Text>
                       <Badge
+                        role="status"
                         color={pairedDevice ? "green" : "gray"}
                         style={{ width: "fit-content" }}
                       >
                         {pairedDevice
-                          ? `Paired ${pairedDevice.label || pairedDevice.platform || "device"}`
+                          ? `Paired ${pairedDevice.label || pairedDevice.platform || "Unknown device"}`
                           : "Waiting for device..."}
                       </Badge>
                     </>
@@ -329,74 +307,86 @@ export function PairedDevicesSection({
           </Callout.Text>
         </Callout.Root>
       ) : null}
-      <Table.Root size="1" variant="surface">
-        <Table.Header>
-          <Table.Row>
-            <Table.ColumnHeaderCell>Label</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Owner</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Platform</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Created</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Last used</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell />
-          </Table.Row>
-        </Table.Header>
-        <Table.Body>
-          {devices.map((device) => {
-            const isCurrent = device.deviceId === currentDeviceId;
-            const revoked = !!device.revokedAt;
-            return (
-              <Table.Row key={device.deviceId}>
-                <Table.Cell>{device.label}</Table.Cell>
-                <Table.Cell>
-                  {owners[device.userId]
-                    ? `@${owners[device.userId]!.handle}`
-                    : device.userId}
-                </Table.Cell>
-                <Table.Cell>{device.platform ?? "unknown"}</Table.Cell>
-                <Table.Cell>{formatTime(device.createdAt)}</Table.Cell>
-                <Table.Cell>{formatTime(device.lastUsedAt)}</Table.Cell>
-                <Table.Cell>
-                  <Badge color={revoked ? "red" : isCurrent ? "green" : "gray"}>
-                    {revoked ? "revoked" : isCurrent ? "this device" : "active"}
-                  </Badge>
-                </Table.Cell>
-                <Table.Cell>
-                  {revoked ? null : confirmId === device.deviceId ? (
-                    <Flex gap="1">
+      {devices.length === 0 && !error ? (
+        <Text size="2" color="gray">
+          No devices yet. Choose Connect a device to add one.
+        </Text>
+      ) : (
+        <Table.Root size="1" variant="surface">
+          <Table.Header>
+            <Table.Row>
+              <Table.ColumnHeaderCell>Label</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Owner</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Platform</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Created</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Last used</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell />
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {devices.map((device) => {
+              const isCurrent = device.deviceId === currentDeviceId;
+              const revoked = !!device.revokedAt;
+              return (
+                <Table.Row key={device.deviceId}>
+                  <Table.Cell>{device.label || "Unknown device"}</Table.Cell>
+                  <Table.Cell>
+                    {owners[device.userId]
+                      ? `@${owners[device.userId]!.handle}`
+                      : "Unknown user"}
+                  </Table.Cell>
+                  <Table.Cell>{device.platform ?? "Unknown"}</Table.Cell>
+                  <Table.Cell>{formatTime(device.createdAt)}</Table.Cell>
+                  <Table.Cell>{formatTime(device.lastUsedAt)}</Table.Cell>
+                  <Table.Cell>
+                    <Badge
+                      color={revoked ? "red" : isCurrent ? "green" : "gray"}
+                    >
+                      {revoked
+                        ? "revoked"
+                        : isCurrent
+                          ? "this device"
+                          : "active"}
+                    </Badge>
+                  </Table.Cell>
+                  <Table.Cell>
+                    {revoked ? null : confirmId === device.deviceId ? (
+                      <Flex gap="1">
+                        <Button
+                          size="1"
+                          color="red"
+                          disabled={busyId === device.deviceId}
+                          onClick={() => void revoke(device.deviceId)}
+                        >
+                          Confirm
+                        </Button>
+                        <Button
+                          size="1"
+                          variant="soft"
+                          onClick={() => setConfirmId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </Flex>
+                    ) : (
                       <Button
                         size="1"
                         color="red"
-                        disabled={busyId === device.deviceId}
-                        onClick={() => void revoke(device.deviceId)}
-                      >
-                        Confirm
-                      </Button>
-                      <Button
-                        size="1"
                         variant="soft"
-                        onClick={() => setConfirmId(null)}
+                        disabled={!!busyId}
+                        onClick={() => setConfirmId(device.deviceId)}
                       >
-                        Cancel
+                        Revoke
                       </Button>
-                    </Flex>
-                  ) : (
-                    <Button
-                      size="1"
-                      color="red"
-                      variant="soft"
-                      disabled={!!busyId}
-                      onClick={() => setConfirmId(device.deviceId)}
-                    >
-                      Revoke
-                    </Button>
-                  )}
-                </Table.Cell>
-              </Table.Row>
-            );
-          })}
-        </Table.Body>
-      </Table.Root>
+                    )}
+                  </Table.Cell>
+                </Table.Row>
+              );
+            })}
+          </Table.Body>
+        </Table.Root>
+      )}
     </Flex>
   );
 }

@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useEffect, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import {
@@ -50,8 +51,6 @@ type Review = {
   attempted?: "create" | "copy";
   result?: SelectedTransferResult;
 };
-const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
 const sizeLabel = (bytes: number) =>
   bytes < 1024
     ? `${bytes} B`
@@ -92,7 +91,7 @@ export function SourceCopySection({
         setWorkspaces(rows);
       })
       .catch((error) => {
-        if (generation.current === current) setError(errorText(error));
+        if (generation.current === current) setError(userFacingError(error));
       });
     return () => {
       closed.current = true;
@@ -137,7 +136,7 @@ export function SourceCopySection({
     try {
       await work();
     } catch (error) {
-      if (!closed.current) setError(errorText(error));
+      if (!closed.current) setError(userFacingError(error));
     } finally {
       pending.current = false;
       if (!closed.current) setBusy(false);

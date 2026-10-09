@@ -6,7 +6,7 @@
  * values stay local and are only emitted on submit.
  */
 import { browserPermissionDecisions } from "@vibestudio/shared/approvals";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   ComponentProps,
   CSSProperties,
@@ -21,6 +21,7 @@ import {
   Code,
   Flex,
   IconButton,
+  Kbd,
   Text,
   TextField,
   Tooltip,
@@ -220,6 +221,20 @@ export function ApprovalCard({
       ),
     );
   }
+  // Hand focus back to whatever had it before the card appeared once the card
+  // is minimized or resolved, so keyboard users are not dropped on <body>.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [previousFocus] = useState(() => document.activeElement);
+  useEffect(() => {
+    const card = cardRef.current;
+    return () => {
+      const active = document.activeElement;
+      const focusLost = !active || active === document.body || !!card?.contains(active);
+      if (focusLost && previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+        previousFocus.focus();
+      }
+    };
+  }, [previousFocus]);
   const emitForApproval = (intent: ApprovalCardIntentBody) => {
     emit({ ...intent, approvalId: approval.approvalId, presentationKey });
   };
@@ -440,6 +455,7 @@ export function ApprovalCard({
 
   return (
     <div
+      ref={cardRef}
       key={approval.approvalId}
       className="approval-card"
       data-approval-tone={accent}
@@ -644,7 +660,7 @@ export function ApprovalCard({
                     style={{ animation: "app-tree-spin 0.7s linear infinite" }}
                   />
                   <Text size="1" color="gray" role="status" aria-live="polite">
-                    {`${approval.lifecycle?.progress?.label ?? "Checking builds, schemas, and authority"}${
+                    {`${approval.lifecycle?.progress?.label ?? "Checking that this is safe to install"}${
                       approval.lifecycle?.progress?.total !== undefined
                         ? ` (${approval.lifecycle.progress.completed ?? 0} of ${approval.lifecycle.progress.total})`
                         : ""
@@ -1174,6 +1190,9 @@ function StandardApprovalActions({
                   : "gray"
             }
             variant={recommended ? "solid" : "surface"}
+            shortcut={
+              recommended ? "Enter" : action.decision === "deny" ? "D" : undefined
+            }
             {...(action.decision === "deny"
               ? { icon: <CrossCircledIcon />, style: { marginLeft: 6 } }
               : {})}
@@ -1213,6 +1232,7 @@ function BrowserPermissionActions({
         label={copy.once.label}
         description={copy.once.description}
         variant="solid"
+        shortcut="Enter"
         onClick={() => decide("once")}
       />
       {decisions.includes("session") && (
@@ -1434,6 +1454,7 @@ function DecisionButton({
   variant = "soft",
   icon = <CheckCircledIcon />,
   style,
+  shortcut,
   onClick,
 }: {
   decision: ApprovalDecision;
@@ -1443,6 +1464,8 @@ function DecisionButton({
   variant?: "solid" | "soft" | "surface" | "outline";
   icon?: ReactNode;
   style?: CSSProperties;
+  /** Visible keyboard hint; decorative, the card advertises it via aria-keyshortcuts. */
+  shortcut?: string;
   onClick: () => void;
 }) {
   return (
@@ -1457,6 +1480,11 @@ function DecisionButton({
       >
         {icon}
         {label}
+        {shortcut ? (
+          <Kbd size="1" aria-hidden>
+            {shortcut}
+          </Kbd>
+        ) : null}
       </Button>
     </Tooltip>
   );

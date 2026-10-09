@@ -1,4 +1,6 @@
+import { userFacingError } from "../utils/userFacingError";
 import { usePanelTrust } from "./usePanelTrust";
+import { confirmAction, confirmClosePanel } from "./ConfirmDialog";
 import {
   useShellWorkspaceClient,
   useWorkspaceNavigationHost,
@@ -168,7 +170,7 @@ export function TitleBar({
       void notification.show({
         type: "error",
         title: "Couldn't create panel",
-        message: error instanceof Error ? error.message : String(error),
+        message: userFacingError(error),
       });
     }
   };
@@ -605,7 +607,7 @@ function BrowserAddressBar({
     void notification.show({
       type: "error",
       title,
-      message: error instanceof Error ? error.message : String(error),
+      message: userFacingError(error),
       ttl: 8_000,
     });
   }, []);
@@ -971,16 +973,15 @@ function BrowserAddressBar({
               <DropdownMenu.Separator />
               <DropdownMenu.Item
                 color="red"
-                onSelect={() => {
-                  if (
-                    !window.confirm(
-                      `Clear ${siteState.cookieCount} cookie${
-                        siteState.cookieCount === 1 ? "" : "s"
-                      } and cached site data for ${siteState.origin}?`,
-                    )
-                  ) {
-                    return;
-                  }
+                onSelect={async () => {
+                  const confirmed = await confirmAction({
+                    title: `Clear ${siteState.cookieCount} cookie${
+                      siteState.cookieCount === 1 ? "" : "s"
+                    } and cached site data for ${siteState.origin}?`,
+                    confirmLabel: "Clear data",
+                    destructive: true,
+                  });
+                  if (!confirmed) return;
                   void panel
                     .clearBrowserSiteData(chromeState.panelId)
                     .then(() =>
@@ -1323,7 +1324,7 @@ const groupStyle = {
 interface HoverableBreadcrumbItemProps {
   panelId: string;
   title: string;
-  hasChildren: boolean;
+  childCount: number;
   icon?: string;
   iconVersion?: string;
   iconState?: string;
@@ -1345,7 +1346,7 @@ interface HoverableBreadcrumbItemProps {
 function HoverableBreadcrumbItem({
   panelId,
   title,
-  hasChildren,
+  childCount,
   icon,
   iconVersion,
   iconState,
@@ -1358,7 +1359,7 @@ function HoverableBreadcrumbItem({
   onEditAddress,
   onClosePane,
 }: HoverableBreadcrumbItemProps) {
-  const { panel } = useShellWorkspaceClient();
+  const { notification, panel } = useShellWorkspaceClient();
 
   const [isHovered, setIsHovered] = useState(false);
   const trust = usePanelTrust(panelId, source);
@@ -1376,13 +1377,17 @@ function HoverableBreadcrumbItem({
   };
 
   const archivePanel = () => {
-    if (
-      hasChildren &&
-      !window.confirm(`Close “${title}”? Child panels will also be archived.`)
-    )
-      return;
-    void panel.archive(panelId).catch((error) => {
+    void (async () => {
+      if (childCount > 0 && !(await confirmClosePanel(title, childCount))) return;
+      await panel.archive(panelId);
+    })().catch((error) => {
       console.error("Failed to close panel from title bar", error);
+      void notification.show({
+        type: "error",
+        title: "Close panel failed",
+        message: userFacingError(error),
+        ttl: 8_000,
+      });
     });
   };
 
@@ -1755,7 +1760,7 @@ function BreadcrumbBar({
       key={panel.id}
       panelId={panel.id}
       title={panel.title}
-      hasChildren={panel.childCount > 0}
+      childCount={panel.childCount}
       icon={panel.icon}
       iconVersion={panel.iconVersion}
       iconState={panel.iconState}
@@ -1777,7 +1782,7 @@ function BreadcrumbBar({
       key={ancestor.id}
       panelId={ancestor.id}
       title={ancestor.title}
-      hasChildren={ancestor.childCount > 0}
+      childCount={ancestor.childCount}
       icon={ancestor.icon}
       iconVersion={ancestor.iconVersion}
       iconState={ancestor.iconState}
@@ -2060,7 +2065,7 @@ function BreadcrumbBar({
             <HoverableBreadcrumbItem
               panelId={navigationData.currentId}
               title={navigationData.currentTitle}
-              hasChildren={navigationData.currentChildCount > 0}
+              childCount={navigationData.currentChildCount}
               isActive={true}
               isCurrent={true}
               onNavigate={() => onNavigateToId?.(navigationData.currentId)}

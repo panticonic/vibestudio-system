@@ -39,7 +39,7 @@ import {
   RocketIcon,
   TrashIcon,
 } from "@radix-ui/react-icons";
-import { openPanel, panel, rpc, workers } from "@workspace/runtime";
+import { missions, openPanel, panel, rpc } from "@workspace/runtime";
 import {
   AutomationActivity,
   AutomationParametersEditor,
@@ -80,24 +80,6 @@ type Overview = {
 type RunCursor = { startedAt: number; runId: string };
 type OverviewCursor = { updatedAt: number; missionId: string };
 type RunPage = { items: RunRecord[]; nextCursor?: RunCursor };
-
-let targetPromise: Promise<string> | null = null;
-
-function callAutomations<T>(method: string, args: unknown[]): Promise<T> {
-  targetPromise ??= workers
-    .resolveService("vibestudio.missions.v1")
-    .then((service) => {
-      if (service.kind !== "durable-object") {
-        throw new Error("The automation service must be a Durable Object");
-      }
-      return service.targetId;
-    })
-    .catch((error) => {
-      targetPromise = null;
-      throw error;
-    });
-  return targetPromise.then((target) => rpc.call<T>(target, method, args));
-}
 
 const automationUiClient: AutomationUiClient = createAutomationUiClient(
   rpc,
@@ -503,7 +485,9 @@ function executionDescription(automation: AutomationRecord): string {
       ? "Conditional agent"
       : execution.action.kind === "eval"
         ? "Exact eval"
-        : "Agent prompt";
+        : execution.action.kind === "notify"
+          ? "Owner notification"
+          : "Agent prompt";
   return execution.conversation.mode === "fresh"
     ? `${action} · new conversation each run`
     : `${action} · continues one conversation`;
@@ -630,11 +614,13 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
           </Grid>
           <Box>
             <Text as="div" size="1" color="gray" mb="1">
-              {execution.action.kind !== "prompt"
-                ? execution.action.kind === "watch"
-                  ? "Watch check code"
-                  : "Exact eval code"
-                : "Exact prompt"}
+              {execution.action.kind === "watch"
+                ? "Watch check code"
+                : execution.action.kind === "eval"
+                  ? "Exact eval code"
+                  : execution.action.kind === "notify"
+                    ? "Notification text"
+                    : "Exact prompt"}
             </Text>
             <Box
               p="3"
@@ -648,7 +634,7 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
               }}
             >
               <Text as="div" size="2">
-                {execution.action.kind !== "prompt"
+                {"code" in execution.action
                   ? execution.action.code
                   : execution.action.text}
               </Text>
@@ -1061,15 +1047,13 @@ function AutomationsPage() {
       else setLoading(true);
       setError(null);
       try {
-        const next = await callAutomations<Overview>("overview", [
-          {
-            limit: 30,
-            filter,
-            ...(debouncedQuery ? { query: debouncedQuery } : {}),
-            ...(deepLinkedMissionId ? { missionId: deepLinkedMissionId } : {}),
-            ...(cursor ? { cursor } : {}),
-          },
-        ]);
+        const next = (await missions.overview({
+          limit: 30,
+          filter,
+          ...(debouncedQuery ? { query: debouncedQuery } : {}),
+          ...(deepLinkedMissionId ? { missionId: deepLinkedMissionId } : {}),
+          ...(cursor ? { cursor } : {}),
+        })) as Overview;
         if (overviewRequest.current === requestId) {
           setOverview((current) =>
             append && current
@@ -1118,7 +1102,7 @@ function AutomationsPage() {
       setBusy({ id: automation.missionId, action: method });
       setError(null);
       try {
-        await callAutomations(method, [automation.missionId]);
+        await missions[method](automation.missionId);
         await load(true);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -1138,13 +1122,10 @@ function AutomationsPage() {
       setLoadingMoreId(id);
       setError(null);
       try {
-        const page = await callAutomations<RunPage>("listRuns", [
-          id,
-          {
-            limit: 20,
-            cursor: { startedAt: last.startedAt, runId: last.runId },
-          },
-        ]);
+        const page: RunPage = await missions.listRuns(id, {
+          limit: 20,
+          cursor: { startedAt: last.startedAt, runId: last.runId },
+        });
         setOlderRuns((value) => ({
           ...value,
           [id]: mergeRuns(value[id] ?? [], page.items),
@@ -1254,7 +1235,7 @@ function AutomationsPage() {
             variant="soft"
             onClick={() => {
               setDeepLinkedMissionId(null);
-              void panel.stateArgs.set({ missionId: null });
+              void panel.stateArgs.patch({ missionId: null });
             }}
           >
             View all automations

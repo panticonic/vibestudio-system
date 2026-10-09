@@ -67,8 +67,6 @@ it.each([320, 390, 1280])(
       ),
     );
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1);
-    await page.screenshot({
-      path: `/home/werg/vibestudio/.cache/template-review/template-ui-adblock-${width}.png`,
-    });
+    await page.screenshot();
   },
 );

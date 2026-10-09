@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
@@ -34,10 +35,6 @@ import {
   pendingReviewNotice,
   type PendingReviewNotice,
 } from "@vibestudio/shared/authority/reviewPending";
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function firstLine(text: string | undefined): string {
   const line = (text ?? "").trim().split("\n")[0] ?? "";
@@ -151,7 +148,7 @@ export function UserNotificationBar() {
       if (requestVersion.current !== version) return;
       const pending = pendingReviewNotice(cause);
       setAwaitingReview(pending);
-      setError(pending ? null : errorMessage(cause));
+      setError(pending ? null : userFacingError(cause));
     } finally {
       if (requestVersion.current === version) setLoading(false);
     }
@@ -229,7 +226,7 @@ export function UserNotificationBar() {
       });
       setHistory(all.filter((entry) => entry.acknowledgedAt !== undefined));
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(userFacingError(cause));
     } finally {
       setHistoryBusy(false);
     }
@@ -260,7 +257,7 @@ export function UserNotificationBar() {
         await userNotifications.acknowledge(notification.id);
         removeLocal(notification.id);
       } catch (cause) {
-        setError(errorMessage(cause));
+        setError(userFacingError(cause));
       } finally {
         setBusyNotificationId(null);
       }
@@ -314,7 +311,7 @@ export function UserNotificationBar() {
         removeLocal(notification.id);
         await acknowledgeInvitesFor(message.channelId);
       } catch (cause) {
-        const detail = errorMessage(cause);
+        const detail = userFacingError(cause);
         setError(
           opened
             ? `Conversation opened, but the notification could not be cleared: ${detail}`
@@ -361,7 +358,7 @@ export function UserNotificationBar() {
         removeLocal(notification.id);
         await acknowledgeInvitesFor(message.channelId);
       } catch (cause) {
-        const detail = errorMessage(cause);
+        const detail = userFacingError(cause);
         setError(
           opened
             ? `Conversation opened, but the notification could not be cleared: ${detail}`
@@ -403,7 +400,7 @@ export function UserNotificationBar() {
         await userNotifications.acknowledge(notification.id);
         removeLocal(notification.id);
       } catch (cause) {
-        const message = errorMessage(cause);
+        const message = userFacingError(cause);
         setError(
           opened
             ? `Conversation opened, but the notification could not be cleared: ${message}`
@@ -549,7 +546,7 @@ export function UserNotificationBar() {
       await userNotifications.acknowledge(entry.id);
       removeLocal(entry.id);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(userFacingError(cause));
     } finally {
       setBusyNotificationId(null);
     }
@@ -825,7 +822,7 @@ export function UserNotificationBar() {
                               focusMessageId: entry.agentMessage!.messageId,
                             },
                           )
-                          .catch((cause) => setError(errorMessage(cause)))
+                          .catch((cause) => setError(userFacingError(cause)))
                       }
                     >
                       Open

@@ -1,6 +1,7 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Button, Callout, Code, Flex, Table, Text } from "@radix-ui/themes";
+import { Badge, Button, Callout, Code, Flex, Table, Text, Tooltip } from "@radix-ui/themes";
 import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
 import { type app, type supervisedUnits } from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
@@ -18,6 +19,8 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
   const [apps, setApps] = useState<AppUnit[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [expandedDiagnostics, setExpandedDiagnostics] = useState<Record<string, UnitHealth>>({});
 
   const load = useCallback(async () => {
@@ -38,9 +41,20 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
         )
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
+    } finally {
+      setLoaded(true);
     }
   }, []);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -78,7 +92,7 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
       if (!result.applied) setError(`${appId} has no pending desktop update.`);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -94,11 +108,11 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
         type: "success",
         title: "App rolled back",
         message: buildKey
-          ? `${appId} restored ${shortBuild(buildKey)}.`
-          : `${appId} restored the previous build.`,
+          ? `${appId} restored an earlier version.`
+          : `${appId} restored the previous version.`,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -112,7 +126,7 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
       await load();
       await loadDiagnostics(appId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -128,7 +142,7 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
       );
       setExpandedDiagnostics((current) => ({ ...current, [appId]: diagnostics }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -146,7 +160,6 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
     await loadDiagnostics(appId);
   };
 
-  if (apps.length === 0) return null;
 
   return (
     <Flex direction="column" gap="2">
@@ -156,8 +169,8 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
             App updates
           </Text>
         ) : null}
-        <Button size="1" variant="soft" onClick={() => void load()}>
-          Refresh
+        <Button size="1" variant="soft" disabled={refreshing} onClick={() => void refresh()}>
+          {refreshing ? "Refreshing…" : "Refresh"}
         </Button>
       </Flex>
       {error ? (
@@ -168,14 +181,20 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
           <Callout.Text>{error}</Callout.Text>
         </Callout.Root>
       ) : null}
+      {loaded && apps.length === 0 && !error ? (
+        <Text size="2" color="gray">
+          No apps installed yet.
+        </Text>
+      ) : null}
+      {apps.length > 0 ? (
       <Table.Root size="1" variant="surface">
         <Table.Header>
           <Table.Row>
             <Table.ColumnHeaderCell>App</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell>Target</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Active build</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Rollback</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>Version</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>Earlier versions</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell />
           </Table.Row>
         </Table.Header>
@@ -197,7 +216,7 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
                   <Table.Cell>{unit.identity.kind}</Table.Cell>
                   <Table.Cell>
                     <Flex direction="column" gap="1">
-                      <Badge color={statusColor(unit.status)}>{unit.status}</Badge>
+                      <Badge color={statusColor(unit.status)}>{statusLabel(unit.status)}</Badge>
                       {pendingUpdate ? <Badge color="blue">pending desktop update</Badge> : null}
                       {unit.lastError ? (
                         <Text size="1" color="red">
@@ -207,15 +226,15 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
                     </Flex>
                   </Table.Cell>
                   <Table.Cell>
-                    <Code size="1">{shortBuild(unit.artifact.buildKey)}</Code>
+                    <BuildLabel buildKey={unit.artifact.buildKey} label="Current" />
                   </Table.Cell>
                   <Table.Cell>
                     <Flex direction="column" gap="1">
                       <Text size="1" color="gray">
-                        {unit.versions.previous.length}/{unit.versions.retentionLimit} retained
+                        {unit.versions.previous.length} of {unit.versions.retentionLimit} kept
                       </Text>
                       {latestPrevious ? (
-                        <Code size="1">{shortBuild(latestPrevious.buildKey)}</Code>
+                        <BuildLabel buildKey={latestPrevious.buildKey} label="Previous" />
                       ) : null}
                     </Flex>
                   </Table.Cell>
@@ -227,7 +246,7 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
                           disabled={busy === `apply:${appId}`}
                           onClick={() => void loadUpdate(appId)}
                         >
-                          Load
+                          Apply update
                         </Button>
                       ) : null}
                       <Button
@@ -319,13 +338,31 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
           })}
         </Table.Body>
       </Table.Root>
+      ) : null}
     </Flex>
   );
 }
 
-function shortBuild(value: string | null | undefined): string {
-  if (!value) return "none";
-  return value.length > 12 ? value.slice(0, 12) : value;
+function BuildLabel({ buildKey, label }: { buildKey: string | null | undefined; label: string }) {
+  if (!buildKey) return <Text size="1" color="gray">None</Text>;
+  return (
+    <Tooltip content={`Build ${buildKey}`}>
+      <Text size="1">{label}</Text>
+    </Tooltip>
+  );
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  running: "Running",
+  available: "Ready",
+  error: "Error",
+  "pending-approval": "Needs approval",
+  building: "Building",
+  stopped: "Stopped",
+};
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status.replace(/-/g, " ");
 }
 
 function statusColor(status: string): "green" | "red" | "amber" | "blue" | "gray" {

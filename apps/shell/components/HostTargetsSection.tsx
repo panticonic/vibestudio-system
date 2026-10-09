@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Callout, Code, Flex, Table, Text, TextField } from "@radix-ui/themes";
@@ -274,7 +275,7 @@ export function HostTargetsSection({ showHeading = true }: { showHeading?: boole
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     }
   }, []);
 
@@ -310,7 +311,7 @@ export function HostTargetsSection({ showHeading = true }: { showHeading?: boole
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -340,7 +341,7 @@ export function HostTargetsSection({ showHeading = true }: { showHeading?: boole
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -376,7 +377,7 @@ export function HostTargetsSection({ showHeading = true }: { showHeading?: boole
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -410,7 +411,7 @@ export function HostTargetsSection({ showHeading = true }: { showHeading?: boole
       }
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
@@ -432,7 +433,7 @@ export function HostTargetsSection({ showHeading = true }: { showHeading?: boole
       setPendingApproval(null);
       await launch(target);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(userFacingError(err));
     } finally {
       setBusy(null);
     }
