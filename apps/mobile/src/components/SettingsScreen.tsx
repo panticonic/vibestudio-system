@@ -1,4 +1,5 @@
 import type { SettingsSection } from "@vibestudio/shared/shellSurface";
+import type { HubPairingOutcome } from "@vibestudio/service-schemas/hubControl";
 import { WorkspaceTransferSheet } from "./WorkspaceTransferSheet";
 import { WorkspaceCookiesCard } from "./WorkspaceCookiesCard";
 import { workspaceName as displayWorkspaceName } from "../services/workspaceName";
@@ -138,12 +139,14 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
     string | null
   >(null);
   const [pairingInvite, setPairingInvite] = React.useState<{
+    code: string;
     pairUrl: string;
     expiresAt: number;
   } | null>(null);
+  const [pairingOutcome, setPairingOutcome] =
+    React.useState<HubPairingOutcome | null>(null);
   const [pairingBusy, setPairingBusy] = React.useState(false);
   const [pairingError, setPairingError] = React.useState<string | null>(null);
-  const [now, setNow] = React.useState(Date.now());
   const mountedRef = React.useRef(true);
   const workspaceSelection = React.useMemo(
     () => (directory ? mobileWorkspaceSelectionDependencies(directory) : null),
@@ -182,11 +185,29 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
     void loadWorkspaces();
   }, [loadWorkspaces]);
 
+  // The hub settles this wait when the invite is redeemed, expires, or is
+  // cancelled; the card only reflects that lifecycle.
   React.useEffect(() => {
-    if (!pairingInvite) return;
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, [pairingInvite]);
+    if (!pairingInvite || !shellClient) return;
+    let cancelled = false;
+    void shellClient.hubControl.awaitPairing({ code: pairingInvite.code }).then(
+      (outcome) => {
+        if (!cancelled && mountedRef.current) setPairingOutcome(outcome);
+      },
+      (error: unknown) => {
+        if (!cancelled && mountedRef.current) {
+          setPairingError(
+            error instanceof Error
+              ? error.message
+              : "Could not follow the pairing link.",
+          );
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [pairingInvite, shellClient]);
 
   const handleWorkspaceSelection = React.useCallback(
     async (workspace: MobileHubWorkspace) => {
@@ -306,17 +327,19 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
   const currentWorkspace = workspaces.find(
     (workspace) => workspace.workspaceId === shellClient?.workspaceId,
   );
-  const pairingExpired = !!pairingInvite && pairingInvite.expiresAt <= now;
+  const pairedDevice =
+    pairingOutcome?.status === "paired" ? pairingOutcome.device : null;
+  const pairingExpired = !!pairingOutcome && !pairedDevice;
 
   const handleCreatePairingInvite = async () => {
     if (!shellClient) return;
     setPairingBusy(true);
     setPairingError(null);
+    setPairingOutcome(null);
     try {
       const result = await shellClient.hubControl.pairDevice();
       if (!mountedRef.current) return;
       setPairingInvite(result.pairing);
-      setNow(Date.now());
     } catch (error) {
       if (mountedRef.current) {
         setPairingError(
@@ -331,13 +354,13 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
   };
 
   const handleCopyPairingLink = () => {
-    if (!pairingInvite || pairingExpired) return;
+    if (!pairingInvite || pairingOutcome) return;
     copyToClipboard(pairingInvite.pairUrl);
     pushToast({ message: "Pairing link copied", tone: "success" });
   };
 
   const handleSharePairingLink = async () => {
-    if (!pairingInvite || pairingExpired) return;
+    if (!pairingInvite || pairingOutcome) return;
     try {
       await shareText(pairingInvite.pairUrl, "Vibestudio pairing link");
     } catch (error) {
@@ -483,19 +506,27 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
               </Text>
               <Badge
                 label={
-                  pairingExpired
-                    ? "Expired"
-                    : `Expires ${new Date(
-                        pairingInvite.expiresAt,
-                      ).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}`
+                  pairedDevice
+                    ? `Paired ${pairedDevice.label || pairedDevice.platform || "Unknown device"}`
+                    : pairingExpired
+                      ? "Expired"
+                      : `Expires ${new Date(
+                          pairingInvite.expiresAt,
+                        ).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}`
                 }
-                tone={pairingExpired ? "warning" : "neutral"}
+                tone={
+                  pairedDevice
+                    ? "success"
+                    : pairingExpired
+                      ? "warning"
+                      : "neutral"
+                }
               />
               <View style={styles.pairingActions}>
-                {pairingExpired ? null : (
+                {pairingOutcome ? null : (
                   <>
                     <Button
                       label="Copy link"
@@ -509,7 +540,7 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
                     />
                   </>
                 )}
-                {pairingExpired ? (
+                {pairingOutcome ? (
                   <Button
                     label="Create new link"
                     variant="filled"

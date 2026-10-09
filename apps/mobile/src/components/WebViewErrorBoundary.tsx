@@ -3,26 +3,21 @@
  *
  * If a single panel's WebView throws during render, this catches it and shows
  * a "Panel failed to load" screen with a reload button. Other panels continue
- * working normally. Uses static colors since theme atoms may be unavailable.
+ * working normally. The caller supplies the resolved theme background.
  */
 
 import React, { type ErrorInfo, type ReactNode } from "react";
 import { View, StyleSheet } from "react-native";
 import { EmptyState, Button } from "./ui/primitives";
+import type { ThemeColors } from "../state/themeAtoms";
 import { RefreshCw } from "../design/icons";
 
 interface WebViewErrorBoundaryProps {
   children: ReactNode;
   /** Panel ID for logging */
   panelId: string;
-  /** Optional color overrides for theming the error screen */
-  colors?: {
-    background?: string;
-    text?: string;
-    textSecondary?: string;
-    accent?: string;
-    accentText?: string;
-  };
+  /** Resolved theme colors for the error screen. */
+  colors: Pick<ThemeColors, "background">;
 }
 
 interface WebViewErrorBoundaryState {
@@ -61,10 +56,7 @@ export class WebViewErrorBoundary extends React.Component<
       const colors = this.props.colors;
       return (
         <View
-          style={[
-            styles.container,
-            colors?.background != null && { backgroundColor: colors.background },
-          ]}
+          style={[styles.container, { backgroundColor: colors.background }]}
         >
           <EmptyState
             icon={RefreshCw}
@@ -94,6 +86,5 @@ export class WebViewErrorBoundary extends React.Component<
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#111419",
   },
 });

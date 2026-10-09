@@ -4,7 +4,6 @@ Workspace browser profiles require iOS 17 or later. Android requires a System
 WebView supporting AndroidX WebKit's `MULTI_PROFILE` capability. The native host
 binds each browser view to one account/workspace profile before loading content;
 unsupported engines show an update message and never use shared browser storage.
-This native contract is `rn-host-5`.
 
 Settings → This device → Website cookies clears only the workspace captured when
 Settings opened. The explicit review names that workspace. Native cookie storage

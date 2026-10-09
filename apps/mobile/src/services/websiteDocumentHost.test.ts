@@ -15,6 +15,7 @@ function harness() {
   const deps = {
     runtimeId: () => "panel:browser",
     bootstrap: jest.fn(async () => ({
+      workspaceId: "workspace:test",
       runtimeId: "panel:browser",
       slotId: "slot",
       contextId: "context",

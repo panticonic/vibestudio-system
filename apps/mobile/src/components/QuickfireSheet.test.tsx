@@ -277,7 +277,7 @@ it("keeps Send available beside Stop for follow-ups during an active turn", asyn
   const input = await waitFor(() => getByTestId("quickfire-compose"));
   fireEvent.changeText(input, "First request");
   await act(async () => fireEvent.press(getByLabelText("Send")));
-  await waitFor(() => getByLabelText("Stop"));
+  await waitFor(() => getByLabelText("Stop generating"));
   fireEvent.changeText(input, "A follow-up");
   await act(async () => fireEvent.press(getByLabelText("Send")));
   expect(client.send).toHaveBeenLastCalledWith("A follow-up", {

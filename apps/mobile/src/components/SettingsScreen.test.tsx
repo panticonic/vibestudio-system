@@ -88,6 +88,8 @@ const profile = {
   avatar: "data:image/png;base64,YXZhdGFy",
 };
 
+let settlePairing: (outcome: unknown) => void = () => undefined;
+
 function renderSettings(section?: "devices" | "connection") {
   const store = createStore();
   store.set(connectionStatusAtom, "connected");
@@ -99,10 +101,17 @@ function renderSettings(section?: "devices" | "connection") {
       routeWorkspace: jest.fn(),
       pairDevice: jest.fn(async () => ({
         pairing: {
+          code: "device-invite",
           pairUrl: "https://vibestudio.app/p#device-invite",
           expiresAt: Date.now() + 60_000,
         },
       })),
+      awaitPairing: jest.fn(
+        () =>
+          new Promise((resolve) => {
+            settlePairing = resolve;
+          }),
+      ),
     },
     dispose: jest.fn(),
     refreshAccountProfile: jest.fn(async () => profile),
@@ -330,6 +339,24 @@ describe("SettingsScreen workspace selector", () => {
     expect(Clipboard.setString).toHaveBeenCalledWith(
       "https://vibestudio.app/p#device-invite",
     );
+
+    await waitFor(() =>
+      expect(view.shellClient.hubControl.awaitPairing).toHaveBeenCalledWith({
+        code: "device-invite",
+      }),
+    );
+    await act(async () =>
+      settlePairing({
+        status: "paired",
+        device: {
+          deviceId: "dev_desktop",
+          userId: "user-1",
+          label: "Desktop",
+          createdAt: 1,
+        },
+      }),
+    );
+    expect(await view.findByText("Paired Desktop")).toBeTruthy();
   });
 
   it("surfaces loading errors and retries in place", async () => {

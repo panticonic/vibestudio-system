@@ -471,7 +471,7 @@ export function QuickfireSheet({
                   )}
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Close Quickfire"
+                    accessibilityLabel="Close"
                     onPress={close}
                     style={styles.navigationButton}
                   >
@@ -573,7 +573,7 @@ export function QuickfireSheet({
                     {view.streaming ? (
                       <IconButton
                         icon={Square}
-                        label="Stop"
+                        label="Stop generating"
                         onPress={() => onIntent({ kind: "stop" })}
                         color={colors.danger}
                         size={17}

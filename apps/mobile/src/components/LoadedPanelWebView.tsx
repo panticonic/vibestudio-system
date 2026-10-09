@@ -96,13 +96,7 @@ function LoadedPanelWebViewImpl({
     >
       <WebViewErrorBoundary
         panelId={entry.panelId}
-        colors={{
-          background: colors.background,
-          text: colors.text,
-          textSecondary: colors.textSecondary,
-          accent: colors.accent,
-          accentText: colors.text,
-        }}
+        colors={colors}
       >
         <PanelWebView
           ref={handleRef}

@@ -24,7 +24,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Pressable,
   ActivityIndicator,
   Platform,
 } from "react-native";
@@ -59,6 +58,7 @@ import {
 import { openExternalUrl } from "../services/nativeCapabilities";
 import { shouldOpenPdfExternally } from "../services/mediaNavigation";
 import { VibestudioLogo } from "./VibestudioLogo";
+import { Button } from "./ui/primitives";
 import type {
   PanelBootObservation,
   PanelBootProbeResult,
@@ -1474,22 +1474,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
             >
               {errorMessage}
             </Text>
-            <Pressable
-              style={[
-                styles.retryButton,
-                colors?.primary != null && { backgroundColor: colors.primary },
-              ]}
-              onPress={handleRetry}
-            >
-              <Text
-                style={[
-                  styles.retryText,
-                  colors?.onPrimary != null && { color: colors.onPrimary },
-                ]}
-              >
-                Retry
-              </Text>
-            </Pressable>
+            <Button label="Retry" variant="filled" onPress={handleRetry} />
           </View>
         </View>
       );
@@ -1525,22 +1510,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
             >
               Your device will open this document in its PDF-capable app.
             </Text>
-            <Pressable
-              style={[
-                styles.retryButton,
-                colors?.primary != null && { backgroundColor: colors.primary },
-              ]}
-              onPress={() => openExternalPdf(url)}
-            >
-              <Text
-                style={[
-                  styles.retryText,
-                  colors?.onPrimary != null && { color: colors.onPrimary },
-                ]}
-              >
-                Open PDF
-              </Text>
-            </Pressable>
+            <Button label="Open PDF" variant="filled" onPress={() => openExternalPdf(url)} />
           </View>
         </View>
       );
@@ -1726,19 +1696,5 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 24,
     lineHeight: 20,
-  },
-  retryButton: {
-    minHeight: 44,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: "#3d6ff0",
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  retryText: {
-    color: "#e0e0e0",
-    fontSize: 16,
-    fontWeight: "600",
   },
 });
