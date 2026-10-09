@@ -246,6 +246,13 @@ function currentInvocationContextId(ctx: ExtensionContextLike): string | undefin
   return invocation?.chainCaller?.contextId ?? invocation?.caller.contextId;
 }
 
+function invocationContextId(ctx: ExtensionContextLike, requested?: string): string | undefined {
+  const current = currentInvocationContextId(ctx);
+  if (requested !== undefined && requested !== current)
+    throw new Error("Typechecking is scoped to the caller's context; invoke from the target context");
+  return current;
+}
+
 function normalizeCheckPanelOptions(options?: CheckPanelOptions | string): CheckPanelOptions {
   if (options === undefined) return {};
   if (typeof options === "string") return { contextId: options };
@@ -271,7 +278,7 @@ export async function activate(ctx: ExtensionContextLike) {
             'Pass the panel source path explicitly, e.g. checkPanel("panels/my-app")'
         );
       }
-      const { contextId = currentInvocationContextId(ctx) } = normalizeCheckPanelOptions(options);
+      const contextId = invocationContextId(ctx, normalizeCheckPanelOptions(options).contextId);
       const resolvedPath = await resolvePanelPath(ctx, source, contextId);
       const result = await typeCheckRpcMethods["typecheck.check"](
         resolvedPath,
@@ -294,7 +301,7 @@ export async function activate(ctx: ExtensionContextLike) {
             'Pass the panel source path explicitly, e.g. check("panels/my-app")'
         );
       }
-      const effectiveContextId = contextId ?? currentInvocationContextId(ctx);
+      const effectiveContextId = invocationContextId(ctx, contextId);
       const resolvedPanelPath = await resolvePanelPath(ctx, source, effectiveContextId);
       await validateFilePath(ctx, filePath, effectiveContextId);
       return typeCheckRpcMethods["typecheck.check"](
@@ -313,7 +320,7 @@ export async function activate(ctx: ExtensionContextLike) {
       fileContent?: string,
       contextId?: string
     ) {
-      const effectiveContextId = contextId ?? currentInvocationContextId(ctx);
+      const effectiveContextId = invocationContextId(ctx, contextId);
       const resolvedPanelPath = await resolvePanelPath(ctx, panelPath, effectiveContextId);
       await validateFilePath(ctx, filePath, effectiveContextId);
       return typeCheckRpcMethods["typecheck.getTypeInfo"](
@@ -334,7 +341,7 @@ export async function activate(ctx: ExtensionContextLike) {
       fileContent?: string,
       contextId?: string
     ) {
-      const effectiveContextId = contextId ?? currentInvocationContextId(ctx);
+      const effectiveContextId = invocationContextId(ctx, contextId);
       const resolvedPanelPath = await resolvePanelPath(ctx, panelPath, effectiveContextId);
       await validateFilePath(ctx, filePath, effectiveContextId);
       return typeCheckRpcMethods["typecheck.getCompletions"](
@@ -350,7 +357,7 @@ export async function activate(ctx: ExtensionContextLike) {
     async getBrowserTypeDefinitions(options?: BrowserTypeDefinitionsOptions) {
       const opts = options ?? {};
       const packageNames = opts.packageNames ?? [];
-      const effectiveContextId = opts.contextId ?? currentInvocationContextId(ctx);
+      const effectiveContextId = invocationContextId(ctx, opts.contextId);
       const source =
         opts.panelPath ?? (packageNames.length > 0 ? currentCallerPanelPath(ctx) : undefined);
 

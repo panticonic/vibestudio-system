@@ -127,7 +127,7 @@ describe("@workspace-extensions/typecheck-service", () => {
     );
   });
 
-  it("resolves checkPanel against an explicit context", async () => {
+  it("accepts an explicit context matching the authenticated caller", async () => {
     const contextProjectionsPath = fs.mkdtempSync(
       path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
     );
@@ -138,7 +138,7 @@ describe("@workspace-extensions/typecheck-service", () => {
       JSON.stringify({ name: "context-panel", version: "0.0.0" })
     );
     fs.writeFileSync(path.join(panelPath, "index.tsx"), "const value: number = 'context-error';\n");
-    const service = await api(undefined, contextProjectionsPath);
+    const service = await api({ callerId: "panel:test", contextId: "ctx-1" }, contextProjectionsPath);
 
     try {
       const result = await service.checkPanel("panels/my-app", {
@@ -149,6 +149,18 @@ describe("@workspace-extensions/typecheck-service", () => {
     } finally {
       fs.rmSync(contextProjectionsPath, { recursive: true, force: true });
     }
+  });
+
+  it("rejects other contexts on every endpoint before resolving files or compiler dependencies", async () => {
+    const service = await api({ callerId: "panel:test", contextId: "own" });
+    const attempts = [
+      () => service.checkPanel("panels/test", { contextId: "other" }),
+      () => service.check("panels/test", undefined, undefined, "other"),
+      () => service.getTypeInfo("panels/test", "index.ts", 1, 1, undefined, "other"),
+      () => service.getCompletions("panels/test", "index.ts", 1, 1, undefined, "other"),
+      () => service.getBrowserTypeDefinitions({ contextId: "other" }),
+    ];
+    for (const attempt of attempts) await expect(attempt()).rejects.toThrow("scoped to the caller's context");
   });
 
   it("infers checkPanel context from the current extension invocation", async () => {
