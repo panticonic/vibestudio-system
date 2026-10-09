@@ -187,32 +187,39 @@ describe("@workspace-extensions/typecheck-service", () => {
     const sourcePackage = path.join(workspaceRoot, "packages", "shared");
     const contextPackage = path.join(contextRoot, "packages", "shared");
     const panelPath = path.join(contextRoot, "panels", "my-app");
+    const admittedPackage = path.join(workspaceRoot, "admitted", "shared");
+    const sharedManifest = JSON.stringify({
+      name: "@workspace/shared",
+      version: "0.0.0",
+      exports: { ".": "./index.ts" },
+      dependencies: { "owner-only-types": "1.0.0" },
+    });
+    const sharedSource =
+      "import { ownerValue } from 'owner-only-types';\nexport const fromShared = ownerValue;\n";
 
     fs.mkdirSync(sourcePackage, { recursive: true });
     fs.writeFileSync(
       path.join(workspaceRoot, "pnpm-workspace.yaml"),
       "packages:\n  - 'packages/*'\n"
     );
-    fs.writeFileSync(
-      path.join(sourcePackage, "package.json"),
-      JSON.stringify({
-        name: "@workspace/shared",
-        version: "0.0.0",
-        exports: { ".": "./index.ts" },
-      })
-    );
-    fs.writeFileSync(path.join(sourcePackage, "index.ts"), "export const fromShared = 1;\n");
+    fs.writeFileSync(path.join(sourcePackage, "package.json"), sharedManifest);
+    fs.writeFileSync(path.join(sourcePackage, "index.ts"), sharedSource);
 
     fs.mkdirSync(contextPackage, { recursive: true });
+    fs.writeFileSync(path.join(contextPackage, "package.json"), sharedManifest);
+    fs.writeFileSync(path.join(contextPackage, "index.ts"), sharedSource);
+    const admittedDependency = path.join(admittedPackage, "node_modules", "owner-only-types");
+    fs.mkdirSync(admittedDependency, { recursive: true });
+    fs.writeFileSync(path.join(admittedPackage, "package.json"), sharedManifest);
+    fs.writeFileSync(path.join(admittedPackage, "index.ts"), sharedSource);
     fs.writeFileSync(
-      path.join(contextPackage, "package.json"),
-      JSON.stringify({
-        name: "@workspace/shared",
-        version: "0.0.0",
-        exports: { ".": "./index.ts" },
-      })
+      path.join(admittedDependency, "package.json"),
+      JSON.stringify({ name: "owner-only-types", version: "1.0.0", types: "index.d.ts" })
     );
-    fs.writeFileSync(path.join(contextPackage, "index.ts"), "export const fromShared = 1;\n");
+    fs.writeFileSync(
+      path.join(admittedDependency, "index.d.ts"),
+      "export declare const ownerValue: number;\n"
+    );
     fs.mkdirSync(panelPath, { recursive: true });
     fs.writeFileSync(
       path.join(panelPath, "package.json"),
@@ -241,7 +248,7 @@ describe("@workspace-extensions/typecheck-service", () => {
             stateHash: "state:test",
             dependencyKey: null,
             nodeModulesPaths: [],
-            workspacePackages: {},
+            workspacePackages: { "@workspace/shared": admittedPackage },
             moduleConditions: [],
           } as T;
         },
@@ -264,6 +271,25 @@ describe("@workspace-extensions/typecheck-service", () => {
         })
       );
       expect(result.errorCount).toBe(0);
+      expect(result.diagnostics).not.toContainEqual(
+        expect.objectContaining({
+          code: 2307,
+          message: expect.stringContaining("owner-only-types"),
+        })
+      );
+
+      fs.writeFileSync(
+        path.join(admittedPackage, "package.json"),
+        JSON.stringify({
+          name: "@workspace/shared",
+          version: "0.0.1",
+          exports: { ".": "./index.ts" },
+          dependencies: { "owner-only-types": "1.0.0" },
+        })
+      );
+      await expect(service.checkPanel("panels/my-app")).rejects.toThrow(
+        "Admitted package does not match the exact semantic manifest: @workspace/shared"
+      );
     } finally {
       fs.rmSync(workspaceRoot, { recursive: true, force: true });
       fs.rmSync(contextProjectionsPath, { recursive: true, force: true });

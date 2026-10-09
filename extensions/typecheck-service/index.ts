@@ -219,11 +219,18 @@ async function typecheckOptions(
   }>("main", "build.prepareTypecheck", unit, ...(contextId ? [`ctx:${contextId}`] : []));
   const packages = new Map(workspaceContext?.packages);
   for (const [name, dir] of Object.entries(environment.workspacePackages)) {
-    if (packages.has(name))
-      throw new Error(`Compiler SDK package duplicates semantic source: ${name}`);
-    const packageJson = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    const manifestPath = path.join(dir, "package.json");
+    const manifestBytes = fs.readFileSync(manifestPath);
+    const packageJson = JSON.parse(manifestBytes.toString("utf8"));
     if (packageJson.name !== name)
-      throw new Error(`Compiler SDK package identity mismatch: ${name}`);
+      throw new Error(`Compiler package identity mismatch: ${name}`);
+    const semantic = packages.get(name);
+    if (semantic) {
+      const semanticManifest = fs.readFileSync(path.join(semantic.dir, "package.json"));
+      if (!semanticManifest.equals(manifestBytes)) {
+        throw new Error(`Admitted package does not match the exact semantic manifest: ${name}`);
+      }
+    }
     packages.set(name, { name, dir, packageJson });
   }
   return { workspaceContext: { monorepoRoot: root, packages }, ...environment };
