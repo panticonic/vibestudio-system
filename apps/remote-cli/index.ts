@@ -63,6 +63,9 @@ async function connect() {
 }
 
 export async function main(): Promise<void> {
+  const command = process.env["VIBESTUDIO_TERMINAL_APP_COMMAND"] ?? "status";
+  if (command !== "status") throw new Error(`Unknown remote-cli command: ${command}`);
+
   const { rpc, close } = await connect();
   const workspaceClient = createTypedServiceClient(
     "workspace",
@@ -87,9 +90,8 @@ export async function main(): Promise<void> {
     );
   }
 
-  const command = process.env["VIBESTUDIO_TERMINAL_APP_COMMAND"] ?? "status";
-  if (command !== "status") throw new Error(`Unknown remote-cli command: ${command}`);
-
+  // The host runs this as a long-lived terminal app: it stays connected,
+  // streaming lifecycle events, until the host asks it to shut down.
   process.on("message", (message) => {
     if ((message as { type?: string })?.type === "shutdown") {
       close();
