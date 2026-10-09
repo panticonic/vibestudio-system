@@ -98,5 +98,10 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@workspace/react": "workspace:*"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "vitest": "^3.2.7"
   }
 }

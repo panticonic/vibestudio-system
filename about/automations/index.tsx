@@ -1032,6 +1032,7 @@ function AutomationsPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [observationAttempt, setObservationAttempt] = useState(0);
   const overviewRequest = useRef(0);
 
   useEffect(() => {
@@ -1082,17 +1083,41 @@ function AutomationsPage() {
   useEffect(() => {
     setOlderRuns({});
     setExhausted(new Set());
-    void load();
   }, [load]);
 
-  const activeRunCount = overview?.stats.running ?? 0;
   useEffect(() => {
-    if (activeRunCount === 0) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load(true);
-    }, 5_000);
-    return () => window.clearInterval(timer);
-  }, [activeRunCount, load]);
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        // Establish the owner's version before reading the initial snapshot.
+        // Changes during that read remain observable at the retained version.
+        let observation = await missions.observeChanges({
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        await load(true);
+        while (!controller.signal.aborted) {
+          observation = await missions.observeChanges({
+            afterVersion: observation.version,
+            signal: controller.signal,
+          });
+          if (controller.signal.aborted) return;
+          await load(true);
+        }
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+          // The initial observation precedes the first snapshot so changes
+          // during that snapshot cannot be missed. If subscribing fails,
+          // settle the initial loading state and leave the explicit retry
+          // action available instead of stranding the page behind its spinner.
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [load, observationAttempt]);
 
   const action = useCallback(
     async (
@@ -1215,7 +1240,16 @@ function AutomationsPage() {
           </Callout.Icon>
           <Callout.Text>
             {error}{" "}
-            <Button variant="ghost" size="1" onClick={() => void load(true)}>
+            <Button
+              variant="ghost"
+              size="1"
+              disabled={loading || refreshing}
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                setObservationAttempt((attempt) => attempt + 1);
+              }}
+            >
               Try again
             </Button>
           </Callout.Text>
