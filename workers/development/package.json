@@ -5,7 +5,7 @@
   "type": "module",
   "vibestudio": {
     "title": "System Development",
-    "icon": "\ud83d\udee0\ufe0f",
+    "icon": "🛠️",
     "kind": "worker",
     "entry": "index.ts",
     "durable": {
@@ -130,7 +130,34 @@
           "evidence": "bounded-dynamic"
         }
       ]
-    }
+    },
+    "services": [
+      {
+        "action": "manage development sessions",
+        "authority": {
+          "binding": "declared",
+          "principals": [
+            "host",
+            "user",
+            "code"
+          ]
+        },
+        "description": "Build and test workspace changes before they're saved.",
+        "durableObject": {
+          "className": "DevelopmentDO"
+        },
+        "name": "development",
+        "notability": "everyday",
+        "presentation": {
+          "domain": "automation",
+          "verb": "manage"
+        },
+        "protocols": [
+          "vibestudio.development.v1"
+        ],
+        "title": "Development"
+      }
+    ]
   },
   "dependencies": {
     "@vibestudio/content-addressing": "workspace:*",
