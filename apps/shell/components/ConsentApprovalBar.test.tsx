@@ -470,6 +470,7 @@ describe("ConsentApprovalBar coordinator", () => {
               workspaceNames: { personal: "Personal", team: "Team" },
               sidebarVisible: true,
               toggleSidebar: () => {},
+              closeSidebar: () => {},
               focus: () => {
                 throw new Error("Approval must not switch workspace");
               },

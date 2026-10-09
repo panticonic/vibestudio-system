@@ -1212,10 +1212,13 @@ export const PanelStack = memo(function PanelStack({
   }, [bumpLayoutEpoch, navigationMode]);
 
   const closeMobileTree = useCallback(() => {
-    if (isMobile) {
+    if (!isMobile) return;
+    if (navigationHost) {
+      navigationHost.closeSidebar();
+    } else {
       setMode("stack");
     }
-  }, [isMobile, setMode]);
+  }, [isMobile, navigationHost, setMode]);
   // Plain tree click retargets the focused pane; Cmd/Ctrl-click force-opens
   // beside it. This makes the tree the canonical picker for a chosen slot.
   const navigateFromTree = useCallback(

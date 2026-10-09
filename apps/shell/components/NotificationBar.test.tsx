@@ -183,6 +183,7 @@ describe("NotificationBar", () => {
             workspaceNames: { personal: "Personal", system: "System" },
             sidebarVisible: true,
             toggleSidebar: vi.fn(),
+            closeSidebar: vi.fn(),
             focus,
           }}
         >

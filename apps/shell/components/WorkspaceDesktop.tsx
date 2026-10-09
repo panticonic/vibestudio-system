@@ -742,6 +742,7 @@ export function WorkspaceDesktop({
                             sidebarVisible,
                             toggleSidebar: () =>
                               setSidebarVisible((visible) => !visible),
+                            closeSidebar: () => setSidebarVisible(false),
                             focus: () => {
                               void openWorkspace(
                                 owner.workspace.workspaceId,

@@ -23,6 +23,7 @@ export const WorkspaceNavigationHostContext = createContext<{
   workspaceNames: Readonly<Record<string, string>>;
   sidebarVisible: boolean;
   toggleSidebar(): void;
+  closeSidebar(): void;
   focus(): void;
   registerNavigateToPanel?(navigate: (panelId: string) => void): () => void;
 } | null>(null);
