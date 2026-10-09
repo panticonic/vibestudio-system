@@ -57,11 +57,20 @@ interface PublicOperation {
   frames: ProviderFrame[];
 }
 
+/** Durable status; callers observe it with an opaque change version. */
+type DurableSensitiveStatus = Omit<SensitiveBrowserImportStatus, "version">;
+
 interface SensitiveOperation {
   sourceId: string;
   cancelled: boolean;
-  status: SensitiveBrowserImportStatus;
+  status: DurableSensitiveStatus;
+  revision: number;
+  waiters: Set<SensitiveWaiter>;
   running: Promise<void>;
+}
+
+interface SensitiveWaiter {
+  changed(status: SensitiveBrowserImportStatus): void;
 }
 
 const SOURCE_TTL_MS = 30 * 60_000;
@@ -75,6 +84,9 @@ export class MobileBrowserImportProvider {
   private readonly sources = new Map<string, MobileImportSource>();
   private readonly publicOperations = new Map<string, PublicOperation>();
   private readonly sensitiveOperations = new Map<string, SensitiveOperation>();
+  /** Scopes status versions to this provider instance. */
+  private readonly epoch = Date.now().toString(36);
+  private revision = 0;
 
   constructor(
     private readonly rpc: MobileRpcClient,
@@ -85,10 +97,13 @@ export class MobileBrowserImportProvider {
   expose(): void {
     const expose = (
       method: string,
-      handler: (args: unknown[]) => unknown | Promise<unknown>,
+      handler: (
+        args: unknown[],
+        signal: AbortSignal,
+      ) => unknown | Promise<unknown>,
     ) =>
-      this.rpc.expose(`browserEnvironment.${method}`, ({ args }) =>
-        handler(args),
+      this.rpc.expose(`browserEnvironment.${method}`, ({ args, signal }) =>
+        handler(args, signal),
       );
     expose("listImportHosts", () => [this.summary()]);
     expose("listImportAcquisitionOptions", ([hostId]) => {
@@ -140,8 +155,11 @@ export class MobileBrowserImportProvider {
         );
       },
     );
-    expose("observeSensitiveImport", ([operationId]) =>
-      this.observeSensitiveImport(String(operationId)),
+    expose("observeSensitiveImport", ([operationId, options], signal) =>
+      this.observeSensitiveImport(String(operationId), {
+        ...this.observeOptions(options),
+        signal,
+      }),
     );
     expose("cancelSensitiveImport", ([operationId]) =>
       this.cancelSensitiveImport(String(operationId)),
@@ -358,7 +376,7 @@ export class MobileBrowserImportProvider {
     if (existing) {
       if (existing.sourceId !== sourceId)
         throw new Error("Protected import inputs changed.");
-      return existing.status;
+      return this.observed(existing);
     }
     const persisted = await this.readLedger(operationId);
     if (persisted && persisted.state !== "running") return persisted;
@@ -367,7 +385,7 @@ export class MobileBrowserImportProvider {
         "This mobile export does not contain that protected browser category.",
       );
     }
-    const status: SensitiveBrowserImportStatus = {
+    const status: DurableSensitiveStatus = {
       operationId,
       state: "running",
       counts: dataTypes.map((dataType) => this.sensitiveCount(dataType)),
@@ -376,22 +394,55 @@ export class MobileBrowserImportProvider {
       sourceId,
       cancelled: false,
       status,
+      revision: ++this.revision,
+      waiters: new Set(),
       running: Promise.resolve(),
     };
-    operation.running = this.runSensitive(operation);
+    // Claim the id, then persist the running receipt before any progress can
+    // be written, so a later write never races behind the initial one.
     this.sensitiveOperations.set(operationId, operation);
     await this.writeLedger(status);
-    return status;
+    operation.running = this.runSensitive(operation);
+    return this.observed(operation);
   }
 
+  /**
+   * Aggregate status. With `afterVersion`, a running import resolves on its
+   * next status change; any other state or version answers immediately.
+   */
   async observeSensitiveImport(
     operationId: string,
+    options: { afterVersion?: string; signal?: AbortSignal } = {},
   ): Promise<SensitiveBrowserImportStatus> {
-    return (
-      this.sensitiveOperations.get(operationId)?.status ??
-      (await this.readLedger(operationId)) ??
-      this.missingSensitive(operationId)
-    );
+    const operation = this.sensitiveOperations.get(operationId);
+    if (!operation)
+      return (
+        (await this.readLedger(operationId)) ??
+        this.missingSensitive(operationId)
+      );
+    const current = this.observed(operation);
+    const { afterVersion, signal } = options;
+    if (
+      afterVersion === undefined ||
+      afterVersion !== current.version ||
+      operation.status.state !== "running"
+    )
+      return current;
+    signal?.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        operation.waiters.delete(waiter);
+        reject(signal!.reason);
+      };
+      const waiter: SensitiveWaiter = {
+        changed: (status) => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(status);
+        },
+      };
+      operation.waiters.add(waiter);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   async cancelSensitiveImport(
@@ -403,10 +454,11 @@ export class MobileBrowserImportProvider {
         (await this.readLedger(operationId)) ??
         this.missingSensitive(operationId)
       );
+    if (operation.status.state !== "running") return this.observed(operation);
     operation.cancelled = true;
     operation.status = { ...operation.status, state: "cancelled" };
-    await this.writeLedger(operation.status);
-    return operation.status;
+    await this.changed(operation);
+    return this.observed(operation);
   }
 
   async releaseSource(sourceId: string): Promise<void> {
@@ -453,6 +505,7 @@ export class MobileBrowserImportProvider {
   }
 
   private async runSensitive(operation: SensitiveOperation): Promise<void> {
+    let terminal: DurableSensitiveStatus;
     try {
       const browserVault = createTypedServiceClient(
         "browserVaultNative",
@@ -462,9 +515,10 @@ export class MobileBrowserImportProvider {
       );
       const parsed = await this.parse(operation.sourceId, ["passwords"]);
       const passwords = parsed.items.passwords;
-      const count =
-        operation.status.counts[0] ?? this.sensitiveCount("passwords");
-      count.read = passwords.length;
+      let count: SensitiveBrowserImportCount = {
+        ...(operation.status.counts[0] ?? this.sensitiveCount("passwords")),
+        read: passwords.length,
+      };
       for (
         let start = 0;
         start < passwords.length;
@@ -475,25 +529,44 @@ export class MobileBrowserImportProvider {
         const stored = await browserVault.addPasswordsBatch(batch, {
           sourceId: operation.sourceId,
         });
-        count.stored += stored;
-        await this.writeLedger(operation.status);
+        if (operation.cancelled) return;
+        count = { ...count, stored: count.stored + stored };
+        operation.status = { ...operation.status, counts: [count] };
+        await this.changed(operation);
       }
       if (operation.cancelled) return;
-      operation.status = {
-        ...operation.status,
-        state: "complete",
-        counts: [count],
-      };
+      terminal = { ...operation.status, state: "complete", counts: [count] };
     } catch {
-      operation.status = {
+      if (operation.cancelled) return;
+      terminal = {
         ...operation.status,
         state: "failed",
         error:
           "Protected browser data could not be imported from the selected export.",
       };
-    } finally {
-      await this.writeLedger(operation.status);
     }
+    operation.status = terminal;
+    await this.changed(operation);
+  }
+
+  /** Persist a status change, then wake the observers waiting on its version. */
+  private async changed(operation: SensitiveOperation): Promise<void> {
+    operation.revision = ++this.revision;
+    await this.writeLedger(operation.status);
+    const status = this.observed(operation);
+    const waiters = [...operation.waiters];
+    operation.waiters.clear();
+    for (const waiter of waiters) waiter.changed(status);
+  }
+
+  private observed(
+    operation: SensitiveOperation,
+  ): SensitiveBrowserImportStatus {
+    return {
+      ...operation.status,
+      counts: operation.status.counts.map((count) => ({ ...count })),
+      version: `${this.epoch}:${operation.revision}`,
+    };
   }
 
   private breakdown(
@@ -626,22 +699,25 @@ export class MobileBrowserImportProvider {
     const value = await this.storage.getItem(`${LEDGER_PREFIX}${operationId}`);
     if (!value) return null;
     try {
-      const status = JSON.parse(value) as SensitiveBrowserImportStatus;
+      const status = JSON.parse(value) as DurableSensitiveStatus;
       if (status.operationId !== operationId) return null;
+      // A stored receipt is terminal for this provider instance and never changes again.
+      const version = `${this.epoch}:stored`;
       return status.state === "running"
         ? {
             ...status,
             state: "failed",
             error:
               "The mobile app stopped before the protected import completed. Choose the export again to retry.",
+            version,
           }
-        : status;
+        : { ...status, version };
     } catch {
       return null;
     }
   }
 
-  private writeLedger(status: SensitiveBrowserImportStatus): Promise<void> {
+  private writeLedger(status: DurableSensitiveStatus): Promise<void> {
     return this.storage.setItem(
       `${LEDGER_PREFIX}${status.operationId}`,
       JSON.stringify(status),
@@ -654,6 +730,16 @@ export class MobileBrowserImportProvider {
       state: "failed",
       counts: [],
       error: "Protected browser import operation is unavailable.",
+      version: `${this.epoch}:missing`,
     };
+  }
+
+  private observeOptions(value: unknown): { afterVersion?: string } {
+    if (value === undefined) return {};
+    const afterVersion = (value as { afterVersion?: unknown } | null)
+      ?.afterVersion;
+    if (typeof afterVersion !== "string")
+      throw new Error("Protected import observation options are invalid.");
+    return { afterVersion };
   }
 }

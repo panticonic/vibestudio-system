@@ -156,6 +156,53 @@ describe("MobileBrowserImportProvider", () => {
     await provider.releaseSource(source.sourceId);
   });
 
+  it("reports aggregate protected progress through versioned observations", async () => {
+    const transport = rpc();
+    const provider = new MobileBrowserImportProvider(
+      transport as never,
+      "phone-1",
+      storage(),
+    );
+    provider.expose();
+    const source = await acquire(provider);
+    const observe = exposedHandler(
+      transport,
+      "browserEnvironment.observeSensitiveImport",
+    ) as (context: {
+      args: unknown[];
+      signal: AbortSignal;
+    }) => Promise<{ state: string; version: string }>;
+    const signal = new AbortController().signal;
+
+    let status = await provider.startSensitiveImport(
+      source.sourceId,
+      ["passwords"],
+      "sealed-1",
+    );
+    const seen = [status];
+    while (status.state === "running") {
+      const next = await observe({
+        args: ["sealed-1", { afterVersion: status.version }],
+        signal,
+      });
+      expect(next.version).not.toBe(status.version);
+      status = next as typeof status;
+      seen.push(status);
+    }
+
+    expect(status).toMatchObject({
+      state: "complete",
+      counts: [{ dataType: "passwords", read: 1, stored: 1 }],
+    });
+    await expect(
+      observe({ args: ["sealed-1", { afterVersion: status.version }], signal }),
+    ).resolves.toEqual(status);
+    expect(JSON.stringify(seen)).not.toContain(secret);
+    expect(JSON.stringify(seen)).not.toContain("private-user");
+
+    await provider.releaseSource(source.sourceId);
+  });
+
   it("rejects protected categories before a public operation can be created", async () => {
     const transport = rpc();
     const provider = new MobileBrowserImportProvider(
