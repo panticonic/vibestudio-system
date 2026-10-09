@@ -487,7 +487,9 @@ function executionDescription(automation: AutomationRecord): string {
         ? "Exact eval"
         : execution.action.kind === "notify"
           ? "Owner notification"
-          : "Agent prompt";
+          : execution.action.kind === "method"
+            ? `Agent method ${execution.action.method}`
+            : "Agent prompt";
   return execution.conversation.mode === "fresh"
     ? `${action} · new conversation each run`
     : `${action} · continues one conversation`;
@@ -620,7 +622,9 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
                   ? "Exact eval code"
                   : execution.action.kind === "notify"
                     ? "Notification text"
-                    : "Exact prompt"}
+                    : execution.action.kind === "method"
+                      ? `Agent method ${execution.action.method}`
+                      : "Exact prompt"}
             </Text>
             <Box
               p="3"
@@ -636,7 +640,9 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
               <Text as="div" size="2">
                 {"code" in execution.action
                   ? execution.action.code
-                  : execution.action.text}
+                  : execution.action.kind === "method"
+                    ? JSON.stringify(execution.action.args, null, 2)
+                    : execution.action.text}
               </Text>
             </Box>
           </Box>
