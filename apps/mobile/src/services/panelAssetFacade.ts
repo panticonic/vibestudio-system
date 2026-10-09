@@ -413,6 +413,10 @@ async function handleRequest(
   rawHead: string,
 ): Promise<void> {
   const startedAt = Date.now();
+  const requestAbort = new AbortController();
+  const onSocketClosed = () => requestAbort.abort(new Error("Panel asset request closed"));
+  if (socket.destroyed) onSocketClosed();
+  else socket.once("close", onSocketClosed);
   const lines = rawHead.split("\r\n");
   const [, target = "/"] = (lines[0] ?? "").split(" ");
   const forwardHeaders = collectForwardHeaders(lines.slice(1));
@@ -468,9 +472,12 @@ async function handleRequest(
     // streaming endpoint's proxyFetch-only fast path and is rejected. GET-only:
     // no request body ever crosses this façade (uploads ride the bridge).
     bridgeCrossings += 1;
-    const result = await transport.streamReadable("main", "gateway.fetch", [
-      { path: gatewayPath, method: "GET", headers: forwardHeaders, gzip: true },
-    ]);
+    const result = await transport.streamReadable(
+      "main",
+      "gateway.fetch",
+      [{ path: gatewayPath, method: "GET", headers: forwardHeaders, gzip: true }],
+      { signal: requestAbort.signal },
+    );
     return normalizeResult(result);
   };
 
@@ -488,7 +495,8 @@ async function handleRequest(
       const fetched = await withPanelAssetRetry(
         transport,
         {
-          canRetry: () => !headSent && !socket.destroyed,
+          canRetry: () => !headSent && !socket.destroyed && !requestAbort.signal.aborted,
+          signal: requestAbort.signal,
           onRetry: (attempt, error) => {
             retriedAttempts = attempt;
             const detail =
@@ -549,6 +557,7 @@ async function handleRequest(
       // already gone
     }
   } finally {
+    socket.off("close", onSocketClosed);
     const phase =
       tier === "store-hit"
         ? "workspace-panel-asset-store-hit"

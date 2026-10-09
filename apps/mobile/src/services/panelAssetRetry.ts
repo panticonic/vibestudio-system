@@ -38,6 +38,8 @@ export interface PanelAssetRetryOptions {
   attempts?: number;
   /** True while no byte of a response has reached the socket. */
   canRetry: () => boolean;
+  /** The requesting socket's lifetime; aborting retires a parked reconnect wait. */
+  signal?: AbortSignal;
   /** Reports each retried failure so a flapping link is visible, not silent. */
   onRetry?: (attempt: number, error: unknown) => void;
 }
@@ -51,7 +53,6 @@ export function isTransientPipeError(error: unknown): boolean {
     /not connected/i.test(message) ||
     /pipe (is )?(down|closed)/i.test(message) ||
     /control channel closed/i.test(message) ||
-    /HEAD not received/i.test(message) ||
     /bulk sequence gap/i.test(message) ||
     /ICE (failed|closed)/i.test(message)
   );
@@ -62,14 +63,29 @@ export function isTransientPipeError(error: unknown): boolean {
  * does. Resolves (rather than rejecting) on give-up so the caller's own attempt
  * budget stays the single place that decides when to stop.
  */
-export function awaitPipeReady(transport: RetryTransport): Promise<void> {
+export function awaitPipeReady(transport: RetryTransport, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   if (transport.status === "connected") return Promise.resolve();
-  return new Promise<void>((resolve) => {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      off();
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(signal?.reason ?? new Error("Panel asset request closed"));
+    };
     const off = transport.onStatusChange((status) => {
       if (status !== "connected") return;
-      off();
+      cleanup();
       resolve();
     });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    else if (transport.status === "connected") {
+      cleanup();
+      resolve();
+    }
   });
 }
 
@@ -93,6 +109,7 @@ export async function withPanelAssetRetry<T>(
     try {
       return await attempt();
     } catch (error) {
+      options.signal?.throwIfAborted();
       lastError = error;
       const retryable =
         (budget === null || tries < budget) &&
@@ -100,7 +117,7 @@ export async function withPanelAssetRetry<T>(
         options.canRetry();
       if (!retryable) break;
       options.onRetry?.(tries, error);
-      await awaitPipeReady(transport);
+      await awaitPipeReady(transport, options.signal);
     }
   }
   throw lastError;

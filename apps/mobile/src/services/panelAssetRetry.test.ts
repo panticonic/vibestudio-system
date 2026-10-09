@@ -36,7 +36,6 @@ describe("isTransientPipeError", () => {
   it("treats pipe-shaped failures as retryable", () => {
     for (const error of [
       pipeDown(),
-      new Error("Streaming RPC HEAD not received within 20000ms"),
       new Error("pipe down: control channel closed"),
       new Error("bulk sequence gap: 3 message(s) lost"),
       new Error("pipe down: ICE failed"),
@@ -159,6 +158,26 @@ describe("awaitPipeReady", () => {
     await expect(awaitPipeReady(fakeTransport("connected"))).resolves.toBeUndefined();
   });
 
+  it("observes a connection that completes as its status listener is installed", async () => {
+    let status: PipeStatus = "disconnected";
+    let listeners = 0;
+    const transport: RetryTransport = {
+      get status() {
+        return status;
+      },
+      onStatusChange() {
+        status = "connected";
+        listeners += 1;
+        return () => {
+          listeners -= 1;
+        };
+      },
+    };
+
+    await expect(awaitPipeReady(transport)).resolves.toBeUndefined();
+    expect(listeners).toBe(0);
+  });
+
   it("ignores non-connected transitions", async () => {
     const transport = fakeTransport("disconnected");
     let settled = false;
@@ -171,5 +190,25 @@ describe("awaitPipeReady", () => {
     transport.set("connected");
     await Promise.resolve();
     expect(settled).toBe(true);
+  });
+
+  it("settles a parked retry when the requesting socket closes", async () => {
+    const transport = fakeTransport("disconnected");
+    const abort = new AbortController();
+    const flight = withPanelAssetRetry(
+      transport,
+      { canRetry: () => true, signal: abort.signal },
+      async () => {
+        throw pipeDown();
+      },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transport.listenerCount()).toBe(1);
+
+    const reason = new Error("request socket closed");
+    abort.abort(reason);
+    await expect(flight).rejects.toBe(reason);
+    expect(transport.listenerCount()).toBe(0);
   });
 });
