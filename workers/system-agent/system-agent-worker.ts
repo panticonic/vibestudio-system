@@ -14,7 +14,6 @@ const SYSTEM_AGENT_PARTICIPANT_METHOD_NAMES = [
   "scheduleResumeAtReset",
   "getAgentSettings",
   "getModelExecutionEvidence",
-  "getDebugState",
   "inspectMethodSuspensions",
 ] as const;
 const SYSTEM_AGENT_PARTICIPANT_METHODS = new Set<string>(

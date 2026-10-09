@@ -85,7 +85,6 @@ describe("SystemAgentWorker", () => {
       "scheduleResumeAtReset",
       "getAgentSettings",
       "getModelExecutionEvidence",
-      "getDebugState",
       "inspectMethodSuspensions",
     ]);
     expect(methods).not.toEqual(
