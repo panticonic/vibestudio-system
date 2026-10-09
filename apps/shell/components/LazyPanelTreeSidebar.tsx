@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { usePanelTrust } from "./usePanelTrust";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 /**
@@ -56,6 +57,7 @@ import { isPanelClosePointerButton } from "@vibestudio/shared/panelCommands";
 import { pinnedPanelIdsAtom } from "../state/appModeAtoms.js";
 import { assertPresent } from "../utils/assertPresent";
 import { PanelIcon } from "./PanelIcon";
+import { confirmClosePanel } from "./ConfirmDialog";
 import { buildGuides } from "./panelTreeGuides.js";
 import { panelTreeKeyboardTarget, type TreeMoveKey } from "./panelTreeKeyboard.js";
 
@@ -237,6 +239,7 @@ function BuildIndicator({ buildState }: { buildState?: string }) {
     return (
       <Box
         className="app-tree-spinner"
+        role="img"
         aria-label="Building"
         style={{
           width: 10,
@@ -258,6 +261,7 @@ function BuildIndicator({ buildState }: { buildState?: string }) {
   if (!dotColor) return null;
   return (
     <Box
+      role="img"
       aria-label={buildState === "error" ? "Build error" : "Pending build"}
       style={{
         width: 6,
@@ -352,7 +356,7 @@ const SortableTreeItem = memo(
     const hasChildren = panel.childCount > 0;
     const showActions = (isHovered || hasFocus || isTouch) && !isDraggingAny;
     // The count is only meaningful when children are hidden behind a collapsed node.
-    const showCount = hasChildren && collapsed && !showActions;
+    const showCount = hasChildren && collapsed;
 
     const handleContextMenu = useCallback(
       (e: React.MouseEvent) => {
@@ -430,15 +434,12 @@ const SortableTreeItem = memo(
     const handleArchive = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (
-          panel.childCount > 0 &&
-          !window.confirm(
-            `Archive “${panel.title}” and its ${panel.childCount} child panel${panel.childCount === 1 ? "" : "s"}?`
-          )
-        ) {
-          return;
-        }
-        onArchive?.(panel.id);
+        void (async () => {
+          if (panel.childCount > 0 && !(await confirmClosePanel(panel.title, panel.childCount))) {
+            return;
+          }
+          onArchive?.(panel.id);
+        })();
       },
       [panel.childCount, panel.id, panel.title, onArchive]
     );
@@ -493,6 +494,8 @@ const SortableTreeItem = memo(
           align="center"
           gap="1"
           role="treeitem"
+          aria-level={depth + 1}
+          aria-selected={isSelected}
           aria-expanded={hasChildren ? !collapsed : undefined}
           className="app-panel-tree-row"
           onFocus={() => setHasFocus(true)}
@@ -501,7 +504,7 @@ const SortableTreeItem = memo(
           }}
           data-panel-tree-row="true"
           data-panel-id={panel.id}
-          aria-label={`Select panel ${panel.title}`}
+          aria-label={panel.title}
           aria-description={[ownerDescription, trust.description].filter(Boolean).join(". ")}
           data-panel-trust={trust.state}
           style={rowStyle}
@@ -590,7 +593,8 @@ const SortableTreeItem = memo(
           {/* Pin indicator — quiet glyph, only when pinned */}
           {isPinned && (
             <DrawingPinFilledIcon
-              aria-label="Pinned — exempt from auto-unload"
+              role="img"
+              aria-label="Pinned — stays loaded"
               style={{
                 flexShrink: 0,
                 color: "var(--gray-11)",
@@ -616,9 +620,13 @@ const SortableTreeItem = memo(
             </Badge>
           )}
 
-          {/* Row actions — on hover (or always on touch), hidden while dragging */}
-          {showActions && (
-            <>
+          {/* Row actions — slot is always reserved so the row never shifts;
+              shown on hover (or always on touch), hidden while dragging */}
+          <Flex
+            align="center"
+            gap="1"
+            style={{ visibility: showActions ? "visible" : "hidden", flexShrink: 0 }}
+          >
               <IconButton
                 size="1"
                 variant="ghost"
@@ -639,7 +647,7 @@ const SortableTreeItem = memo(
                 size="1"
                 variant="ghost"
                 color="gray"
-                aria-label="Archive panel"
+                aria-label="Close panel"
                 onClick={handleArchive}
                 className="app-tree-action app-tree-action-danger"
                 style={{
@@ -651,8 +659,7 @@ const SortableTreeItem = memo(
               >
                 <Cross2Icon width={12} height={12} />
               </IconButton>
-            </>
-          )}
+          </Flex>
         </Flex>
 
         <TreeConnectors guides={guides} isSelected={isSelected} />
@@ -946,7 +953,7 @@ export function LazyPanelTreeSidebar({
       void notification.show({
         type: "error",
         title: "Couldn't create panel",
-        message: error instanceof Error ? error.message : String(error),
+        message: userFacingError(error),
       });
     }
   }, []);
@@ -962,7 +969,7 @@ export function LazyPanelTreeSidebar({
         void notification.show({
           type: "error",
           title: "Couldn't add child panel",
-          message: error instanceof Error ? error.message : String(error),
+          message: userFacingError(error),
         });
       }
     },
@@ -983,7 +990,7 @@ export function LazyPanelTreeSidebar({
         void notification.show({
           type: "error",
           title: "Couldn't load older panels",
-          message: error instanceof Error ? error.message : String(error),
+          message: userFacingError(error),
         });
       } finally {
         setLoadingGroupKey(null);
@@ -1168,6 +1175,8 @@ export function LazyPanelTreeSidebar({
       {/* The workspace section frame owns the gutter; this list adds none. */}
       <div ref={setListElement}>
         <Box
+          role="tree"
+          aria-label="Panels"
           style={{
             position: "relative",
             height: virtualizer.getTotalSize(),

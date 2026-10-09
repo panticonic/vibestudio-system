@@ -64,6 +64,7 @@ import {
   hubControlMethods,
   type HubDevice,
   type HubPairingInvite,
+  type HubPairingOutcome,
 } from "@vibestudio/service-schemas/hubControl";
 import { workspacePresenceMethods } from "@vibestudio/service-schemas/workspacePresence";
 import { browserEnvironmentMethods } from "@vibestudio/service-schemas/browserEnvironment";
@@ -96,8 +97,8 @@ import { getSharedPanelAddressOptions } from "@workspace/omnibox-core";
 import type { WorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import { createShellTemplateManagementClient } from "@workspace/template-management";
 import { createWorkspacePresentationClient } from "@workspace/runtime/workspace-presentation";
-import { HostCommandRegistry } from "@vibestudio/shell-core/panelCommandRegistry";
 import {
+  createHostCommandRegistry,
   HOST_COMMAND_CONTRIBUTION_EVENT,
   HOST_COMMAND_RUN_EVENT,
 } from "@vibestudio/shared/hostCommands";
@@ -200,6 +201,7 @@ export interface RemoteCredCurrent {
 }
 export type DeviceRecord = HubDevice;
 export type PairingInvite = HubPairingInvite;
+export type PairingOutcome = HubPairingOutcome;
 // =============================================================================
 // Workspace Presence Service (WP8 §4 — who's connected to this workspace)
 // =============================================================================
@@ -517,6 +519,18 @@ export function createShellWorkspaceClient(
     );
   }
 
+  // Panel-contributed commands. The shared registry owns attribution,
+  // replacement, and run dispatch; desktop only renders them in the palette.
+  const hostCommandRegistry = createHostCommandRegistry({
+    dispatchRun: (panelId, payload) =>
+      rpc.emit(panelId, HOST_COMMAND_RUN_EVENT, payload),
+  });
+  /** A slot whose runtime is replaced or retired loses its contributed commands. */
+  const retiringSlot = <T>(panelId: string, operation: () => T): T => {
+    hostCommandRegistry.release(panelId);
+    return operation();
+  };
+
   // =============================================================================
   // Panel Service
   // =============================================================================
@@ -588,9 +602,13 @@ export function createShellWorkspaceClient(
       intent: BrowserNavigationIntent,
     ) => viewClient.markBrowserNavigationIntent(panelId, intent),
     reload: (panelId: string) =>
-      productPanelRuntime.panelTree.get(panelId).reload(),
+      retiringSlot(panelId, () =>
+        productPanelRuntime.panelTree.get(panelId).reload(),
+      ),
     reloadView: (panelId: string) =>
-      productPanelRuntime.panelTree.get(panelId).reload(),
+      retiringSlot(panelId, () =>
+        productPanelRuntime.panelTree.get(panelId).reload(),
+      ),
     forceReloadView: (panelId: string) =>
       viewClient.browserForceReload(panelId),
     findInPage: (
@@ -612,13 +630,21 @@ export function createShellWorkspaceClient(
       viewClient.saveBrowserPagePdf(panelId),
     stopBrowserMedia: (panelId: string) => viewClient.stopBrowserMedia(panelId),
     rebuildPanel: (panelId: string) =>
-      productPanelRuntime.panelTree.get(panelId).rebuild(),
+      retiringSlot(panelId, () =>
+        productPanelRuntime.panelTree.get(panelId).rebuild(),
+      ),
     navigateHistory: (panelId: string, delta: -1 | 1) =>
-      productPanelRuntime.panelTree.navigateHistory(panelId, delta),
+      retiringSlot(panelId, () =>
+        productPanelRuntime.panelTree.navigateHistory(panelId, delta),
+      ),
     unload: (panelId: string) =>
-      productPanelRuntime.panelTree.get(panelId).unload(),
+      retiringSlot(panelId, () =>
+        productPanelRuntime.panelTree.get(panelId).unload(),
+      ),
     archive: (panelId: string) =>
-      productPanelRuntime.panelTree.get(panelId).archive(),
+      retiringSlot(panelId, () =>
+        productPanelRuntime.panelTree.get(panelId).archive(),
+      ),
     createAboutPanel: async (page: string) => {
       const createOptions =
         page === "new"
@@ -647,9 +673,9 @@ export function createShellWorkspaceClient(
         stateArgs?: Record<string, unknown>;
       },
     ) =>
-      productPanelRuntime.panelTree
-        .navigate(panelId, source, options)
-        .then((observation) => ({
+      retiringSlot(panelId, () =>
+        productPanelRuntime.panelTree.navigate(panelId, source, options),
+      ).then((observation) => ({
           id: observation.panelId,
           title: observation.title,
         })),
@@ -763,11 +789,9 @@ export function createShellWorkspaceClient(
   // =============================================================================
   // Panel commands (shared registry; desktop presents them in the command palette)
   // =============================================================================
-  const hostCommandRegistry = new HostCommandRegistry();
-
   rpc.on(
     HOST_COMMAND_CONTRIBUTION_EVENT,
-    (event) => hostCommandRegistry.accept(event),
+    (event) => hostCommandRegistry.acceptRpcEvent(event),
     {
       kind: "closed",
       reason: "This listener consumes host or implementation lifecycle events.",
@@ -782,7 +806,7 @@ export function createShellWorkspaceClient(
       return hostCommandRegistry.list(focusedPanelId);
     },
     run: (panelId: string, commandId: string) =>
-      rpc.emit(panelId, HOST_COMMAND_RUN_EVENT, { commandId }),
+      hostCommandRegistry.run(panelId, commandId),
   };
   const connectNativePanelAdapter =
     ownership.nativePresentation.connectNativePanelAdapter;
@@ -1195,7 +1219,7 @@ export function createShellWorkspaceClient(
           // its own stateArgs (it reacts to the host-published change), then
           // bring it forward. A failure to set is a lost focus, not a lost open.
           await existing.stateArgs
-            .set({ focusMessageId: opts.focusMessageId })
+            .patch({ focusMessageId: opts.focusMessageId })
             .catch(() => undefined);
         }
         await existing.focus();

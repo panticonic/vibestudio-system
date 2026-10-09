@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useEffect, useRef, useState } from "react";
 import { Cross2Icon, MagnifyingGlassIcon } from "@radix-ui/react-icons";
 import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
@@ -91,7 +92,7 @@ export function PanelFinder({
                 [workspaceId]: {
                   ...initialGroup,
                   loading: false,
-                  error: error instanceof Error ? error.message : String(error),
+                  error: userFacingError(error),
                 },
               }));
           }
@@ -139,7 +140,7 @@ export function PanelFinder({
           [workspaceId]: {
             ...(current[workspaceId] ?? group),
             loading: false,
-            error: error instanceof Error ? error.message : String(error),
+            error: userFacingError(error),
           },
         }));
       });

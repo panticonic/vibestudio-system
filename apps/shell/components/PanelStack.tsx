@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { createPortal } from "react-dom";
 import {
   useWorkspaceNavigationHost,
@@ -61,6 +62,7 @@ import type { NavigateToPanelId } from "./NavigationContext";
 import { LazyPanelTreeSidebar } from "./LazyPanelTreeSidebar";
 import { useShellEvent } from "../shell/useShellEvent";
 import { SavePasswordBar } from "./SavePasswordBar";
+import { confirmClosePanel } from "./ConfirmDialog";
 import { assertPresent } from "../utils/assertPresent";
 import { ColumnRow } from "./ColumnRow";
 import { PanelColumnNavigation } from "./PanelColumnNavigation";
@@ -106,7 +108,7 @@ function reportPanelCommandError(
   action: string,
   error: unknown,
 ): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = userFacingError(error);
   void notification.show({
     type: "error",
     title: `${action} failed`,
@@ -812,21 +814,21 @@ export const PanelStack = memo(function PanelStack({
               reportPanelCommandError(notification, "Unload", error),
             );
           return;
-        case "archive":
-          if (
-            visiblePanel &&
-            (panelMap.get(panelId)?.children.length ?? 0) > 0 &&
-            !window.confirm(
-              `Close “${visiblePanel.title}” and its child panels? All descendants will be archived.`,
+        case "archive": {
+          const subPanelCount = panelMap.get(panelId)?.children.length ?? 0;
+          void (async () => {
+            if (
+              visiblePanel &&
+              subPanelCount > 0 &&
+              !(await confirmClosePanel(visiblePanel.title, subPanelCount))
             )
-          )
-            return;
-          void panelService
-            .archive(panelId)
-            .catch((error) =>
-              reportPanelCommandError(notification, "Close panel", error),
-            );
+              return;
+            await panelService.archive(panelId);
+          })().catch((error) =>
+            reportPanelCommandError(notification, "Close panel", error),
+          );
           return;
+        }
         case "focus-address":
           window.dispatchEvent(new Event("shell-focus-address"));
           return;
@@ -883,7 +885,7 @@ export const PanelStack = memo(function PanelStack({
               void notification.show({
                 type: "error",
                 title: "Panel link could not be opened",
-                message: error instanceof Error ? error.message : String(error),
+                message: userFacingError(error),
               });
             });
             return;
@@ -1044,7 +1046,7 @@ export const PanelStack = memo(function PanelStack({
             void notification.show({
               type: "error",
               title: "Panel link could not be opened",
-              message: error instanceof Error ? error.message : String(error),
+              message: userFacingError(error),
             });
           });
           return;

@@ -24,6 +24,7 @@ import { useShellEvent } from "../shell/useShellEvent";
 
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import MainMode from "./MainMode";
+import { ConfirmDialogHost } from "./ConfirmDialog";
 
 /**
  * Root App component that renders the main panel app.
@@ -112,6 +113,7 @@ export function App() {
             <MainMode />
           </ChunkErrorBoundary>
         </ReportingFirstUse>
+        <ConfirmDialogHost />
       </WorkspaceIconsContext.Provider>
     </Theme>
   );

@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { WebsiteConnectionsProvider } from "../shell/hooks/WebsiteConnections";
 import { hubApprovalSource } from "../shell/client";
 import { useShellWorkspaceClient, useWorkspaceVisible, useWorkspaceNavigationHost } from "../shell/workspaceContext";
@@ -68,7 +69,7 @@ function PanelAppContent() {
       void notification.show({
         type: "error",
         title: "Couldn't open page",
-        message: error instanceof Error ? error.message : String(error),
+        message: userFacingError(error),
       });
     }
   }, []);

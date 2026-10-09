@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useState } from "react";
 import { Box, Button, Flex, Spinner, Text } from "@radix-ui/themes";
@@ -80,7 +81,7 @@ export function PaneContent({
       } catch (error) {
         if (!signal.aborted)
           setActionError(
-            error instanceof Error ? error.message : String(error),
+            userFacingError(error),
           );
       }
     },
@@ -167,7 +168,7 @@ export function PaneContent({
               .takeOver(panelId)
               .catch((error: unknown) =>
                 setActionError(
-                  error instanceof Error ? error.message : String(error),
+                  userFacingError(error),
                 ),
               )
               .finally(() => setTakeoverBusy(false));

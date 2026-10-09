@@ -1,3 +1,4 @@
+import { userFacingError } from "../utils/userFacingError";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
 import { APPROVAL_OVERLAY_HOST_ID } from "./ConsentApprovalBar";
 import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
@@ -250,7 +251,7 @@ export function WorkspaceDesktop({
         await owner.client.app.openShellSurface(target);
       })
       .catch((error: unknown) => {
-        setError(error instanceof Error ? error.message : String(error));
+        setError(userFacingError(error));
       });
   }, [focusedId]);
 
@@ -321,7 +322,7 @@ export function WorkspaceDesktop({
         setError(null);
       } catch (error) {
         if (generation === focusGeneration.current)
-          setError(error instanceof Error ? error.message : String(error));
+          setError(userFacingError(error));
         throw error;
       }
     },
@@ -405,7 +406,7 @@ export function WorkspaceDesktop({
         );
       } catch (error) {
         if (generation !== epoch.current) return;
-        setError(error instanceof Error ? error.message : String(error));
+        setError(userFacingError(error));
       }
     },
     [open],
@@ -489,7 +490,7 @@ export function WorkspaceDesktop({
           });
       } catch (error) {
         if (live)
-          setError(error instanceof Error ? error.message : String(error));
+          setError(userFacingError(error));
       }
     };
     const release = incomingPanelLocation.onLocation((location) => {
@@ -511,7 +512,7 @@ export function WorkspaceDesktop({
       await owner.client.panel.createAboutPanel("new");
       await openWorkspace(id);
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(userFacingError(error));
     }
   };
   const selectSearchResult = (workspaceId: string, panelId: string) => {
@@ -553,7 +554,7 @@ export function WorkspaceDesktop({
     approvalPresentation.request(id);
     const workspace = catalog.find((entry) => entry.workspaceId === id);
     if (workspace)
-      void open(workspace).catch((error) => setError(String(error)));
+      void open(workspace).catch((error) => setError(userFacingError(error)));
   };
   const sections: WorkspaceSection[] = catalog.map((workspace) => ({
     workspace,
