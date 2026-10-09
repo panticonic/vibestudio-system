@@ -7,6 +7,7 @@ import type {
 } from "@vibestudio/service-schemas/view";
 import { createNativePanelPresentation } from "./nativePanelPresentation";
 import { createShellWorkspaceClient } from "./workspaceClient";
+import { HOST_COMMAND_CONTRIBUTION_EVENT } from "@vibestudio/shared/hostCommands";
 
 function nativeSession(workspaceId: string) {
   const bridge = {
@@ -67,6 +68,24 @@ const slot = {
   focused: true,
 };
 describe("workspace-owned shell clients", () => {
+  it("keeps contributed commands when a requested reload fails before runtime replacement", async () => {
+    const host = nativeSession("personal");
+    const registration = vi.mocked(host.rpc.on).mock.calls.find(
+      ([event]) => event === HOST_COMMAND_CONTRIBUTION_EVENT,
+    );
+    if (!registration) throw new Error("Missing host command contribution receiver");
+    const receive = registration[1] as (event: unknown) => void;
+    receive({
+      caller: { callerId: "runtime-1", callerKind: "panel", callerPanelId: "panel:tree/slot-1" },
+      payload: { commands: [{ id: "save", label: "Save" }] },
+    });
+    await expect(host.client.panel.reload("panel:tree/slot-1")).rejects.toThrow("server offline");
+    expect(await host.client.hostCommands.list()).toEqual([
+      { panelId: "panel:tree/slot-1", commands: [{ id: "save", label: "Save" }] },
+    ]);
+    host.client.hostCommands.releaseRuntime("runtime-1");
+    expect(await host.client.hostCommands.list()).toEqual([]);
+  });
   it("keeps identically named native panel slots and revisions separate", async () => {
     const personal = nativeSession("personal");
     const project = nativeSession("project");

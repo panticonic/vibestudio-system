@@ -39,6 +39,14 @@ export function PanelApp() {
 
 function PanelAppContent() {
   const { notification, panel, hostCommands } = useShellWorkspaceClient();
+  useShellEvent("panel:runtimeLeaseChanged", (event) => {
+    if (event.previous && (event.reason === "retired" || event.reason === "revoked" ||
+      event.next?.runtimeEntityId !== event.previous.runtimeEntityId))
+      hostCommands.releaseRuntime(event.previous.runtimeEntityId);
+  });
+  useShellEvent("panel-tree-invalidated", (event) => {
+    for (const slotId of event.removedSlotIds) hostCommands.releaseSlot(slotId);
+  });
   const visible = useWorkspaceVisible();
   const navigationHost = useWorkspaceNavigationHost();
   const workspaceId = navigationHost?.workspaceId ?? "system";

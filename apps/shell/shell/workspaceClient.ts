@@ -525,11 +525,7 @@ export function createShellWorkspaceClient(
     dispatchRun: (panelId, payload) =>
       rpc.emit(panelId, HOST_COMMAND_RUN_EVENT, payload),
   });
-  /** A slot whose runtime is replaced or retired loses its contributed commands. */
-  const retiringSlot = <T>(panelId: string, operation: () => T): T => {
-    hostCommandRegistry.release(panelId);
-    return operation();
-  };
+
 
   // =============================================================================
   // Panel Service
@@ -602,13 +598,9 @@ export function createShellWorkspaceClient(
       intent: BrowserNavigationIntent,
     ) => viewClient.markBrowserNavigationIntent(panelId, intent),
     reload: (panelId: string) =>
-      retiringSlot(panelId, () =>
-        productPanelRuntime.panelTree.get(panelId).reload(),
-      ),
+      productPanelRuntime.panelTree.get(panelId).reload(),
     reloadView: (panelId: string) =>
-      retiringSlot(panelId, () =>
-        productPanelRuntime.panelTree.get(panelId).reload(),
-      ),
+      productPanelRuntime.panelTree.get(panelId).reload(),
     forceReloadView: (panelId: string) =>
       viewClient.browserForceReload(panelId),
     findInPage: (
@@ -630,21 +622,13 @@ export function createShellWorkspaceClient(
       viewClient.saveBrowserPagePdf(panelId),
     stopBrowserMedia: (panelId: string) => viewClient.stopBrowserMedia(panelId),
     rebuildPanel: (panelId: string) =>
-      retiringSlot(panelId, () =>
-        productPanelRuntime.panelTree.get(panelId).rebuild(),
-      ),
+      productPanelRuntime.panelTree.get(panelId).rebuild(),
     navigateHistory: (panelId: string, delta: -1 | 1) =>
-      retiringSlot(panelId, () =>
-        productPanelRuntime.panelTree.navigateHistory(panelId, delta),
-      ),
+      productPanelRuntime.panelTree.navigateHistory(panelId, delta),
     unload: (panelId: string) =>
-      retiringSlot(panelId, () =>
-        productPanelRuntime.panelTree.get(panelId).unload(),
-      ),
+      productPanelRuntime.panelTree.get(panelId).unload(),
     archive: (panelId: string) =>
-      retiringSlot(panelId, () =>
-        productPanelRuntime.panelTree.get(panelId).archive(),
-      ),
+      productPanelRuntime.panelTree.get(panelId).archive(),
     createAboutPanel: async (page: string) => {
       const createOptions =
         page === "new"
@@ -673,9 +657,7 @@ export function createShellWorkspaceClient(
         stateArgs?: Record<string, unknown>;
       },
     ) =>
-      retiringSlot(panelId, () =>
-        productPanelRuntime.panelTree.navigate(panelId, source, options),
-      ).then((observation) => ({
+      productPanelRuntime.panelTree.navigate(panelId, source, options).then((observation) => ({
           id: observation.panelId,
           title: observation.title,
         })),
@@ -799,6 +781,8 @@ export function createShellWorkspaceClient(
   );
 
   const hostCommands = {
+    releaseRuntime: (runtimeEntityId: string) => hostCommandRegistry.releaseRuntime(runtimeEntityId),
+    releaseSlot: (slotId: string) => hostCommandRegistry.release(slotId),
     list: async () => {
       const focusedPanelId = await viewClient
         .getFocusedPanelId()
