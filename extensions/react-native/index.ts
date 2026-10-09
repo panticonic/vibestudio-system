@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { BuildProviderInput, BuildProviderOutput } from "@vibestudio/shared/buildProvider";
+import {
+  RN_HOST_ABI,
+  type BuildProviderInput,
+  type BuildProviderOutput,
+} from "@vibestudio/shared/buildProvider";
 import { contentTypeForPath } from "@vibestudio/shared/contentType";
 import { writeProjectedMetroConfig } from "./metroConfig.js";
 
@@ -27,7 +31,9 @@ export async function activate() {
   return {
     async build(input: BuildProviderInput): Promise<BuildProviderOutput> {
       if (input.target !== "react-native") {
-        throw new Error(`react-native provider cannot build target: ${input.target}`);
+        throw new Error(
+          `react-native provider cannot build target: ${input.target}`,
+        );
       }
       const appManifest =
         input.manifest["app"] && typeof input.manifest["app"] === "object"
@@ -35,9 +41,14 @@ export async function activate() {
           : input.manifest;
       const entry = String(appManifest["renderer"] ?? "index.tsx");
       const entryPath = path.resolve(input.sourcePath, entry);
-      const rnHostAbi =
-        typeof appManifest["rnHostAbi"] === "string" ? appManifest["rnHostAbi"] : null;
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vibestudio-rn-provider-"));
+      if (appManifest["rnHostAbi"] !== RN_HOST_ABI) {
+        throw new Error(
+          `React Native app ${input.unitName} declares rnHostAbi ${JSON.stringify(appManifest["rnHostAbi"] ?? null)}, but this host builds for ${JSON.stringify(RN_HOST_ABI)}. Port the app to the current native host contract and declare that value.`,
+        );
+      }
+      const tempDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "vibestudio-rn-provider-"),
+      );
       ownedTempDirs.add(tempDir);
       const artifacts: BuildProviderOutput["artifacts"] = [];
       try {
@@ -52,10 +63,13 @@ export async function activate() {
             entryPath,
             bundlePath,
             assetsDir,
-            metroConfig
+            metroConfig,
           );
           const bundleArtifactId = randomUUID();
-          artifactFiles.set(bundleArtifactId, { filePath: bundlePath, tempDir });
+          artifactFiles.set(bundleArtifactId, {
+            filePath: bundlePath,
+            tempDir,
+          });
           artifacts.push({
             path: `${platform}/index.bundle`,
             role: "primary",
@@ -66,7 +80,10 @@ export async function activate() {
           });
           for (const assetPath of walkFiles(assetsDir)) {
             const assetArtifactId = randomUUID();
-            artifactFiles.set(assetArtifactId, { filePath: assetPath, tempDir });
+            artifactFiles.set(assetArtifactId, {
+              filePath: assetPath,
+              tempDir,
+            });
             artifacts.push({
               path: `${platform}/${path.relative(assetsDir, assetPath).replace(/\\/g, "/")}`,
               role: "asset",
@@ -89,7 +106,7 @@ export async function activate() {
       return {
         artifacts,
         metadata: {
-          rnHostAbi,
+          rnHostAbi: RN_HOST_ABI,
         },
       };
     },
@@ -104,7 +121,9 @@ export async function activate() {
         start(controller) {
           source.on("data", (chunk) => {
             controller.enqueue(
-              typeof chunk === "string" ? Buffer.from(chunk) : new Uint8Array(chunk)
+              typeof chunk === "string"
+                ? Buffer.from(chunk)
+                : new Uint8Array(chunk),
             );
           });
           source.on("error", (error) => controller.error(error));
@@ -128,17 +147,19 @@ async function runReactNativeBundle(
   entryPath: string,
   bundlePath: string,
   assetsDir: string,
-  metroConfig: string
+  metroConfig: string,
 ): Promise<void> {
   const nodeModulesPath = input.dependencyProjection.nodeModulesPath;
   if (!nodeModulesPath) {
-    throw new Error("React Native builds require a Build V2 dependency projection");
+    throw new Error(
+      "React Native builds require a Build V2 dependency projection",
+    );
   }
   const reactNativePath = path.join(nodeModulesPath, "react-native");
   const bundleScript = path.join(reactNativePath, "scripts", "bundle.js");
   if (!fs.existsSync(bundleScript)) {
     throw new Error(
-      "Build V2 dependency projection does not contain react-native/scripts/bundle.js"
+      "Build V2 dependency projection does not contain react-native/scripts/bundle.js",
     );
   }
   const cliConfig = JSON.stringify({
@@ -183,7 +204,7 @@ async function runReactNativeBundle(
 function run(
   command: string,
   args: string[],
-  opts: { cwd: string; env: NodeJS.ProcessEnv }
+  opts: { cwd: string; env: NodeJS.ProcessEnv },
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -200,7 +221,9 @@ function run(
       if (code === 0) resolve();
       else
         reject(
-          new Error(`${command} ${args.join(" ")} failed with code ${code}\n${stderr.trim()}`)
+          new Error(
+            `${command} ${args.join(" ")} failed with code ${code}\n${stderr.trim()}`,
+          ),
         );
     });
   });

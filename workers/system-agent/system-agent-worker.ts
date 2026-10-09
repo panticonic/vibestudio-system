@@ -5,7 +5,7 @@ import {
 import type { ParticipantDescriptor } from "@workspace/harness";
 import type { ToolRegistration } from "@panticonic/pi-durable";
 import { authorNativeTool } from "@workspace/harness";
-import { createRpcFs } from "@workspace/runtime/worker";
+import { createRpcFs } from "@workspace/runtime/worker/rpc-fs";
 import { SYSTEM_AGENT_EVAL_GUIDE, SYSTEM_AGENT_PROMPT } from "./prompts.js";
 
 const SYSTEM_AGENT_PARTICIPANT_METHOD_NAMES = [

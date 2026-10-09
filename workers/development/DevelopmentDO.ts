@@ -693,30 +693,6 @@ export class DevelopmentDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  snapshotExecutionRoots(): Array<{
-    owner: "development-run";
-    ownerId: string;
-    reason: "retained-result";
-    artifact: NonNullable<DevelopmentRun["artifact"]>;
-  }> {
-    return this.store
-      .listRuns({})
-      .filter(
-        (
-          run
-        ): run is DevelopmentRun & {
-          artifact: NonNullable<DevelopmentRun["artifact"]>;
-        } => run.artifact !== null
-      )
-      .map((run) => ({
-        owner: "development-run" as const,
-        ownerId: run.runId,
-        reason: "retained-result" as const,
-        artifact: run.artifact
-      }));
-  }
-
-  @schemaRpc()
   nativeRunEvent(input: {
     kind: "attached-route-lost";
     runId: string;

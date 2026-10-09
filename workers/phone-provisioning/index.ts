@@ -1,8 +1,4 @@
-import {
-  DurableObjectBase,
-  schemaRpc,
-  type DurableObjectContext,
-} from "@workspace/runtime/worker/kernel";
+import { DurableObjectBase, schemaRpc } from "@workspace/runtime/worker/kernel";
 import {
   PhoneDeviceDiscoverySchema,
   PhoneProviderSchema,
@@ -17,10 +13,6 @@ import type { PhoneNativeDesktop } from "@vibestudio/service-schemas/phoneNative
 /** Userland policy over the exact provider-only native phone endpoint. */
 export class PhoneProvisioningDO extends DurableObjectBase {
   static override rpcMethods = phoneProvisioningMethods;
-
-  constructor(ctx: DurableObjectContext, env: unknown) {
-    super(ctx, env);
-  }
 
   protected createTables(): void {}
 
@@ -134,12 +126,11 @@ export class PhoneProvisioningDO extends DurableObjectBase {
 
   private async desktops(): Promise<PhoneNativeDesktop[]> {
     this.requireUser();
-    const endpoints = await this.rpc.call<PhoneNativeDesktop[]>(
+    return this.rpc.call<PhoneNativeDesktop[]>(
       "main",
       "phoneNativeEndpoint.desktops",
       [],
     );
-    return endpoints;
   }
 
   private async select(providerId?: string): Promise<PhoneNativeDesktop> {
