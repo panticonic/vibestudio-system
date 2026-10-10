@@ -2,6 +2,7 @@ import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   envelopeFromMessage,
+  serializeRpcFailure,
   type RpcClient,
   type RpcEnvelope,
 } from "@vibestudio/rpc";
@@ -146,12 +147,12 @@ it("holds a nested workspace acquisition for its owning shell and retries after 
             result: { state: "decided" },
           }
         : protectedAttempts === 1
-          ? { type: "response" as const, requestId: envelope.message.requestId, error: { message: "upsertImportJob: authority acquisition required", errorKind: "access" as const, code: "EACQUIRE", errorData: {
+          ? { type: "response" as const, requestId: envelope.message.requestId, error: serializeRpcFailure(Object.assign(new Error("upsertImportJob: authority acquisition required"), { errorKind: "access" as const, code: "EACQUIRE", errorData: {
                 acquisition: {
                   acquisitionId: "acq:browser-import",
                   ownerRuntimeId: "@workspace-apps/shell",
                 },
-              } } }
+              } })) }
           : {
               type: "response" as const,
               requestId: envelope.message.requestId,
