@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({
   events: new Map<string, (payload?: unknown) => void>(),
   bindings: [] as Array<string | null>,
   intent: null as null | ((payload: unknown) => void),
-  focused: "panel-a",
+  focused: "panel-a" as string | null,
   chrome: vi.fn(),
   reportFailure: vi.fn(),
   list: vi.fn(async () => [] as Array<{ slotId: string; promotedAt: null }>),
@@ -98,6 +98,25 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+function renderOwnerWithHost() {
+  const host = document.createElement("div");
+  host.id = "app-quickfire-host:system";
+  host.getBoundingClientRect = () => ({
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: 900,
+    bottom: 800,
+    width: 900,
+    height: 800,
+    toJSON: () => ({}),
+  });
+  document.body.appendChild(host);
+  render(<QuickfireOwner />);
+  return host;
+}
+
 async function open() {
   await act(async () => {
     api.events.get("open-command-agent")?.({ mode: "quickfire" });
@@ -122,6 +141,45 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Quickfire opening ownership", () => {
+  it("retains the conversation binding on dismissal and resumes it from the palette", async () => {
+    const host = renderOwnerWithHost();
+    await open();
+    await waitFor(() => expect(api.bindings.at(-1)).toBe("panel-a"));
+    dismiss();
+    expect(api.bindings.at(-1)).toBe("panel-a");
+    await act(async () => {
+      api.events.get("open-command-palette")?.();
+    });
+    await waitFor(() => expect(api.surface?.props.mode).toBe("quickfire"));
+    expect(api.bindings.at(-1)).toBe("panel-a");
+    host.remove();
+  });
+
+  it("reopens the bound conversation when the overlay or window has no focused panel", async () => {
+    const host = renderOwnerWithHost();
+    await open();
+    await waitFor(() => expect(api.bindings.at(-1)).toBe("panel-a"));
+    dismiss();
+    api.focused = null;
+    await open();
+    await waitFor(() => expect(api.surface?.props.mode).toBe("quickfire"));
+    expect(api.bindings.at(-1)).toBe("panel-a");
+    host.remove();
+  });
+
+  it("releases a dismissed conversation binding when its panel is destroyed", async () => {
+    render(<QuickfireOwner />);
+    await open();
+    await waitFor(() => expect(api.bindings.at(-1)).toBe("panel-a"));
+    dismiss();
+    act(() =>
+      api.events.get("panel-tree-invalidated")?.({
+        removedSlotIds: ["panel-a"],
+      }),
+    );
+    expect(api.bindings.at(-1)).toBeNull();
+  });
+
   it("focuses a chrome request's source panel and opens its complete repair draft", async () => {
     const store = createStore();
     const host = document.createElement("div");

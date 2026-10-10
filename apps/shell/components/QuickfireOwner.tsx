@@ -171,6 +171,8 @@ export function QuickfireOwner() {
   );
 
   const [state, setState] = useState<OverlayState>(CLOSED);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [chromeState, setChromeState] = useState<PanelChromeState | null>(null);
   const [pinnedPanelIds, setPinnedPanelIds] = useState<string[]>([]);
   const [openPanels, setOpenPanels] = useState<OpenPanelEntry[]>([]);
@@ -360,7 +362,6 @@ export function QuickfireOwner() {
       },
     ) => {
       const opening = ++openingRef.current;
-      setPanelLost(false);
       void (async () => {
         let focused: string | null = null;
         try {
@@ -377,14 +378,19 @@ export function QuickfireOwner() {
         }
 
         if (opening !== openingRef.current) return;
-        const target = options?.panelId ?? focused;
-        returnFocusPanelIdRef.current = focused;
+        setPanelLost(false);
+        const target = options?.panelId ?? focused ?? stateRef.current.panelId;
+        const resolvedMode =
+          mode === "all" && target && conversationSlotsRef.current.has(target)
+            ? "quickfire"
+            : mode;
+        returnFocusPanelIdRef.current = focused ?? target;
         setChromeState(null);
         setState((current) => ({
           ...CLOSED,
           open: true,
           panelId: target,
-          mode,
+          mode: resolvedMode,
           query: options?.prompt
             ? `${QUICKFIRE_MODE_PREFIX[mode]}${options.prompt}`
             : "",
@@ -476,7 +482,15 @@ export function QuickfireOwner() {
    */
   const close = useCallback((options?: { restoreFocus?: boolean }) => {
     openingRef.current += 1;
-    setState(CLOSED);
+    // Dismiss the view without discarding the shell-owned conversation binding.
+    // Reopening the same panel can render its transcript immediately.
+    setState((current) => ({
+      ...current,
+      open: false,
+      query: "",
+      argSession: null,
+      retargeting: false,
+    }));
     setQuickfireConversations(null);
     const returnTo = returnFocusPanelIdRef.current;
     returnFocusPanelIdRef.current = null;
@@ -512,11 +526,13 @@ export function QuickfireOwner() {
   }, [reportCommandFailure, state.open, state.panelId]);
   useEffect(refreshChrome, [refreshChrome]);
 
-  // The bound slot can vanish under an open overlay (§4.4 `panel-lost`).
+  // A destroyed slot ends the binding even while the view is dismissed.
   useShellEvent("panel-tree-invalidated", (event) => {
-    if (!state.open || !state.panelId) return;
-    if (event.removedSlotIds.includes(state.panelId)) setPanelLost(true);
-    else refreshChrome();
+    if (!state.panelId) return;
+    if (event.removedSlotIds.includes(state.panelId)) {
+      setPanelLost(true);
+      setState((current) => ({ ...current, panelId: null }));
+    } else refreshChrome();
   });
 
   /**
@@ -525,11 +541,11 @@ export function QuickfireOwner() {
    * that creates the conversation, so this must never be driven by focus alone.
    */
   const quickfireSlotId =
-    state.open && state.mode === "quickfire" && !state.argSession && !panelLost
+    state.mode === "quickfire" && !state.argSession && !panelLost
       ? state.panelId
       : null;
   const conversationBinding =
-    state.open && state.mode === "quickfire" ? state.conversation : null;
+    state.mode === "quickfire" ? state.conversation : null;
   const quickfireSource = useMemo<QuickfireSessionSource | null>(() => {
     if (conversationBinding) {
       return {
@@ -562,7 +578,10 @@ export function QuickfireOwner() {
       quickfireSession.view.hasConversation &&
       !quickfireSession.view.promoted
     ) {
-      conversationSlotsRef.current.add(quickfireSlotId);
+      if (!conversationSlotsRef.current.has(quickfireSlotId)) {
+        conversationIndexEpochRef.current += 1;
+        conversationSlotsRef.current.add(quickfireSlotId);
+      }
     }
   }, [
     quickfireSession.view.hasConversation,
@@ -1540,7 +1559,7 @@ export function QuickfireOwner() {
           open: true,
           bounds: anchorBounds,
           // The palette always takes keyboard focus on open (§2.3).
-          focusRequest: `quickfire:${focusRequest}`,
+          focusRequest: { key: `quickfire:${focusRequest}`, focus: "take" },
           theme,
           props: surfaceProps,
         }

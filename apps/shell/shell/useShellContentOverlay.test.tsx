@@ -27,7 +27,7 @@ const baseOptions: ShellContentOverlayOptions = {
   bounds: { x: 0, y: 0, width: 800, height: 600 },
   props: { revision: 1 },
   theme: { appearance: "light" },
-  focusRequest: "approval-1",
+  focusRequest: { key: "approval-1", focus: "unless-typing" },
 };
 
 function Probe({ options }: { options: ShellContentOverlayOptions | null }) {
@@ -47,24 +47,31 @@ describe("useShellContentOverlay", () => {
     const rendered = render(<Probe options={baseOptions} />);
 
     await waitFor(() =>
-      expect(shellClient.show).toHaveBeenCalledWith(expect.objectContaining({ focus: true }))
+      expect(shellClient.show).toHaveBeenCalledWith(expect.objectContaining({ focus: "unless-typing" }))
     );
 
     rendered.rerender(<Probe options={{ ...baseOptions, props: { revision: 2 } }} />);
     await waitFor(() =>
       expect(shellClient.update).toHaveBeenLastCalledWith(
-        expect.objectContaining({ props: { revision: 2 }, focus: false })
+        expect.not.objectContaining({ focus: expect.anything() })
       )
+    );
+    expect(shellClient.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ props: { revision: 2 } })
     );
 
     rendered.rerender(
       <Probe
-        options={{ ...baseOptions, props: { revision: 3 }, focusRequest: "approval-1:refocus" }}
+        options={{
+          ...baseOptions,
+          props: { revision: 3 },
+          focusRequest: { key: "approval-1:refocus", focus: "take" },
+        }}
       />
     );
     await waitFor(() =>
       expect(shellClient.update).toHaveBeenLastCalledWith(
-        expect.objectContaining({ props: { revision: 3 }, focus: true })
+        expect.objectContaining({ props: { revision: 3 }, focus: "take" })
       )
     );
   });

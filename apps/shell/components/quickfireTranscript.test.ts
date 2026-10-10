@@ -45,11 +45,12 @@ function stateWith(
     invocations?: Array<{
       id: string;
       name: string;
-      turnId: string;
+      turnId?: string;
+      nativeSource?: ChannelViewState["invocations"][string]["nativeSource"];
       status?: string;
       request?: unknown;
       result?: unknown;
-      progress?: Array<{ at: string; message?: string }>;
+      progress?: Array<{ at: string; message?: string; data?: unknown }>;
       failure?: unknown;
       startedAt?: string;
       updatedAt?: string;
@@ -98,6 +99,7 @@ function stateWith(
       invocationId: invocation.id,
       name: invocation.name,
       turnId: invocation.turnId,
+      nativeSource: invocation.nativeSource,
       status: invocation.status ?? "completed",
       outputs: [],
       progress: invocation.progress ?? [],
@@ -373,6 +375,65 @@ describe("projectTranscript", () => {
     const transcript = projectTranscript(state, "shell-1").entries;
     expect(transcript.map((message) => message.id)).toEqual(["m2"]);
     expect(transcript[0]).toMatchObject({ error: true });
+  });
+
+  it("renders native tool invocations and their activity without a turn association", () => {
+    const state = stateWith([], {
+      invocations: [
+        {
+          id: "native-tool",
+          name: "panel_console",
+          status: "running",
+          request: { limit: 20 },
+        },
+      ],
+    });
+    expect(projectTranscript(state, "shell-1").entries).toContainEqual({
+      kind: "tool",
+      id: "invocation:native-tool",
+      call: {
+        id: "native-tool",
+        name: "panel_console",
+        state: "running",
+        arguments: [{ name: "limit", value: "20", language: "json" }],
+      },
+    });
+    expect(projectTranscript(state, "shell-1").entries.at(-1)).toMatchObject({
+      kind: "activity", phase: "using-tools", label: "using tools",
+    });
+  });
+
+  it.each(["thinking", "text"] as const)("projects native live model %s without treating the model task as a tool", (type) => {
+    const nativeSource: NonNullable<ChannelViewState["invocations"][string]["nativeSource"]> = {
+      owner: {
+        runtimeId: "agent-1", authoritySessionId: "lifetime:author", contextId: "context:author",
+        incarnation: "storage:author", channelId: "channel-1", source: "workers/agent",
+        effectiveVersion: "state:author", className: "Agent", objectKey: "author", executionDigest: "a".repeat(64),
+      },
+      task: { conversationId: 1, taskId: 3, kind: "pi.model", version: 1 },
+      operation: { kind: "model", purpose: "generation", attempt: 1, cutoff: 2, requestDigest: "b".repeat(64) },
+    };
+    const state = stateWith([], {
+      invocations: [{
+        id: "native-model", name: "model.generation", status: "running", nativeSource,
+        progress: [{ at: "2026-10-10T09:00:00.000Z", data: {
+          kind: "native.model-stream", conversationId: 1, taskId: 3, attempt: 1,
+          cutoff: 2, frontier: 2, phase: "running",
+          message: { content: [type === "thinking" ? { type, thinking: "Reading the panel" } : { type, text: "The panel shows" }] },
+        } }],
+      }],
+    });
+    const entries = projectTranscript(state, "shell-1").entries;
+    expect(entries.some((entry) => entry.kind === "tool")).toBe(false);
+    expect(entries).toContainEqual(expect.objectContaining({ kind: type === "thinking" ? "thinking" : "message", streaming: true }));
+    expect(entries.at(-1)).toMatchObject({ kind: "activity", phase: type === "thinking" ? "thinking" : "responding" });
+    state.invocations["native-model"]!.status = "completed";
+    expect(projectTranscript(state, "shell-1").entries).toEqual([]);
+    state.invocations["native-model"]!.status = "failed";
+    state.invocations["native-model"]!.terminalReason = "Provider disconnected";
+    expect(projectTranscript(state, "shell-1").entries).toEqual([
+      expect.objectContaining({ kind: "notice", severity: "error", title: "Model request failed", detail: "Provider disconnected" }),
+    ]);
   });
 
   it("renders one entry per invocation without grouping calls onto a message", () => {

@@ -640,6 +640,18 @@ describe("ApprovalCard", () => {
     expect(screen.queryByText("What exactly")).toBeNull();
   });
 
+  it("takes keyboard focus on the card so its shortcuts receive keys", () => {
+    renderCard(
+      capabilityApproval({
+        approvalId: "focus-owner",
+        title: "Manage running workspace services",
+        allowedDecisions: ["once", "session", "deny"],
+      }),
+    );
+
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+  });
+
   it("makes task scope the primary and keyboard-default action when offered", () => {
     const { emit } = renderCard(
       capabilityApproval({

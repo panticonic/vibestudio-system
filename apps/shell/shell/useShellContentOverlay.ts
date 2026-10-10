@@ -11,6 +11,7 @@ import {
  */
 import { useEffect, useRef } from "react";
 
+import type { ContentOverlayFocus } from "@vibestudio/service-schemas/view";
 import type { OverlaySurfaceKey, OverlayThemeInfo } from "../overlay/types";
 
 export interface ContentOverlayBounds {
@@ -29,11 +30,13 @@ export interface ShellContentOverlayOptions {
   props: unknown;
   theme: OverlayThemeInfo;
   /**
-   * Opaque identity for a one-shot focus request. Keeping this stable while
-   * props refresh prevents a visible overlay from repeatedly taking focus;
-   * changing it deliberately requests focus again.
+   * A one-shot focus request. `key` is its opaque identity: keeping it stable
+   * while props refresh prevents a visible overlay from repeatedly taking
+   * focus; changing it deliberately requests focus again. `focus` is the
+   * intent — `take` for an explicit user act, `unless-typing` for a surface
+   * that appeared on its own and must not capture someone's typing.
    */
-  focusRequest?: string;
+  focusRequest?: { key: string; focus: ContentOverlayFocus };
 }
 
 const presentationOwners = new Map<OverlaySurfaceKey, symbol>();
@@ -86,14 +89,14 @@ export function useShellContentOverlay(
     }
     const shouldFocus =
       focusRequest !== undefined &&
-      focusRequest !== consumedFocusRequestRef.current;
-    if (shouldFocus) consumedFocusRequestRef.current = focusRequest;
+      focusRequest.key !== consumedFocusRequestRef.current;
+    if (shouldFocus) consumedFocusRequestRef.current = focusRequest.key;
     const payload = {
       surface,
       bounds,
       props,
       theme,
-      focus: shouldFocus,
+      ...(shouldFocus ? { focus: focusRequest.focus } : {}),
     };
     if (
       !shownRef.current ||
@@ -112,7 +115,8 @@ export function useShellContentOverlay(
     bounds?.width,
     bounds?.x,
     bounds?.y,
-    focusRequest,
+    focusRequest?.key,
+    focusRequest?.focus,
     open,
     props,
     surface,

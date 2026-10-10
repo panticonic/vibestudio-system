@@ -52,6 +52,7 @@ import {
 import {
   useShellContentOverlay,
   type ContentOverlayBounds,
+  type ShellContentOverlayOptions,
 } from "../shell/useShellContentOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
 import { effectiveThemeAtom, themeConfigAtom } from "../state/themeAtoms";
@@ -779,17 +780,18 @@ export function ConsentApprovalBar({
     }
   };
 
-  // Secret-input + device-code flows want keyboard focus on open; others stay
-  // hands-off so the panel keeps focus and remains clickable.
-  const needsFocus =
-    current?.kind === "client-config" ||
-    current?.kind === "credential-input" ||
-    current?.kind === "device-code";
-  const focusRequest =
+  // An approval takes keyboard focus when it opens, so its shortcuts work
+  // without a click — unless the user is typing elsewhere, whose next Enter
+  // would otherwise accept it. An explicit request (Ctrl+Shift+A, the slate
+  // command) always takes focus.
+  const focusRequest: ShellContentOverlayOptions["focusRequest"] =
     current && keyboardFocusRequest?.approvalId === current.approvalId
-      ? `explicit:${current.approvalId}:${keyboardFocusRequest.sequence}`
-      : current && needsFocus
-        ? `initial:${current.approvalId}`
+      ? {
+          key: `explicit:${current.approvalId}:${keyboardFocusRequest.sequence}`,
+          focus: "take",
+        }
+      : current
+        ? { key: `initial:${current.approvalId}`, focus: "unless-typing" }
         : undefined;
 
   const theme = useMemo<OverlayThemeInfo>(

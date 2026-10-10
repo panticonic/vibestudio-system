@@ -32,7 +32,7 @@ export type { QuickfireSessionSource, QuickfireSessionView };
  * Quickfire agent) or an existing channel (a conversation opened from a
  * notification, messaging plan §4.8).
  *
- * Passing `null` (overlay closed, or not in quickfire mode) tears the connection
+ * Passing `null` (the binding is released) tears the connection
  * down. The durable conversation is untouched by that — only clear, slot close,
  * and promotion end a slot conversation.
  */

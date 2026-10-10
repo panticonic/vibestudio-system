@@ -100,24 +100,31 @@ function fakeChannelClient(events: unknown[] = []) {
       snapshots: [],
       ready: { hasMoreBefore: false },
     })),
-    events: () => ({
+    events: vi.fn((options?: { includeSignals?: boolean }) => ({
       [Symbol.asyncIterator]: () => {
         let index = 0;
+        const visible = events.filter(
+          (event) =>
+            options?.includeSignals || !(event as { signal?: boolean }).signal,
+        );
         return {
           next: () =>
-            index < events.length
-              ? Promise.resolve({ value: events[index++], done: false })
+            index < visible.length
+              ? Promise.resolve({ value: visible[index++], done: false })
               : // Then park: a live channel stays open rather than ending.
                 new Promise<IteratorResult<unknown>>(() => {}),
         };
       },
-    }),
+    })),
     ready: () => Promise.resolve(),
     close: vi.fn(() => Promise.resolve()),
     send: vi.fn(() => Promise.resolve()),
     recordReadReceipt: vi.fn(() => Promise.resolve()),
     getParticipants: vi.fn(async () => [
-      { participantId: "channel-agent", metadata: { handle: "quickfire" } },
+      {
+        participantId: "channel-agent",
+        metadata: { handle: "quickfire", type: "agent" },
+      },
     ]),
     callMethod: vi.fn(
       (
@@ -162,7 +169,10 @@ function channelClientEmittingOnSend(eventsOnSend: unknown[]) {
     }),
     recordReadReceipt: vi.fn(() => Promise.resolve()),
     getParticipants: vi.fn(async () => [
-      { participantId: "channel-agent", metadata: { handle: "quickfire" } },
+      {
+        participantId: "channel-agent",
+        metadata: { handle: "quickfire", type: "agent" },
+      },
     ]),
     callMethod: vi.fn(
       (
@@ -232,6 +242,107 @@ describe("useQuickfireSessionCore", () => {
     });
     expect(result.current.view.channelId).toBe("channel-1");
     expect(result.current.view.hasConversation).toBe(true);
+  });
+
+  it("projects live native reasoning signals before the model finishes", async () => {
+    const base = {
+      type: "agentic.trajectory.v1/event",
+      senderId: "agent-1",
+      ts: 1700000000000,
+    };
+    const actor = { kind: "agent", id: "agent-1" };
+    const started = {
+      ...base,
+      pubsubId: 1,
+      payload: {
+        kind: "invocation.started",
+        actor,
+        causality: { invocationId: "model-1" },
+        payload: {
+          protocol: "agentic.trajectory.v1",
+          name: "model.generation",
+          invocationType: "system",
+          nativeSource: {
+            owner: {
+              runtimeId: "agent-1", authoritySessionId: "lifetime:author", contextId: "context:author",
+              incarnation: "storage:author", channelId: "channel-1", source: "workers/agent",
+              effectiveVersion: "state:author", className: "Agent", objectKey: "author", executionDigest: "a".repeat(64),
+            },
+            task: { conversationId: 1, taskId: 2, kind: "pi.model", version: 1 },
+            operation: { kind: "model", purpose: "generation", attempt: 1, cutoff: 1, requestDigest: "b".repeat(64) },
+          },
+        },
+        createdAt: new Date(base.ts).toISOString(),
+      },
+    };
+    const progress = {
+      ...base,
+      signal: true,
+      payload: {
+        kind: "invocation.progress",
+        actor,
+        causality: { invocationId: "model-1" },
+        payload: {
+          protocol: "agentic.trajectory.v1",
+          data: {
+            kind: "native.model-stream",
+            conversationId: 1,
+            taskId: 2,
+            attempt: 1,
+            cutoff: 1,
+            frontier: 1,
+            phase: "running",
+            message: {
+              content: [
+                { type: "thinking", thinking: "Inspecting the console" },
+              ],
+            },
+          },
+        },
+        createdAt: new Date(base.ts).toISOString(),
+      },
+    };
+    const { transport } = transportFor(fresh, {}, [started, progress]);
+    const { result } = renderHook(() =>
+      useQuickfireSessionCore("panel-a", transport),
+    );
+    await waitFor(() =>
+      expect(result.current.view.transcript).toContainEqual(
+        expect.objectContaining({
+          kind: "thinking",
+          text: "Inspecting the console",
+          streaming: true,
+        }),
+      ),
+    );
+    expect(result.current.view.streaming).toBe(true);
+    expect(result.current.view.transcript.some((entry) => entry.kind === "tool")).toBe(false);
+  });
+
+  it("stops the agent from channel presence even without trajectory roster events", async () => {
+    const { transport, client } = transportFor(fresh);
+    const { result } = renderHook(() =>
+      useQuickfireSessionCore("panel-a", transport),
+    );
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+    await act(() => result.current.stop());
+    expect(client.callMethod).toHaveBeenCalledWith("channel-agent", "pause", {
+      reason: "User interrupted quickfire",
+    });
+  });
+
+  it("propagates stop failures instead of pretending interruption succeeded", async () => {
+    const { transport, client } = transportFor(fresh);
+    client.callMethod.mockImplementation(() => ({
+      result: Promise.reject(new Error("Agent disconnected")),
+    }));
+    const { result } = renderHook(() =>
+      useQuickfireSessionCore("panel-a", transport),
+    );
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+    await act(async () => {
+      await expect(result.current.stop()).rejects.toThrow("Agent disconnected");
+    });
   });
 
   it("rejects a slot session without its exact channel target", async () => {
@@ -662,6 +773,28 @@ describe("useQuickfireSessionCore send queue", () => {
     });
     rerender({ slotId: "slot-b" });
     await waitFor(() => expect(transport.sessionFor).toHaveBeenCalledTimes(2));
+    expect(client.send).not.toHaveBeenCalled();
+  });
+
+  it("does not deliver queued text to a different panel when retargeted during lookup", async () => {
+    let releaseBinding!: () => void;
+    const { transport, client } = transportFor(fresh, {
+      sessionFor: vi.fn(async (slotId: string) => {
+        if (slotId === "slot-a") {
+          await new Promise<void>((resolve) => { releaseBinding = resolve; });
+        }
+        return fresh;
+      }),
+    });
+    const { result, rerender } = renderHook(
+      ({ slotId }: { slotId: string }) => useQuickfireSessionCore(slotId, transport),
+      { initialProps: { slotId: "slot-a" } },
+    );
+    await waitFor(() => expect(transport.sessionFor).toHaveBeenCalledWith("slot-a", { fresh: false }));
+    await act(async () => { await result.current.send("only for panel A"); });
+    rerender({ slotId: "slot-b" });
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+    await act(async () => { releaseBinding(); });
     expect(client.send).not.toHaveBeenCalled();
   });
 });

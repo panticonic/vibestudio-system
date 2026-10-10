@@ -21,7 +21,6 @@ import {
   Code,
   Flex,
   IconButton,
-  Kbd,
   Text,
   TextField,
   Tooltip,
@@ -227,6 +226,14 @@ export function ApprovalCard({
   const [previousFocus] = useState(() => document.activeElement);
   useEffect(() => {
     const card = cardRef.current;
+    // The card is the keyboard target for its shortcuts. React honors
+    // `autoFocus` only on form controls, so the card focuses itself — unless a
+    // field inside it already took focus. Whether the hosting view has keyboard
+    // focus at all is the host's decision (`focusRequest`); this only makes sure
+    // keys land on the card rather than <body> once it does.
+    if (card && !card.contains(document.activeElement)) {
+      card.focus({ preventScroll: true });
+    }
     return () => {
       const active = document.activeElement;
       const focusLost = !active || active === document.body || !!card?.contains(active);
@@ -474,7 +481,6 @@ export function ApprovalCard({
         ? { role: "dialog", "aria-modal": "false" as const }
         : { role: "group" })}
       tabIndex={0}
-      autoFocus
       aria-keyshortcuts="Enter D Escape ArrowLeft ArrowRight"
       onKeyDown={handleKeyboardDecision}
       aria-labelledby={`approval-title-${approval.approvalId}`}
@@ -1481,9 +1487,9 @@ function DecisionButton({
         {icon}
         {label}
         {shortcut ? (
-          <Kbd size="1" aria-hidden>
-            {shortcut}
-          </Kbd>
+          <span className="approval-shortcut" aria-hidden>
+            {shortcut === "Enter" ? "↵" : shortcut}
+          </span>
         ) : null}
       </Button>
     </Tooltip>
