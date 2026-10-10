@@ -227,6 +227,37 @@ it("holds a nested workspace acquisition for its owning shell and retries after 
 it("routes server calls and replies independently of a workspace named hub", async () => {
   const handlers = new Set<(envelope: RpcEnvelope) => void>();
   const sent: RpcEnvelope[] = [];
+  const replies: Array<{
+    requestId: string;
+    requestDestination: RpcEnvelope["destination"];
+    callerId: string;
+  }> = [];
+  const serverApprovals = [{
+    approvalId: "server-approval",
+    callerId: "panel:server",
+    callerKind: "panel" as const,
+    repoPath: "panels/server",
+    effectiveVersion: "server:v1",
+    requestedAt: 1,
+    kind: "browser-permission" as const,
+    ownerUserId: "user-1",
+    workspaceId: "system",
+    environmentKey: "browser-default",
+    panelId: "panel:server",
+    origin: "https://example.com",
+    topLevelUrl: "https://example.com",
+    capabilities: ["popups" as const],
+    deviceLabel: "Desktop",
+  }];
+  const workspaceApprovals = [{
+    ...serverApprovals[0]!,
+    approvalId: "workspace-approval",
+    callerId: "panel:hub",
+    repoPath: "panels/hub",
+    effectiveVersion: "hub:v1",
+    workspaceId: "hub",
+    panelId: "panel:hub",
+  }];
   vi.stubGlobal("__vibestudioTransport", {
     identity: { workspaceId: "system", runtimeId: "@workspace-apps/shell" },
     send: async (envelope: RpcEnvelope) => {
@@ -243,6 +274,12 @@ it("routes server calls and replies independently of a workspace named hub", asy
         callerKind: "server" as const,
         ...(workspaceId ? { workspaceId } : {}),
       };
+      const result = isHub ? serverApprovals : workspaceApprovals;
+      replies.push({
+        requestId,
+        requestDestination: envelope.destination,
+        callerId: caller.callerId,
+      });
       queueMicrotask(() =>
         handlers.forEach((handler) =>
           handler(
@@ -255,7 +292,7 @@ it("routes server calls and replies independently of a workspace named hub", asy
               message: {
                 type: "response",
                 requestId,
-                result: isHub ? "server" : "workspace",
+                result,
               },
             }),
           ),
@@ -280,14 +317,26 @@ it("routes server calls and replies independently of a workspace named hub", asy
   const workspace = await module.createWorkspaceShellClient("hub");
   await expect(
     module.hubRpc.call("main", mainRpcMethods["shellApproval.listPending"], []),
-  ).resolves.toBe("server");
+  ).resolves.toEqual(serverApprovals);
   await expect(
     state.clients[1]!.call("main", mainRpcMethods["shellApproval.listPending"], []),
-  ).resolves.toBe("workspace");
+  ).resolves.toEqual(workspaceApprovals);
   expect(sent.map((envelope) => envelope.destination)).toEqual([
     { kind: "hub" },
     { kind: "workspace", workspaceId: "hub" },
   ]);
+  const requestIds = sent.map((envelope) => {
+    if (envelope.message.type !== "request")
+      throw new Error("Route fixture sent a non-request envelope");
+    return envelope.message.requestId;
+  });
+  expect(new Set(requestIds).size).toBe(2);
+  expect(replies.map((reply) => reply.requestId)).toEqual(requestIds);
+  expect(replies.map((reply) => reply.requestDestination)).toEqual([
+    { kind: "hub" },
+    { kind: "workspace", workspaceId: "hub" },
+  ]);
+  expect(replies.map((reply) => reply.callerId)).toEqual(["hub", "main"]);
   workspace.close();
 });
 
