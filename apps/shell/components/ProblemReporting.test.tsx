@@ -281,6 +281,34 @@ describe("one separate first-start prompt followed by the unit audit", () => {
     expect(mocks.decideServer).not.toHaveBeenCalled();
   });
 
+  it("keeps sharing choice loading until the connected server service is ready", async () => {
+    let finish!: (value: typeof decision) => void;
+    mocks.serverConsent.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(
+      <Theme>
+        <ReportingFirstUse>
+          <GatedAudit />
+        </ReportingFirstUse>
+      </Theme>,
+    );
+    await screen.findByText("Loading sharing choice…");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(mocks.decide).not.toHaveBeenCalled();
+    expect(mocks.decideServer).not.toHaveBeenCalled();
+    await act(async () => {
+      finish(decision);
+    });
+    await screen.findByRole("dialog");
+    expect(screen.queryByText("Loading sharing choice…")).toBeNull();
+    expect(mocks.serverConsent).toHaveBeenCalledOnce();
+  });
+
   it("does not flash the first-start dialog while loading a saved choice", async () => {
     let finish!: (value: typeof decision) => void;
     mocks.consent.mockImplementationOnce(
