@@ -202,8 +202,10 @@ async function withLocalAgent(
         registry,
         publishWake: async () => {},
         modelRequests: createProtectedModelProvider({
-          rpcForRequest: (_request, _api, nativeContext) =>
-            rpcForContext(nativeContext),
+          rpcForRequest: (_request, _api, nativeContext) => {
+            const rpc = rpcForContext(nativeContext);
+            return {rpc,cleanupRpc:rpc};
+          },
           egressFetch: fetch,
           waitForAuthority: async () => {
             throw new Error(

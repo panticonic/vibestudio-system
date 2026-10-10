@@ -13,7 +13,6 @@ import type {
   ToolRegistration,
   ToolExecutionApi,
 } from "@panticonic/pi-durable";
-import type { AgentToolExecutionContext } from "@workspace/agentic-do";
 import { executeTool } from "@workspace/harness/testing/native-tool";
 import type {
   ParticipantRef,
@@ -89,11 +88,12 @@ class TestNotifyWorker extends SystemAgentWorker {
   }
   protected override async bindNativeToolExecution(
     api: ToolExecutionApi,
-  ): Promise<AgentToolExecutionContext> {
+  ) {
     return {
       invocationId: api.callId,
       commandId: `command:${api.callId}`,
       rpc: this.rpc,
+      cleanupRpc: this.rpc,
     };
   }
   async notifyTool(): Promise<ToolRegistration> {

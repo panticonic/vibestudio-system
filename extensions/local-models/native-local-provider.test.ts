@@ -126,7 +126,7 @@ describe("native local provider admission", () => {
           registry,
           publishWake: async () => {},
           modelRequests: createProtectedModelProvider({
-            rpcForRequest: () => rpc,
+            rpcForRequest: () => ({rpc,cleanupRpc:rpc}),
             waitForAuthority: async () => {
               throw new Error("Unexpected component approval");
             },
