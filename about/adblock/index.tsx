@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 /**
  * Ad Block Settings Page - Shell panel for ad blocking configuration.
  *
@@ -196,8 +197,8 @@ function AdBlockSettingsPage() {
     try {
       setLoading(true);
       const [configData, statsData] = await Promise.all([
-        rpc.call<AdBlockConfig>("main", "adblock.getConfig", []),
-        rpc.call<AdBlockStats>("main", "adblock.getStats", []),
+        rpc.call("main", mainRpcMethods["adblock.getConfig"], []),
+        rpc.call("main", mainRpcMethods["adblock.getStats"], []),
       ]);
       setConfig(configData);
       setStats(statsData);
@@ -211,9 +212,9 @@ function AdBlockSettingsPage() {
 
   const refreshStats = async () => {
     try {
-      const statsData = await rpc.call<AdBlockStats>(
+      const statsData = await rpc.call(
         "main",
-        "adblock.getStats",
+        mainRpcMethods["adblock.getStats"],
         [],
       );
       setStats(statsData);
@@ -225,7 +226,7 @@ function AdBlockSettingsPage() {
   };
 
   const refreshConfig = async () => {
-    const next = await rpc.call<AdBlockConfig>("main", "adblock.getConfig", []);
+    const next = await rpc.call("main", mainRpcMethods["adblock.getConfig"], []);
     setConfig(next);
   };
 
@@ -248,7 +249,7 @@ function AdBlockSettingsPage() {
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.setEnabled", [enabled]);
+      await rpc.call("main", mainRpcMethods["adblock.setEnabled"], [enabled]);
       setConfig({ ...config, enabled });
     } catch (err) {
       reportMutationError("Couldn't update ad blocking", err);
@@ -265,7 +266,7 @@ function AdBlockSettingsPage() {
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.setListEnabled", [
+      await rpc.call("main", mainRpcMethods["adblock.setListEnabled"], [
         list,
         enabled,
       ]);
@@ -286,7 +287,7 @@ function AdBlockSettingsPage() {
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.addToWhitelist", [
+      await rpc.call("main", mainRpcMethods["adblock.addToWhitelist"], [
         newDomain.trim(),
       ]);
       setConfig({
@@ -306,7 +307,7 @@ function AdBlockSettingsPage() {
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.removeFromWhitelist", [domain]);
+      await rpc.call("main", mainRpcMethods["adblock.removeFromWhitelist"], [domain]);
       setConfig({
         ...config,
         whitelist: config.whitelist.filter((d) => d !== domain),
@@ -327,7 +328,7 @@ function AdBlockSettingsPage() {
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.addCustomList", [
+      await rpc.call("main", mainRpcMethods["adblock.addCustomList"], [
         newListUrl.trim(),
       ]);
       setConfig({
@@ -348,7 +349,7 @@ function AdBlockSettingsPage() {
     setIsSaving(true);
     setMutationError(null);
     try {
-      await rpc.call<unknown>("main", "adblock.removeCustomList", [url]);
+      await rpc.call("main", mainRpcMethods["adblock.removeCustomList"], [url]);
       setConfig({
         ...config,
         customLists: config.customLists.filter((u) => u !== url),
@@ -367,7 +368,7 @@ function AdBlockSettingsPage() {
     setMutationError(null);
     setSuccessMessage(null);
     try {
-      await rpc.call<unknown>("main", "adblock.rebuildEngine", []);
+      await rpc.call("main", mainRpcMethods["adblock.rebuildEngine"], []);
       await refreshConfig();
       setSuccessMessage(
         "Filter lists were downloaded and the blocking engine was refreshed.",

@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   envelopeFromMessage,
@@ -120,7 +121,7 @@ it("binds System RPC identity before its first request and isolates destination 
   expect(systemEvent).toHaveBeenCalledOnce();
   expect(projectEvent).toHaveBeenCalledOnce();
   project.close();
-  await expect(state.clients[1]!.call("main", "workspace.getConfig", [])).rejects.toMatchObject({
+  await expect(state.clients[1]!.call("main", mainRpcMethods["workspace.getConfig"], [])).rejects.toMatchObject({
     errorKind: "transport",
     code: "CONNECTION_LOST",
   });
@@ -145,19 +146,12 @@ it("holds a nested workspace acquisition for its owning shell and retries after 
             result: { state: "decided" },
           }
         : protectedAttempts === 1
-          ? {
-              type: "response" as const,
-              requestId: envelope.message.requestId,
-              error: "upsertImportJob: authority acquisition required",
-              errorKind: "access" as const,
-              errorCode: "EACQUIRE",
-              errorData: {
+          ? { type: "response" as const, requestId: envelope.message.requestId, error: { message: "upsertImportJob: authority acquisition required", errorKind: "access" as const, code: "EACQUIRE", errorData: {
                 acquisition: {
                   acquisitionId: "acq:browser-import",
                   ownerRuntimeId: "@workspace-apps/shell",
                 },
-              },
-            }
+              } } }
           : {
               type: "response" as const,
               requestId: envelope.message.requestId,
@@ -204,7 +198,7 @@ it("holds a nested workspace acquisition for its owning shell and retries after 
   const module = await import("./client");
   const project = await module.createWorkspaceShellClient("project");
   await expect(
-    state.clients[1]!.call("main", "extensions.invokeProvider", [
+    state.clients[1]!.call("main", mainRpcMethods["extensions.invokeProvider"], [
       "browserData",
       "startImport",
       [],
@@ -284,10 +278,10 @@ it("routes server calls and replies independently of a workspace named hub", asy
   const module = await import("./client");
   const workspace = await module.createWorkspaceShellClient("hub");
   await expect(
-    module.hubRpc.call("main", "shellApproval.listPending", []),
+    module.hubRpc.call("main", mainRpcMethods["shellApproval.listPending"], []),
   ).resolves.toBe("server");
   await expect(
-    state.clients[1]!.call("main", "shellApproval.listPending", []),
+    state.clients[1]!.call("main", mainRpcMethods["shellApproval.listPending"], []),
   ).resolves.toBe("workspace");
   expect(sent.map((envelope) => envelope.destination)).toEqual([
     { kind: "hub" },

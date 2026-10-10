@@ -38,6 +38,7 @@ async function workspace(workspaceId: string) {
   const initial = store.initializeWorkspace(
     contextId,
     `genesis:${workspaceId}`,
+    null,
   );
   const blobs = new Map<string, Uint8Array>();
   let allowed = true;

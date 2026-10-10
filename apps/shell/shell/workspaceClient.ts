@@ -1,8 +1,11 @@
+import { mainRpcMethod } from "@vibestudio/service-schemas/mainRpc";
+import { channelRpcMethods } from "@workspace-workers/pubsub-channel/contract";
+import { modelSettingsRpcMethods } from "@workspace/model-catalog/rpc-contract";
+import { quickfireRpcMethods } from "@workspace-workers/quickfire-service/contract";
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
+import { createDurableObjectServiceClient, createGadServiceClient } from "@vibestudio/service-schemas/clients/durableObjectServiceClient";
 import { problemReportsMethods } from "@vibestudio/service-schemas/problemReports";
-import {
-  MODEL_SETTINGS_SERVICE_PROTOCOL,
-  type ModelSettingsSnapshot,
-} from "@workspace/model-catalog/catalog";
+import { MODEL_SETTINGS_SERVICE_PROTOCOL } from "@workspace/model-catalog/catalog";
 import { websiteHostingMethods } from "@vibestudio/service-schemas/websiteHosting";
 import { createWorkspaceIcons } from "./workspaceIcons";
 import type { NativePanelPresentation } from "./nativePanelPresentation";
@@ -37,10 +40,7 @@ import {
   remoteCredMethods,
   type RemoteCredCurrent as RemoteCredCurrentContract,
 } from "@vibestudio/service-schemas/remoteCred";
-import {
-  QUICKFIRE_SERVICE_PROTOCOL,
-  type QuickfireSession,
-} from "@workspace/quickfire-core/service";
+import { QUICKFIRE_SERVICE_PROTOCOL } from "@workspace/quickfire-core/service";
 import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
 import { shellPresenceMethods } from "@vibestudio/service-schemas/shellPresence";
@@ -69,20 +69,10 @@ import {
 import { workspacePresenceMethods } from "@vibestudio/service-schemas/workspacePresence";
 import { browserEnvironmentMethods } from "@vibestudio/service-schemas/browserEnvironment";
 import { createBrowserDataClient } from "@vibestudio/browser-data/client";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
-import {
-  createDurableObjectServiceClient,
-  createGadServiceClient,
-} from "@vibestudio/shared/workspaceServiceRpc";
+
+
 import type { ChannelInvite } from "@vibestudio/shared/channelInvites";
-import {
-  agentMessageNotificationData,
-  channelInviteFromNotification,
-  type AgentMessageNotificationData,
-  type UserNotification,
-  type UserNotificationAcknowledgementResult,
-  type UserNotificationListResult,
-} from "@vibestudio/shared/userNotifications";
+import { agentMessageNotificationData, channelInviteFromNotification, type AgentMessageNotificationData, type UserNotification } from "@vibestudio/shared/userNotifications";
 import type { ConnectPairing } from "@vibestudio/shared/connect";
 import type { PanelLocation } from "@vibestudio/shared/panelLocation";
 import type { PanelPlacementHint } from "@vibestudio/shared/types";
@@ -255,70 +245,26 @@ export function createShellWorkspaceClient(
   },
 ) {
   const hostLaunch = new HostLaunchClient((service, method, args) =>
-    rpc.call("main", `${service}.${method}`, args),
+    rpc.call("main", mainRpcMethod(`${service}.${method}`), args),
   );
-  const websiteConnections = createTypedServiceClient(
-    "websiteHosting",
-    { list: websiteHostingMethods.list },
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const shellPresenceClient = createTypedServiceClient(
-    "shellPresence",
-    shellPresenceMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const appClient = createTypedServiceClient(
-    "app",
-    appMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const accountClient = createTypedServiceClient(
-    "account",
-    accountMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
+  const websiteConnections = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "websiteHosting" }, { list: websiteHostingMethods.list });
+  const shellPresenceClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "shellPresence" }, shellPresenceMethods);
+  const appClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "app" }, appMethods);
+  const accountClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "account" }, accountMethods);
   // Electron chrome owns a distinct event domain that projects workspace events
   // together with native host state. Other runtimes use the canonical `events`.
   const eventsClient = new EventsClient(rpc, undefined, "desktopEvents");
-  const extensionsClient = createTypedServiceClient(
-    "extensions",
-    extensionsMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
+  const extensionsClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "extensions" }, extensionsMethods);
   const browserDataClient = createBrowserDataClient({
     callService: (service, method, args) =>
-      rpc.call("main", `${service}.${method}`, args),
+      rpc.call("main", mainRpcMethod(`${service}.${method}`), args),
   });
-  const browserEnvironmentClient = createTypedServiceClient(
-    "browserEnvironment",
-    browserEnvironmentMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const menuClient = createTypedServiceClient(
-    "menu",
-    menuMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const notificationClient = createTypedServiceClient(
-    "notification",
-    notificationMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const remoteCredClient = createTypedServiceClient(
-    "remoteCred",
-    remoteCredMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const autofillClient = createTypedServiceClient(
-    "autofill",
-    autofillMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const viewClient = createTypedServiceClient(
-    "view",
-    viewMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
+  const browserEnvironmentClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "browserEnvironment" }, browserEnvironmentMethods);
+  const menuClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "menu" }, menuMethods);
+  const notificationClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "notification" }, notificationMethods);
+  const remoteCredClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "remoteCred" }, remoteCredMethods);
+  const autofillClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "autofill" }, autofillMethods);
+  const viewClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "view" }, viewMethods);
   const productPanelRuntime = createShellPanelRuntime({
     rpc,
     focusPanel: async (panelId, options) => {
@@ -345,63 +291,18 @@ export function createShellWorkspaceClient(
     },
     data: browserDataClient,
   });
-  const problemReports = createTypedServiceClient(
-    "problemReports",
-    problemReportsMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const workspaceClient = createTypedServiceClient(
-    "workspace",
-    workspaceMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const runtimeClient = createTypedServiceClient(
-    "runtime",
-    runtimeMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const buildClient = createTypedServiceClient(
-    "build",
-    buildMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const workspaceStateClient = createTypedServiceClient(
-    "workspace-state",
-    workspaceStateMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
+  const problemReports = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "problemReports" }, problemReportsMethods);
+  const workspaceClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "workspace" }, workspaceMethods);
+  const runtimeClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "runtime" }, runtimeMethods);
+  const buildClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "build" }, buildMethods);
+  const workspaceStateClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "workspace-state" }, workspaceStateMethods);
   const workspacePresentation = createWorkspacePresentationClient(rpc);
-  const panelRuntimeClient = createTypedServiceClient(
-    "panelRuntime",
-    panelRuntimeMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const vcsClient = createTypedServiceClient(
-    "vcs",
-    vcsMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const hubControlClient = createTypedServiceClient(
-    "hubControl",
-    hubControlMethods,
-    (service, method, args) =>
-      ownership.hubRpc.call("main", `${service}.${method}`, args),
-  );
-  const blobstoreClient = createTypedServiceClient(
-    "blobstore",
-    blobstoreMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const credentialsClient = createTypedServiceClient(
-    "credentials",
-    credentialsMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
-  const workspacePresenceClient = createTypedServiceClient(
-    "workspacePresence",
-    workspacePresenceMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
+  const panelRuntimeClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "panelRuntime" }, panelRuntimeMethods);
+  const vcsClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "vcs" }, vcsMethods);
+  const hubControlClient = createTypedRpcServiceClient(ownership.hubRpc, { targetId: "main", namespace: "hubControl" }, hubControlMethods);
+  const blobstoreClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "blobstore" }, blobstoreMethods);
+  const credentialsClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "credentials" }, credentialsMethods);
+  const workspacePresenceClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "workspacePresence" }, workspacePresenceMethods);
   // =============================================================================
   // App Service
   // =============================================================================
@@ -947,7 +848,7 @@ export function createShellWorkspaceClient(
   const templates = createShellTemplateManagementClient(
     (extension, method, args) =>
       extensionsClient.invoke(extension, method, args),
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
+    (service, method, args) => rpc.call("main", mainRpcMethod(`${service}.${method}`), args),
   );
   const credentials = {
     listStoredCredentials: () => credentialsClient.listStoredCredentials(),
@@ -1045,9 +946,7 @@ export function createShellWorkspaceClient(
   async function describeChannelInvite(
     invite: ChannelInvite,
   ): Promise<ShellChannelInvite> {
-    const config = await rpc.call<{
-      title?: string;
-    } | null>(invite.channelTargetId, "getConfig", []);
+    const config = await rpc.call(invite.channelTargetId, channelRpcMethods["getConfig"], []);
     return {
       ...invite,
       channelTitle: config?.title?.trim() || invite.channelId,
@@ -1062,7 +961,7 @@ export function createShellWorkspaceClient(
       limit?: number;
     }): Promise<ShellUserNotification[]> {
       const { notifications } =
-        await userNotificationStore.call<UserNotificationListResult>(
+        await userNotificationStore.call(
           "listUserNotificationsForMe",
           ...(input ? [input] : []),
         );
@@ -1120,7 +1019,7 @@ export function createShellWorkspaceClient(
 
     async acknowledge(id: string): Promise<boolean> {
       const result =
-        await userNotificationStore.call<UserNotificationAcknowledgementResult>(
+        await userNotificationStore.call(
           "acknowledgeUserNotification",
           { id },
         );
@@ -1136,8 +1035,8 @@ export function createShellWorkspaceClient(
       channelTargetId: string,
     ): Promise<{ contextId: string; title: string | null }> {
       const [config, contextId] = await Promise.all([
-        rpc.call<{ title?: string } | null>(channelTargetId, "getConfig", []),
-        rpc.call<string | null>(channelTargetId, "getContextId", []),
+        rpc.call(channelTargetId, channelRpcMethods["getConfig"], []),
+        rpc.call(channelTargetId, channelRpcMethods["getContextId"], []),
       ]);
       if (!contextId) {
         throw new Error(
@@ -1211,8 +1110,8 @@ export function createShellWorkspaceClient(
       }
 
       const [config, contextId] = await Promise.all([
-        rpc.call<{ title?: string } | null>(channelTargetId, "getConfig", []),
-        rpc.call<string | null>(channelTargetId, "getContextId", []),
+        rpc.call(channelTargetId, channelRpcMethods["getConfig"], []),
+        rpc.call(channelTargetId, channelRpcMethods["getContextId"], []),
       ]);
       if (!contextId) {
         throw new Error(
@@ -1340,16 +1239,16 @@ export function createShellWorkspaceClient(
   // =============================================================================
   const quickfireClient = createDurableObjectServiceClient(
     rpc,
-    QUICKFIRE_SERVICE_PROTOCOL,
+    QUICKFIRE_SERVICE_PROTOCOL, quickfireRpcMethods,
   );
 
   const quickfireModels = createDurableObjectServiceClient(
     rpc,
-    MODEL_SETTINGS_SERVICE_PROTOCOL,
+    MODEL_SETTINGS_SERVICE_PROTOCOL, modelSettingsRpcMethods,
   );
   const quickfire = {
     loadModelCatalog: async () =>
-      (await quickfireModels.call<ModelSettingsSnapshot>("getSettings"))
+      (await quickfireModels.call("getSettings"))
         .catalog,
     /**
      * Resolve (creating on first use) the conversation bound to a panel slot.
@@ -1357,15 +1256,15 @@ export function createShellWorkspaceClient(
      * call it when the user actually enters quickfire mode over that panel.
      */
     sessionFor: (slotId: string, options?: { fresh?: boolean }) =>
-      quickfireClient.call<QuickfireSession>("sessionFor", {
+      quickfireClient.call("sessionFor", {
         slotId,
         ...(options?.fresh ? { fresh: true } : {}),
       }),
     clear: (slotId: string) =>
-      quickfireClient.call<{ cleared: boolean }>("clear", { slotId }),
+      quickfireClient.call("clear", { slotId }),
     promote: (slotId: string) =>
-      quickfireClient.call<QuickfireSession | null>("promote", { slotId }),
-    list: () => quickfireClient.call<QuickfireSession[]>("list"),
+      quickfireClient.call("promote", { slotId }),
+    list: () => quickfireClient.call("list"),
   };
 
   /**
@@ -1460,11 +1359,7 @@ export type ShellWorkspaceClient = ReturnType<
 
 /** Approval decisions stay bound to the RPC owner supplied by the caller. */
 export function createShellApprovalClient(rpc: RpcClient) {
-  const shellApprovalClient = createTypedServiceClient(
-    "shellApproval",
-    shellApprovalMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  );
+  const shellApprovalClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "shellApproval" }, shellApprovalMethods);
   return {
     resolve: (approvalId: string, decision: ApprovalDecision) =>
       shellApprovalClient.resolve(approvalId, decision),

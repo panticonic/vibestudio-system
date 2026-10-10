@@ -1,3 +1,9 @@
+import { mainRpcMethod, mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
+import { channelRpcMethods } from "@workspace-workers/pubsub-channel/contract";
+import { modelSettingsRpcMethods } from "@workspace/model-catalog/rpc-contract";
+import { quickfireRpcMethods } from "@workspace-workers/quickfire-service/contract";
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
+import { createDurableObjectServiceClient, createGadServiceClient } from "@vibestudio/service-schemas/clients/durableObjectServiceClient";
 import {
   MODEL_SETTINGS_SERVICE_PROTOCOL,
   type ModelSettingsSnapshot,
@@ -80,17 +86,14 @@ import {
   startPanelAssetFacade,
   type PanelAssetFacade,
 } from "./panelAssetFacade";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
 import { blobstoreMethods } from "@vibestudio/service-schemas/blobstore";
 import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
 import { credentialsMethods } from "@vibestudio/service-schemas/credentials";
 import { websiteHostingMethods } from "@vibestudio/service-schemas/websiteHosting";
 import { pushMethods } from "@vibestudio/service-schemas/push";
-import {
-  QUICKFIRE_SERVICE_PROTOCOL,
-  type QuickfireSession,
-} from "@workspace/quickfire-core/service";
+import { QUICKFIRE_SERVICE_PROTOCOL } from "@workspace/quickfire-core/service";
 import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
 import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
@@ -101,15 +104,8 @@ import {
 } from "./browserPrivacyPresentation";
 import { MobileBrowserImportProvider } from "./mobileBrowserImportProvider";
 export type { MobileBrowserPrivacySection } from "./browserPrivacyPresentation";
-import {
-  createDurableObjectServiceClient,
-  createGadServiceClient,
-} from "@vibestudio/shared/workspaceServiceRpc";
-import {
-  type UserNotification,
-  type UserNotificationAcknowledgementResult,
-  type UserNotificationListResult,
-} from "@vibestudio/shared/userNotifications";
+
+import { type UserNotification } from "@vibestudio/shared/userNotifications";
 import type { PendingUnitInstallReviewApproval } from "@vibestudio/shared/approvals";
 import {
   HostLaunchClient,
@@ -185,66 +181,31 @@ export interface Credentials {
   deviceId: string;
 }
 function createShellApprovalClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "shellApproval",
-    shellApprovalMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
-  );
+  return createTypedRpcServiceClient(transport, { targetId: "main", namespace: "shellApproval" }, shellApprovalMethods);
 }
 
 function createBlobstoreClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "blobstore",
-    blobstoreMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
-  );
+  return createTypedRpcServiceClient(transport, { targetId: "main", namespace: "blobstore" }, blobstoreMethods);
 }
 
 function createPanelRuntimeClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "panelRuntime",
-    panelRuntimeMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
-  );
+  return createTypedRpcServiceClient(transport, { targetId: "main", namespace: "panelRuntime" }, panelRuntimeMethods);
 }
 
 function createShellBrowserPrivacyClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "shellBrowserPrivacy",
-    shellBrowserPrivacyMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
-  );
+  return createTypedRpcServiceClient(transport, { targetId: "main", namespace: "shellBrowserPrivacy" }, shellBrowserPrivacyMethods);
 }
 
 function createCredentialsClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "credentials",
-    credentialsMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
-  );
+  return createTypedRpcServiceClient(transport, { targetId: "main", namespace: "credentials" }, credentialsMethods);
 }
 
 function createPushClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "push",
-    pushMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
-  );
+  return createTypedRpcServiceClient(transport, { targetId: "main", namespace: "push" }, pushMethods);
 }
 
 function createWorkspaceRpcClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "workspace",
-    workspaceMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
-  );
+  return createTypedRpcServiceClient(transport, { targetId: "main", namespace: "workspace" }, workspaceMethods);
 }
 
 /**
@@ -257,29 +218,21 @@ function createWorkspaceRpcClient(transport: MobileRpcClient) {
 function createQuickfireClient(transport: MobileRpcClient) {
   const client = createDurableObjectServiceClient(
     transport,
-    QUICKFIRE_SERVICE_PROTOCOL,
+    QUICKFIRE_SERVICE_PROTOCOL, quickfireRpcMethods,
   );
   return {
     sessionFor: (input: { slotId: string; fresh?: boolean }) =>
-      client.call<QuickfireSession>("sessionFor", input),
+      client.call("sessionFor", input),
     clear: (input: { slotId: string }) =>
-      client.call<{ cleared: boolean }>("clear", input),
+      client.call("clear", input),
     promote: (input: { slotId: string }) =>
-      client.call<QuickfireSession | null>("promote", input),
-    list: () => client.call<QuickfireSession[]>("list"),
+      client.call("promote", input),
+    list: () => client.call("list"),
   };
 }
 
 function createHubControlClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "hubControl",
-    hubControlMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args, {
-        destination: { kind: "hub" },
-        authorityAcquisition: "wait",
-      }),
-  );
+  return createTypedRpcServiceClient(transport, { targetId: "main", namespace: "hubControl" }, hubControlMethods);
 }
 
 type ShellApprovalClient = ReturnType<typeof createShellApprovalClient>;
@@ -379,7 +332,7 @@ class MobilePanels implements PanelHost {
     this.presentation = createWorkspacePresentationClient(this.deps.transport);
     this.browserData = createBrowserDataClient({
       callService: (service: string, method: string, args: unknown[]) =>
-        this.deps.transport.call("main", `${service}.${method}`, args),
+        this.deps.transport.call("main", mainRpcMethod(`${service}.${method}`), args),
     });
     const source: PanelTreeQuerySource = {
       rootGroups: (input) => this.presentation.rootGroups(input),
@@ -447,7 +400,7 @@ class MobilePanels implements PanelHost {
         );
       },
       hosting: (method, input) =>
-        this.deps.transport.call("main", `websiteHosting.${method}`, [input]),
+        this.deps.transport.call("main", mainRpcMethod(`websiteHosting.${method}`), [input]),
       relay: (panelId, method, args) =>
         this.bridgeAdapterInstance!.relay(panelId, method, args),
       closeRelay: (panelId) =>
@@ -1224,16 +1177,11 @@ export class ShellClient {
   readonly workspaces: WorkspaceClient;
   readonly hubControl: ReturnType<typeof createHubControlClient>;
   readonly events: EventsClient;
-  readonly websiteConnections = createTypedServiceClient(
-    "websiteHosting",
-    {
+  get websiteConnections() { return createTypedRpcServiceClient(this.transport, { targetId: "main", namespace: "websiteHosting" }, {
       list: websiteHostingMethods.list,
       end: websiteHostingMethods.end,
       forget: websiteHostingMethods.forget,
-    },
-    (service, method, args) =>
-      this.transport.call("main", `${service}.${method}`, args),
-  );
+    }); }
   readonly shellApproval: ShellApprovalClient;
   /** Content-addressed reads used by approval diff review and file inspection. */
   readonly blobstore: BlobstoreClient;
@@ -1286,30 +1234,20 @@ export class ShellClient {
     request,
     signal,
   ) =>
-    createTypedServiceClient(
-      "browserPermissions",
-      browserPermissionsMethods,
-      (service, method, args) =>
-        this.transport.call("main", `${service}.${method}`, args, { signal }),
-    ).request({
+    this.transport.call("main", mainRpcMethods["browserPermissions.request"], [{
       panelId,
       sessionEpoch: this.browserSessionEpoch,
       origin: request.origin,
       topLevelUrl: request.topLevelUrl,
       capabilities: request.capabilities,
       deviceLabel: "Vibestudio Mobile",
-    });
+    }], { signal });
   readonly browserNotificationPermission = (
     origin: string,
   ): "default" | "denied" | "granted" =>
     this.browserNotificationGrants.get(origin) ?? "default";
   readonly refreshBrowserNotificationPermissions = async (): Promise<void> => {
-    const snapshot = await createTypedServiceClient(
-      "browserPermissions",
-      browserPermissionsMethods,
-      (service, method, args) =>
-        this.transport.call("main", `${service}.${method}`, args),
-    ).snapshot({ sessionEpoch: this.browserSessionEpoch });
+    const snapshot = await createTypedRpcServiceClient(this.transport, { targetId: "main", namespace: "browserPermissions" }, browserPermissionsMethods).snapshot({ sessionEpoch: this.browserSessionEpoch });
     this.replaceBrowserNotificationGrants(snapshot.grants);
   };
   readonly requestBrowserNotificationPermission = async (
@@ -1318,19 +1256,14 @@ export class ShellClient {
     topLevelUrl: string,
     signal: AbortSignal,
   ): Promise<"default" | "denied" | "granted"> => {
-    const result = await createTypedServiceClient(
-      "browserPermissions",
-      browserPermissionsMethods,
-      (service, method, args) =>
-        this.transport.call("main", `${service}.${method}`, args, { signal }),
-    ).request({
+    const result = await this.transport.call("main", mainRpcMethods["browserPermissions.request"], [{
       panelId,
       sessionEpoch: this.browserSessionEpoch,
       origin,
       topLevelUrl,
       capabilities: ["notifications"],
       deviceLabel: "Vibestudio Mobile",
-    });
+    }], { signal });
     this.replaceBrowserNotificationGrants(result.grants);
     return result.granted
       ? "granted"
@@ -1501,14 +1434,14 @@ export class ShellClient {
     this.userNotifications = {
       list: async (input) =>
         (
-          await userNotificationStore.call<UserNotificationListResult>(
+          await userNotificationStore.call(
             "listUserNotificationsForMe",
             ...(input ? [input] : []),
           )
         ).notifications,
       acknowledge: async (id) =>
         (
-          await userNotificationStore.call<UserNotificationAcknowledgementResult>(
+          await userNotificationStore.call(
             "acknowledgeUserNotification",
             { id },
           )
@@ -1520,14 +1453,14 @@ export class ShellClient {
           return { id: existing.id, title: existing.title };
         }
         const [config, contextId] = await Promise.all([
-          this.transport.call<{ title?: string } | null>(
+          this.transport.call(
             channelTargetId,
-            "getConfig",
+            channelRpcMethods["getConfig"],
             [],
           ),
-          this.transport.call<string | null>(
+          this.transport.call(
             channelTargetId,
-            "getContextId",
+            channelRpcMethods["getContextId"],
             [],
           ),
         ]);
@@ -1544,14 +1477,14 @@ export class ShellClient {
       },
       describeConversation: async (channelTargetId) => {
         const [config, contextId] = await Promise.all([
-          this.transport.call<{ title?: string } | null>(
+          this.transport.call(
             channelTargetId,
-            "getConfig",
+            channelRpcMethods["getConfig"],
             [],
           ),
-          this.transport.call<string | null>(
+          this.transport.call(
             channelTargetId,
-            "getContextId",
+            channelRpcMethods["getContextId"],
             [],
           ),
         ]);
@@ -1574,11 +1507,11 @@ export class ShellClient {
     const quickfireClient = createQuickfireClient(this.transport);
     const quickfireModels = createDurableObjectServiceClient(
       this.transport,
-      MODEL_SETTINGS_SERVICE_PROTOCOL,
+      MODEL_SETTINGS_SERVICE_PROTOCOL, modelSettingsRpcMethods,
     );
     this.quickfire = {
       loadModelCatalog: async () =>
-        (await quickfireModels.call<ModelSettingsSnapshot>("getSettings"))
+        (await quickfireModels.call("getSettings"))
           .catalog,
       sessionFor: (slotId, options) =>
         quickfireClient.sessionFor({
@@ -1592,7 +1525,7 @@ export class ShellClient {
     this.hostLaunch =
       config.appSourceClient?.hostLaunch ??
       new HostLaunchClient((service, method, args) =>
-        this.transport.call("main", `${service}.${method}`, args),
+        this.transport.call("main", mainRpcMethod(`${service}.${method}`), args),
       );
     this.browserPrivacy = createShellBrowserPrivacyClient(this.transport);
     this.events.on("panel:runtimeLeaseChanged", (event) => {

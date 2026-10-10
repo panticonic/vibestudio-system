@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { createBridgeAdapter } from "./bridgeAdapter";
 import {
   createRpcClient,
@@ -743,10 +744,10 @@ describe("bridgeAdapter native app navigation", () => {
       },
     });
     await expect(
-      rpc.call("main", "app.describeShellSurfaces", []),
+      rpc.call("main", mainRpcMethods["app.describeShellSurfaces"], []),
     ).resolves.toEqual({ surfaces: ["settings", "workspace-chooser"] });
     await expect(
-      rpc.call("main", "app.openShellSurface", [
+      rpc.call("main", mainRpcMethods["app.openShellSurface"], [
         { kind: "settings", section: "connection" },
       ]),
     ).resolves.toBeUndefined();
@@ -755,7 +756,7 @@ describe("bridgeAdapter native app navigation", () => {
       section: "connection",
     });
     await expect(
-      rpc.call("main", "app.openShellSurface", [
+      rpc.call("main", mainRpcMethods["app.openShellSurface"], [
         { kind: "settings", section: "apps" },
       ]),
     ).rejects.toThrow("Mobile settings do not include");

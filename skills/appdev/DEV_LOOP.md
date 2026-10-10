@@ -189,8 +189,9 @@ For terminal apps:
   `runtime.supervision.logs({ kind: "app", releaseId: appName })` read its rows
   and stdout/stderr; `restart(row.identity)` replaces it.
 - For host runner/reconcile failures, use `serverLog.query` (eval:
-  `services.serverLog.query(...)`; app/panel/worker:
-  `rpc.call("main", "serverLog.query", [{ ... }])`) or the `about/server-logs`
+  `services.serverLog.query(...)`; app/panel/worker: pass
+  `mainRpcMethods["serverLog.query"]` from
+  `@vibestudio/service-schemas/mainRpc`) or the `about/server-logs`
   live viewer; see `../server-logs/SKILL.md`.
 - Test pushed updates and rollback while the app is running; the runner should
   replace the process with the selected trusted build.
@@ -208,7 +209,8 @@ a workspace, and use the typed services from that session.
 From app, panel, worker, or eval contexts, use `runtime.supervision.*` with the
 app's entity or release identity for the app process, and `serverLog.*` for the
 host server. In eval, use `services.serverLog.*`; elsewhere use
-`rpc.call("main", "serverLog.query", [{ ... }])`. `serverLog.query/tail/stats`
+`rpc.call("main", mainRpcMethods["serverLog.query"], [{ ... }])`.
+`serverLog.query/tail/stats`
 is read-only and supports live following through `server-log:append`. Humans
 can open `about/server-logs`.
 

@@ -46,108 +46,28 @@ import {
   TrashIcon,
   UpdateIcon,
 } from "@radix-ui/react-icons";
-import { useIsMobile, usePanelTheme, usePanelThemeConfig, useStateArgs } from "@workspace/react";
+import {
+  useIsMobile,
+  usePanelTheme,
+  usePanelThemeConfig,
+  useStateArgs,
+} from "@workspace/react";
 import { extensions } from "@workspace/runtime";
+import {
+  localModelsExtensionMethods,
+  type CuratedModel,
+  type LocalModelEntry,
+  type LocalModelsStatus,
+  type ServerState,
+} from "@workspace/model-catalog/localModels";
 
 const EXTENSION = "@workspace-extensions/local-models";
 const POLL_MS = 2500;
 
-// ── extension wire types (structural mirrors of extension types.ts) ─────────
-
-interface GpuInfo {
-  vendor: string;
-  name: string;
-  vramMB: number;
-  backend: string;
-  discrete: boolean;
-}
-
-interface HardwareProfile {
-  os: string;
-  arch: string;
-  gpus: GpuInfo[];
-  cpu: { cores: number; features: string[] };
-  ramMB: number;
-  chosenBackend: string;
-  chosenGpu: GpuInfo | null;
-  tier: string;
-  notes: string[];
-}
-
-interface EngineState {
-  pin: { buildTag: string };
-  cpu: { buildTag: string; backend: string } | null;
-  gpu: { buildTag: string; backend: string } | null;
-  degradedReason: string | null;
-}
-
-type ServerState =
-  | { state: "stopped" }
-  | { state: "starting" }
-  | { state: "running"; port: number; loadedModels: string[]; uptimeMs: number }
-  | { state: "backoff"; attempt: number; nextRetryMs: number }
-  | { state: "error"; message: string; logTail: string[] };
-
-interface DownloadJob {
-  id: string;
-  slug: string;
-  hfRepo: string;
-  file: string;
-  totalBytes: number | null;
-  receivedBytes: number;
-  phase: "active" | "queued" | "paused";
-  error: string | null;
-}
-
-interface LocalModelsStatus {
-  role: "owner" | "attached";
-  hardware: HardwareProfile | null;
-  engine: EngineState | null;
-  servers: { utility: ServerState; main: ServerState };
-  fallback: {
-    ready: boolean;
-    warm: boolean;
-    modelRef: string;
-    downloadSizeBytes: number;
-    reason: string | null;
-  };
-  downloads: DownloadJob[];
-  storageRoot: string;
-  diskFreeBytes: number;
-}
-
-interface LocalModelEntry {
-  slug: string;
-  displayName: string;
-  server: "utility" | "main";
-  contextWindow: number;
-  toolsCapable: boolean;
-  reasoningCapable: boolean;
-  fit: { fit: string; estTokensPerSec: number | null; notes: string[] };
-  state: "ready" | "startable" | "not-installed" | "starting" | "downloading" | "error";
-  download: {
-    progress: number;
-    phase: "active" | "queued" | "paused";
-    receivedBytes: number;
-    totalBytes: number | null;
-  } | null;
-  errorMessage: string | null;
-}
-
-interface CuratedModel {
-  slug: string;
-  displayName: string;
-  hfRepo: string;
-  quantByTier: Record<string, string>;
-  sha256ByQuant: Record<string, string>;
-  toolsCapable: boolean;
-  blurb: string;
-}
-
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-function invoke<T>(method: string, args: unknown[] = []): Promise<T> {
-  return extensions.invoke(EXTENSION, method, args) as Promise<T>;
+function invoke(method: string, args: unknown[] = []): Promise<unknown> {
+  return extensions.invoke(EXTENSION, method, args);
 }
 
 function formatBytes(bytes: number): string {
@@ -196,7 +116,8 @@ function serverBadge(state: ServerState) {
     case "running":
       return (
         <Badge color="green" variant="soft">
-          <CheckCircledIcon /> running · port {state.port} · {formatUptime(state.uptimeMs)}
+          <CheckCircledIcon /> running · port {state.port} ·{" "}
+          {formatUptime(state.uptimeMs)}
         </Badge>
       );
     case "starting":
@@ -248,7 +169,9 @@ function ModelActions({
             variant="soft"
             aria-label={`Load ${model.displayName}`}
             disabled={busy !== null}
-            onClick={() => act("load", () => invoke("ensureLoaded", [model.slug]))}
+            onClick={() =>
+              act("load", () => invoke("ensureLoaded", [model.slug]))
+            }
           >
             <RocketIcon />
           </IconButton>
@@ -261,7 +184,11 @@ function ModelActions({
             variant="soft"
             aria-label={`Download ${model.displayName}`}
             disabled={busy !== null}
-            onClick={() => act("install", () => invoke("installModel", [`local:${model.slug}`]))}
+            onClick={() =>
+              act("install", () =>
+                invoke("installModel", [`local:${model.slug}`]),
+              )
+            }
           >
             <DownloadIcon />
           </IconButton>
@@ -299,7 +226,9 @@ export default function LocalModelsPanel() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [removeTarget, setRemoveTarget] = useState<LocalModelEntry | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<LocalModelEntry | null>(
+    null,
+  );
   const [importPath, setImportPath] = useState("");
   const [logLines, setLogLines] = useState<string[] | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
@@ -318,16 +247,28 @@ export default function LocalModelsPanel() {
     setLogKind(kind);
     setLogError(null);
     setLogLines([]);
-    void invoke<string[]>("tailServerLogLines", [kind, 200])
+    void invoke(localModelsExtensionMethods.tailServerLogLines.method, [
+      kind,
+      200,
+    ])
+      .then((value) =>
+        localModelsExtensionMethods.tailServerLogLines.result.parse(value),
+      )
       .then((lines) => setLogLines(lines))
-      .catch((err) => setLogError(err instanceof Error ? err.message : String(err)));
+      .catch((err) =>
+        setLogError(err instanceof Error ? err.message : String(err)),
+      );
   }, [stateArgs.openLog]);
 
   const refresh = useCallback(async () => {
     try {
       const [nextStatus, nextModels] = await Promise.all([
-        invoke<LocalModelsStatus>("status"),
-        invoke<LocalModelEntry[]>("listModels"),
+        invoke(localModelsExtensionMethods.status.method).then((value) =>
+          localModelsExtensionMethods.status.result.parse(value),
+        ),
+        invoke(localModelsExtensionMethods.listModels.method).then((value) =>
+          localModelsExtensionMethods.listModels.result.parse(value),
+        ),
       ]);
       setStatus(nextStatus);
       setModels(nextModels);
@@ -341,7 +282,11 @@ export default function LocalModelsPanel() {
     setCatalogLoading(true);
     setCatalogError(null);
     try {
-      setCatalog(await invoke<CuratedModel[]>("searchCatalog"));
+      setCatalog(
+        localModelsExtensionMethods.searchCatalog.result.parse(
+          await invoke(localModelsExtensionMethods.searchCatalog.method),
+        ),
+      );
     } catch (err) {
       setCatalogError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -369,10 +314,13 @@ export default function LocalModelsPanel() {
         setBusy(null);
       }
     },
-    [refresh]
+    [refresh],
   );
 
-  const installedSlugs = useMemo(() => new Set(models.map((m) => m.slug)), [models]);
+  const installedSlugs = useMemo(
+    () => new Set(models.map((m) => m.slug)),
+    [models],
+  );
   const hardware = status?.hardware ?? null;
   const engine = status?.engine ?? null;
   const filteredCatalog = useMemo(() => {
@@ -380,12 +328,17 @@ export default function LocalModelsPanel() {
     const notInstalled = catalog.filter((c) => !installedSlugs.has(c.slug));
     if (!q) return notInstalled;
     return notInstalled.filter(
-      (c) => c.displayName.toLowerCase().includes(q) || c.hfRepo.toLowerCase().includes(q)
+      (c) =>
+        c.displayName.toLowerCase().includes(q) ||
+        c.hfRepo.toLowerCase().includes(q),
     );
   }, [catalog, installedSlugs, query]);
-  const fallbackModel = models.find((model) => model.server === "utility") ?? null;
-  const fallbackJob = status?.downloads.find((job) => job.slug === fallbackModel?.slug) ?? null;
-  const fallbackDownload = fallbackJob && !fallbackJob.error ? fallbackJob : null;
+  const fallbackModel =
+    models.find((model) => model.server === "utility") ?? null;
+  const fallbackJob =
+    status?.downloads.find((job) => job.slug === fallbackModel?.slug) ?? null;
+  const fallbackDownload =
+    fallbackJob && !fallbackJob.error ? fallbackJob : null;
   const fallbackFailure = fallbackJob?.error ?? null;
 
   return (
@@ -428,9 +381,15 @@ export default function LocalModelsPanel() {
                       Can't reach the local-models extension.
                     </Text>
                     <Text size="1" color="gray">
-                      Check that the extension is installed and enabled, then retry.
+                      Check that the extension is installed and enabled, then
+                      retry.
                     </Text>
-                    <Button size="1" variant="soft" color="red" onClick={() => void refresh()}>
+                    <Button
+                      size="1"
+                      variant="soft"
+                      color="red"
+                      onClick={() => void refresh()}
+                    >
                       <ReloadIcon /> Retry
                     </Button>
                   </Flex>
@@ -447,13 +406,18 @@ export default function LocalModelsPanel() {
                     <Callout.Icon>
                       <ExclamationTriangleIcon />
                     </Callout.Icon>
-                    <Callout.Text>GPU backend degraded: {engine.degradedReason}</Callout.Text>
+                    <Callout.Text>
+                      GPU backend degraded: {engine.degradedReason}
+                    </Callout.Text>
                   </Callout.Root>
                 )}
               </Box>
               <Flex gap="2" align="center" wrap="wrap">
                 {status && (
-                  <Badge color={status.role === "owner" ? "blue" : "gray"} variant="soft">
+                  <Badge
+                    color={status.role === "owner" ? "blue" : "gray"}
+                    variant="soft"
+                  >
                     {status.role}
                   </Badge>
                 )}
@@ -461,7 +425,9 @@ export default function LocalModelsPanel() {
                   size="1"
                   variant="soft"
                   disabled={busy !== null}
-                  onClick={() => act("re-detect", () => invoke("getHardwareProfile", [true]))}
+                  onClick={() =>
+                    act("re-detect", () => invoke("getHardwareProfile", [true]))
+                  }
                 >
                   <ReloadIcon /> Re-detect
                 </Button>
@@ -486,11 +452,23 @@ export default function LocalModelsPanel() {
               <Flex justify="between" align="center" gap="3" wrap="wrap">
                 <Flex align="start" gap="3" style={{ minWidth: 0 }}>
                   {status?.fallback.warm ? (
-                    <CheckCircledIcon color="var(--green-9)" width={22} height={22} />
+                    <CheckCircledIcon
+                      color="var(--green-9)"
+                      width={22}
+                      height={22}
+                    />
                   ) : status?.fallback.ready ? (
-                    <CheckCircledIcon color="var(--gray-8)" width={22} height={22} />
+                    <CheckCircledIcon
+                      color="var(--gray-8)"
+                      width={22}
+                      height={22}
+                    />
                   ) : (
-                    <DownloadIcon color="var(--gray-8)" width={22} height={22} />
+                    <DownloadIcon
+                      color="var(--gray-8)"
+                      width={22}
+                      height={22}
+                    />
                   )}
                   <Box style={{ minWidth: 0 }}>
                     <Text size="2" weight="medium" as="p">
@@ -528,11 +506,14 @@ export default function LocalModelsPanel() {
                       disabled={busy !== null}
                       onClick={() =>
                         act("install-fallback", () =>
-                          invoke("installModel", [status.fallback.modelRef])
+                          invoke("installModel", [status.fallback.modelRef]),
                         )
                       }
                     >
-                      <DownloadIcon /> {fallbackFailure ? "Retry download" : "Download & install"}
+                      <DownloadIcon />{" "}
+                      {fallbackFailure
+                        ? "Retry download"
+                        : "Download & install"}
                     </Button>
                   ) : null}
                 </Flex>
@@ -557,7 +538,9 @@ export default function LocalModelsPanel() {
                   <Progress
                     value={
                       fallbackDownload.totalBytes
-                        ? (fallbackDownload.receivedBytes / fallbackDownload.totalBytes) * 100
+                        ? (fallbackDownload.receivedBytes /
+                            fallbackDownload.totalBytes) *
+                          100
                         : 0
                     }
                     size="2"
@@ -576,7 +559,9 @@ export default function LocalModelsPanel() {
               </Heading>
               <Flex direction="column" gap="2">
                 {status.downloads.map((job) => {
-                  const progress = job.totalBytes ? (job.receivedBytes / job.totalBytes) * 100 : 0;
+                  const progress = job.totalBytes
+                    ? (job.receivedBytes / job.totalBytes) * 100
+                    : 0;
                   return (
                     <Flex key={job.id} align="center" gap="3">
                       <Box style={{ flex: 1, minWidth: 0 }}>
@@ -587,7 +572,9 @@ export default function LocalModelsPanel() {
                           </Text>
                           <Text size="1" color="gray">
                             {formatBytes(job.receivedBytes)}
-                            {job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : ""}
+                            {job.totalBytes
+                              ? ` / ${formatBytes(job.totalBytes)}`
+                              : ""}
                           </Text>
                         </Flex>
                         <Progress value={progress} size="1" mt="1" />
@@ -601,7 +588,11 @@ export default function LocalModelsPanel() {
                         <IconButton
                           size="1"
                           variant="soft"
-                          onClick={() => act("pause", () => invoke("pauseDownload", [job.id]))}
+                          onClick={() =>
+                            act("pause", () =>
+                              invoke("pauseDownload", [job.id]),
+                            )
+                          }
                         >
                           <PauseIcon />
                         </IconButton>
@@ -609,7 +600,11 @@ export default function LocalModelsPanel() {
                         <IconButton
                           size="1"
                           variant="soft"
-                          onClick={() => act("resume", () => invoke("resumeDownload", [job.id]))}
+                          onClick={() =>
+                            act("resume", () =>
+                              invoke("resumeDownload", [job.id]),
+                            )
+                          }
                         >
                           <PlayIcon />
                         </IconButton>
@@ -618,7 +613,11 @@ export default function LocalModelsPanel() {
                         size="1"
                         variant="soft"
                         color="red"
-                        onClick={() => act("cancel", () => invoke("cancelDownload", [job.id]))}
+                        onClick={() =>
+                          act("cancel", () =>
+                            invoke("cancelDownload", [job.id]),
+                          )
+                        }
                       >
                         <Cross2Icon />
                       </IconButton>
@@ -634,14 +633,21 @@ export default function LocalModelsPanel() {
             <Flex justify="between" align="start" gap="2" mb="2" wrap="wrap">
               <Heading size="2">Model library</Heading>
               {status && (
-                <Text size="1" color="gray" truncate style={{ maxWidth: "100%" }}>
-                  {status.storageRoot} · {formatBytes(status.diskFreeBytes)} free
+                <Text
+                  size="1"
+                  color="gray"
+                  truncate
+                  style={{ maxWidth: "100%" }}
+                >
+                  {status.storageRoot} · {formatBytes(status.diskFreeBytes)}{" "}
+                  free
                 </Text>
               )}
             </Flex>
             {models.length === 0 ? (
               <Text size="2" color="gray">
-                No models installed yet. Install the fallback above or add another model below.
+                No models installed yet. Install the fallback above or add
+                another model below.
               </Text>
             ) : isMobile ? (
               <Flex direction="column" gap="2">
@@ -660,7 +666,12 @@ export default function LocalModelsPanel() {
                         </Box>
                         {fitBadge(model.fit.fit)}
                       </Flex>
-                      <Flex align="center" justify="between" gap="2" wrap="wrap">
+                      <Flex
+                        align="center"
+                        justify="between"
+                        gap="2"
+                        wrap="wrap"
+                      >
                         <Flex align="center" gap="2" wrap="wrap">
                           <Badge color="gray" variant="soft">
                             {Math.round(model.contextWindow / 1024)}K context
@@ -741,7 +752,9 @@ export default function LocalModelsPanel() {
                       </Table.Cell>
                       <Table.Cell>{fitBadge(model.fit.fit)}</Table.Cell>
                       <Table.Cell>
-                        <Text size="1">{Math.round(model.contextWindow / 1024)}K</Text>
+                        <Text size="1">
+                          {Math.round(model.contextWindow / 1024)}K
+                        </Text>
                       </Table.Cell>
                       <Table.Cell>
                         <Text size="1">{model.toolsCapable ? "✓" : "—"}</Text>
@@ -770,7 +783,9 @@ export default function LocalModelsPanel() {
                         {model.state === "downloading" && (
                           <Badge color="blue" variant="soft">
                             downloading{" "}
-                            {model.download ? `${Math.round(model.download.progress * 100)}%` : ""}
+                            {model.download
+                              ? `${Math.round(model.download.progress * 100)}%`
+                              : ""}
                           </Badge>
                         )}
                         {model.state === "error" && (
@@ -813,7 +828,9 @@ export default function LocalModelsPanel() {
             </TextField.Root>
             <Flex direction="column" gap="2">
               {filteredCatalog.map((entry) => {
-                const quant = hardware ? entry.quantByTier[hardware.tier] : undefined;
+                const quant = hardware
+                  ? entry.quantByTier[hardware.tier]
+                  : undefined;
                 return (
                   <Flex
                     key={entry.slug}
@@ -837,7 +854,8 @@ export default function LocalModelsPanel() {
                       </Text>
                       {!quant ? (
                         <Text size="1" color="gray" as="p">
-                          No compatible build is available for your detected hardware tier.
+                          No compatible build is available for your detected
+                          hardware tier.
                         </Text>
                       ) : null}
                     </Box>
@@ -856,11 +874,14 @@ export default function LocalModelsPanel() {
                         onClick={() =>
                           act("download", async () => {
                             if (!quant) {
-                              throw new Error("No compatible model build is available");
+                              throw new Error(
+                                "No compatible model build is available",
+                              );
                             }
                             // File naming follows the HF convention the curated
                             // catalog pins: <repo-basename>-<QUANT>.gguf.
-                            const repoBase = entry.hfRepo.split("/")[1] ?? entry.slug;
+                            const repoBase =
+                              entry.hfRepo.split("/")[1] ?? entry.slug;
                             const file = `${repoBase.replace(/-GGUF$/iu, "")}-${quant}.gguf`;
                             await invoke("startDownloadJob", [
                               {
@@ -905,11 +926,14 @@ export default function LocalModelsPanel() {
                   </Callout.Text>
                 </Callout.Root>
               ) : null}
-              {!catalogLoading && !catalogError && filteredCatalog.length === 0 && (
-                <Text size="1" color="gray">
-                  Nothing matching — every curated model for this hardware tier is installed.
-                </Text>
-              )}
+              {!catalogLoading &&
+                !catalogError &&
+                filteredCatalog.length === 0 && (
+                  <Text size="1" color="gray">
+                    Nothing matching — every curated model for this hardware
+                    tier is installed.
+                  </Text>
+                )}
             </Flex>
             <Separator size="4" my="3" />
             <Flex
@@ -920,7 +944,10 @@ export default function LocalModelsPanel() {
               <input
                 type="file"
                 // Chromium/Electron directory picker; the runtime import API needs the folder path.
-                {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                {...({ webkitdirectory: "", directory: "" } as Record<
+                  string,
+                  string
+                >)}
                 aria-label="Choose a folder of GGUF files"
                 onChange={(event) => {
                   const file = event.currentTarget.files?.[0] as
@@ -930,11 +957,14 @@ export default function LocalModelsPanel() {
                   if (path) setImportPath(path.replace(/[\\/][^\\/]+$/, ""));
                   else
                     setError(
-                      "The selected folder path was unavailable. Enter its absolute path instead."
+                      "The selected folder path was unavailable. Enter its absolute path instead.",
                     );
                 }}
                 className="app-touch-target"
-                style={{ width: isMobile ? "100%" : undefined, maxWidth: isMobile ? "none" : 190 }}
+                style={{
+                  width: isMobile ? "100%" : undefined,
+                  maxWidth: isMobile ? "none" : 190,
+                }}
               />
               <TextField.Root
                 placeholder="Import a folder of GGUF files (absolute path)…"
@@ -966,13 +996,25 @@ export default function LocalModelsPanel() {
             </Heading>
             <Flex direction="column" gap="2">
               {(["utility", "main"] as const).map((kind) => (
-                <Flex key={kind} justify="between" align="center" gap="3" wrap="wrap">
+                <Flex
+                  key={kind}
+                  justify="between"
+                  align="center"
+                  gap="3"
+                  wrap="wrap"
+                >
                   <Box style={{ minWidth: 0 }}>
                     <Text size="2" weight="medium">
-                      {kind === "utility" ? "Utility (fallback, CPU)" : "Main (library)"}
+                      {kind === "utility"
+                        ? "Utility (fallback, CPU)"
+                        : "Main (library)"}
                     </Text>
                     <Box mt="1">
-                      {status ? serverBadge(status.servers[kind]) : <Spinner size="1" />}
+                      {status ? (
+                        serverBadge(status.servers[kind])
+                      ) : (
+                        <Spinner size="1" />
+                      )}
                     </Box>
                   </Box>
                   <Flex gap="2" wrap="wrap">
@@ -980,7 +1022,9 @@ export default function LocalModelsPanel() {
                       size="1"
                       variant="soft"
                       disabled={busy !== null}
-                      onClick={() => act("restart", () => invoke("restartServer", [kind]))}
+                      onClick={() =>
+                        act("restart", () => invoke("restartServer", [kind]))
+                      }
                     >
                       <ReloadIcon /> Restart
                     </Button>
@@ -994,9 +1038,21 @@ export default function LocalModelsPanel() {
                           setLogError(null);
                           setLogLines([]);
                           try {
-                            setLogLines(await invoke<string[]>("tailServerLogLines", [kind, 200]));
+                            setLogLines(
+                              localModelsExtensionMethods.tailServerLogLines.result.parse(
+                                await invoke(
+                                  localModelsExtensionMethods.tailServerLogLines
+                                    .method,
+                                  [kind, 200],
+                                ),
+                              ),
+                            );
                           } catch (error) {
-                            setLogError(error instanceof Error ? error.message : String(error));
+                            setLogError(
+                              error instanceof Error
+                                ? error.message
+                                : String(error),
+                            );
                           }
                         })
                       }
@@ -1019,8 +1075,8 @@ export default function LocalModelsPanel() {
         <Dialog.Content maxWidth="380px">
           <Dialog.Title>Delete {removeTarget?.displayName}?</Dialog.Title>
           <Dialog.Description size="2" color="gray">
-            Frees the model's disk space. Agents configured to use it will fall back the next time
-            they run.
+            Frees the model's disk space. Agents configured to use it will fall
+            back the next time they run.
           </Dialog.Description>
           <Flex gap="2" justify="end" mt="3">
             <Dialog.Close>
@@ -1033,7 +1089,10 @@ export default function LocalModelsPanel() {
               onClick={() => {
                 const target = removeTarget;
                 setRemoveTarget(null);
-                if (target) void act("remove", () => invoke("removeModel", [target.slug]));
+                if (target)
+                  void act("remove", () =>
+                    invoke("removeModel", [target.slug]),
+                  );
               }}
             >
               <TrashIcon /> Delete
@@ -1043,11 +1102,19 @@ export default function LocalModelsPanel() {
       </Dialog.Root>
 
       {/* ── log viewer ────────────────────────────────────────────────── */}
-      <Dialog.Root open={logLines !== null} onOpenChange={(open) => !open && setLogLines(null)}>
+      <Dialog.Root
+        open={logLines !== null}
+        onOpenChange={(open) => !open && setLogLines(null)}
+      >
         <Dialog.Content maxWidth="720px">
-          <Dialog.Title>{logKind === "utility" ? "Utility" : "Main"} server log</Dialog.Title>
+          <Dialog.Title>
+            {logKind === "utility" ? "Utility" : "Main"} server log
+          </Dialog.Title>
           <ScrollArea type="auto" scrollbars="both" style={{ maxHeight: 420 }}>
-            <Code size="1" style={{ whiteSpace: "pre", display: "block", padding: 8 }}>
+            <Code
+              size="1"
+              style={{ whiteSpace: "pre", display: "block", padding: 8 }}
+            >
               {logError
                 ? `Couldn't read the log: ${logError}`
                 : (logLines ?? []).join("\n") || "(log empty)"}

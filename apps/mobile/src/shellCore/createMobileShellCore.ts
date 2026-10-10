@@ -1,5 +1,6 @@
+import { mainRpcMethod } from "@vibestudio/service-schemas/mainRpc";
 import { PanelRegistry } from "@vibestudio/shared/panelRegistry";
-import { createShellCore } from "@vibestudio/shell-core/createShellCore";
+import { createShellCore } from "@vibestudio/service-schemas/clients/shellCoreClient";
 import type { MobileRpcClient } from "../services/mobileTransport";
 import { parseHostConfig } from "../services/panelUrls";
 import { createMobileLocalViewStateStore } from "./localViewState";
@@ -27,7 +28,7 @@ export function createMobileShellCore(deps: {
   const { panelManager } = createShellCore({
     registry,
     call: (service, method, args) =>
-      deps.transport.call("main", `${service}.${method}`, args),
+      deps.transport.call("main", mainRpcMethod(`${service}.${method}`), args),
     workspaceState: presentation.workspaceState,
     viewState: createMobileLocalViewStateStore(
       deps.localStorageScope,

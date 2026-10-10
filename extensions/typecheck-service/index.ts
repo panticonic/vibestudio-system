@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { PANEL_PRINCIPAL_PREFIX } from "@vibestudio/shared/principalIds";
@@ -15,7 +16,7 @@ interface ExtensionContextLike {
     ensureMaterialized(scope: string | string[] | "all"): Promise<void>;
   };
   rpc: {
-    call<T>(targetId: string, method: string, ...args: unknown[]): Promise<T>;
+    call: import("@vibestudio/rpc").RpcCaller["call"];
   };
   invocation: {
     current(): {
@@ -210,13 +211,7 @@ async function typecheckOptions(
   const root = contextId ? path.join(info.contextProjectionsPath, contextId) : info.path;
   const unit = path.relative(root, panelPath).split(path.sep).join("/");
   resolveWithin(root, unit);
-  const environment = await ctx.rpc.call<{
-    stateHash: string;
-    dependencyKey: string | null;
-    nodeModulesPaths: string[];
-    workspacePackages: Record<string, string>;
-    moduleConditions: string[];
-  }>("main", "build.prepareTypecheck", unit, ...(contextId ? [`ctx:${contextId}`] : []));
+  const environment = await ctx.rpc.call("main", mainRpcMethods["build.prepareTypecheck"], [unit, contextId ? `ctx:${contextId}` : undefined]);
   const packages = new Map(workspaceContext?.packages);
   for (const [name, dir] of Object.entries(environment.workspacePackages)) {
     const manifestPath = path.join(dir, "package.json");

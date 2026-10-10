@@ -1,16 +1,17 @@
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import {
   accountMethods,
   type AccountProfile,
   type AccountProfileUpdate,
 } from "@vibestudio/service-schemas/account";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+
 import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
 
 export type MobileAccountProfile = AccountProfile;
 export type MobileAccountProfileUpdate = AccountProfileUpdate;
 
 interface AccountProfileTransport {
-  call(service: string, method: string, args: unknown[]): Promise<unknown>;
+  call: import("@vibestudio/rpc").RpcCaller["call"];
 }
 
 export class MobileAccountProfileClient {
@@ -19,14 +20,8 @@ export class MobileAccountProfileClient {
   private readonly hubControl;
 
   constructor(transport: AccountProfileTransport) {
-    this.account = createTypedServiceClient("account", accountMethods, (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args)
-    );
-    this.hubControl = createTypedServiceClient(
-      "hubControl",
-      hubControlMethods,
-      (service, method, args) => transport.call("main", `${service}.${method}`, args)
-    );
+    this.account = createTypedRpcServiceClient(transport, { targetId: "main", namespace: "account" }, accountMethods);
+    this.hubControl = createTypedRpcServiceClient(transport, { targetId: "main", namespace: "hubControl" }, hubControlMethods);
   }
 
   get current(): MobileAccountProfile | null {

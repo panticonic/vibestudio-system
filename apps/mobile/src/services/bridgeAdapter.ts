@@ -1,3 +1,4 @@
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import { appMethods } from "@vibestudio/service-schemas/app";
 import {
   mobileShellSurface,
@@ -11,7 +12,7 @@ import {
 } from "@vibestudio/shared/panel/ids";
 import type { OpenExternalOptions } from "@vibestudio/shared/externalOpen";
 import { externalOpenMethods } from "@vibestudio/service-schemas/externalOpen";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+
 import {
   responseEnvelopeFor,
   rpcErrorKindOf,
@@ -316,18 +317,11 @@ export function createBridgeAdapter(deps: {
           callerKind: "shell",
           workspaceId: deps.workspaceId,
         },
-        {
-          type: "response",
-          requestId: request.requestId,
-          error: error instanceof Error ? error.message : String(error),
-          errorKind: rpcErrorKindOf(error),
-          ...(error instanceof RpcBoundaryError && error.code
-            ? { errorCode: error.code }
-            : {}),
-          ...(rpcErrorDataOf(error) !== undefined
+        { type: "response", requestId: request.requestId, error: { message: error instanceof Error ? error.message : String(error), errorKind: rpcErrorKindOf(error), ...(error instanceof RpcBoundaryError && error.code
+            ? { code: error.code }
+            : {}), ...(rpcErrorDataOf(error) !== undefined
             ? { errorData: rpcErrorDataOf(error) }
-            : {}),
-        },
+            : {}) } },
       );
     }
     assertCurrent();
@@ -423,12 +417,7 @@ export function createBridgeAdapter(deps: {
         }
         case "openExternal": {
           const [url, options] = args as [string, OpenExternalOptions?];
-          const externalOpen = createTypedServiceClient(
-            "externalOpen",
-            externalOpenMethods,
-            (svc, method, callArgs) =>
-              deps.transport.call("main", `${svc}.${method}`, callArgs),
-          );
+          const externalOpen = createTypedRpcServiceClient(deps.transport, { targetId: "main", namespace: "externalOpen" }, externalOpenMethods);
           await externalOpen.openExternal(url, options);
           return;
         }

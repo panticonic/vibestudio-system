@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -304,7 +305,7 @@ function hostGovernanceRowKey(row: HostGovernanceRow, index: number): string {
  * always scoped to the active workspace and bounded. Read-only (INV-2).
  */
 async function fetchHostGovernance(workspaceId: string): Promise<HostGovernanceRow[]> {
-  const result = await rpc.call<unknown>("main", "governance.list", [
+  const result = await rpc.call("main", mainRpcMethods["governance.list"], [
     { filter: { workspaceId }, limit: 200 },
   ]);
   if (Array.isArray(result)) return result as HostGovernanceRow[];

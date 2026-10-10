@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTestDO } from "@workspace/runtime/worker/test-utils";
+import { wireCallerFor } from "@vibestudio/rpc/internal";
 import { PhoneProvisioningDO } from "./index.js";
+
+class TestPhoneProvisioningDO extends PhoneProvisioningDO {
+  wireCallerForTest() {
+    return wireCallerFor(this.rpc);
+  }
+}
 
 describe("PhoneProvisioningDO", () => {
   it("selects the desktop transport and rewrites provider identity", async () => {
-    const { instance, callAs } = await createTestDO(PhoneProvisioningDO, {
+    const { instance, callAs } = await createTestDO(TestPhoneProvisioningDO, {
       WORKER_SOURCE: "workers/phone-provisioning",
       WORKER_CLASS_NAME: "PhoneProvisioningDO",
       __objectKey: "workspace-phone-provisioning",
@@ -32,10 +39,7 @@ describe("PhoneProvisioningDO", () => {
         ];
       },
     );
-    Object.defineProperty(instance, "rpc", {
-      value: { call: rpcCall },
-      configurable: true,
-    });
+    vi.spyOn(instance.wireCallerForTest(), "call").mockImplementation(rpcCall);
 
     await expect(
       callAs(
@@ -52,6 +56,7 @@ describe("PhoneProvisioningDO", () => {
       "main",
       "phoneNativeEndpoint.providers",
       [{ clientId: "shell:desktop" }],
+      undefined,
     );
   });
 });

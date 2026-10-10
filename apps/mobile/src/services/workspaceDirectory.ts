@@ -1,3 +1,4 @@
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import {
   submitWorkspaceCreation,
   readWorkspaceCreationSubmission,
@@ -251,20 +252,8 @@ export class MobileWorkspaceDirectory {
     readonly account: MobileWorkspaceAccount,
     private readonly stored: StoredMobileConnection,
   ) {
-    this.hubControl = createTypedServiceClient(
-      "hubControl",
-      hubControlMethods,
-      (_service, method, args) =>
-        account.control.rpc.call("main", `hubControl.${method}`, args, {
-          authorityAcquisition: "wait",
-        }),
-    );
-    const shellApproval = createTypedServiceClient(
-      "shellApproval",
-      shellApprovalMethods,
-      (_service, method, args) =>
-        account.control.rpc.call("main", `shellApproval.${method}`, args),
-    );
+    this.hubControl = createTypedRpcServiceClient(account.control.rpc, { targetId: "main", namespace: "hubControl" }, hubControlMethods);
+    const shellApproval = createTypedRpcServiceClient(account.control.rpc, { targetId: "main", namespace: "shellApproval" }, shellApprovalMethods);
     this.hubApproval = {
       owner: { kind: "hub" },
       label: "Account",
@@ -624,12 +613,7 @@ export class MobileWorkspaceDirectory {
     locator: import("@vibestudio/service-schemas/templates").TemplateLocator,
   ) {
     const system = await this.open(this.systemWorkspaceId);
-    const extensions = createTypedServiceClient(
-      "extensions",
-      extensionsMethods,
-      (service, method, args) =>
-        system.client.transport.call("main", `${service}.${method}`, args),
-    );
+    const extensions = createTypedRpcServiceClient(system.client.transport, { targetId: "main", namespace: "extensions" }, extensionsMethods);
     const templates = createTypedServiceClient(
       "@workspace-extensions/templates",
       templatesMethods,

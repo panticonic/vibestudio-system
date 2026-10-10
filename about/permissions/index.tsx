@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 /**
  * Permissions — the one screen where lasting access is reviewed and revoked.
  *
@@ -1011,7 +1012,7 @@ function ProfileItemRow({
   open: boolean;
   onToggle(): void;
   busy: boolean;
-  onChange(request: Record<string, unknown>): void;
+  onChange(request: import("@vibestudio/shared/rpcMethods").RpcMethodArgs<typeof mainRpcMethods["permissions.updateAgentProfile"]>[0]): void;
   now: number;
 }) {
   const action =
@@ -1143,7 +1144,7 @@ function ProfileCard({
 }: {
   profile: AgentAuthorityProfile;
   changingId: string | null;
-  onChange(request: Record<string, unknown>): void;
+  onChange(request: import("@vibestudio/shared/rpcMethods").RpcMethodArgs<typeof mainRpcMethods["permissions.updateAgentProfile"]>[0]): void;
   openItems: Set<string>;
   onToggleItem(id: string): void;
   now: number;
@@ -1512,7 +1513,7 @@ function AreaView({
   profiles: AgentAuthorityProfile[];
   units: BuildUnitCatalogEntry[];
   changingId: string | null;
-  onChange(request: Record<string, unknown>): void;
+  onChange(request: import("@vibestudio/shared/rpcMethods").RpcMethodArgs<typeof mainRpcMethods["permissions.updateAgentProfile"]>[0]): void;
   openItems: Set<string>;
   onToggleItem(id: string): void;
   now: number;
@@ -2013,12 +2014,12 @@ function PermissionsPage() {
     try {
       const [nextGrants, nextProfiles, nextSafety, nextUnits, nextRecords, nextPending] =
         await Promise.all([
-          rpc.call<SavedPermissionGrant[]>("main", "permissions.list", []),
-          rpc.call<AgentAuthorityProfile[]>("main", "permissions.listAgentProfiles", []),
-          rpc.call<AuthoritySafetyStatus>("main", "permissions.safetyStatus", []),
-          rpc.call<BuildUnitCatalogEntry[]>("main", "build.listUnits", []),
-          rpc.call<GovernanceRecord[]>("main", "governance.list", [{ limit: 200 }]),
-          rpc.call<PendingAuthorityRequest[]>("main", "permissions.listPendingRequests", []),
+          rpc.call("main", mainRpcMethods["permissions.list"], []),
+          rpc.call("main", mainRpcMethods["permissions.listAgentProfiles"], []),
+          rpc.call("main", mainRpcMethods["permissions.safetyStatus"], []),
+          rpc.call("main", mainRpcMethods["build.listUnits"], []),
+          rpc.call("main", mainRpcMethods["governance.list"], [{ limit: 200 }]),
+          rpc.call("main", mainRpcMethods["permissions.listPendingRequests"], []),
         ]);
       setGrants(nextGrants);
       setProfiles(nextProfiles);
@@ -2035,19 +2036,19 @@ function PermissionsPage() {
     }
   }, []);
 
-  const updateProfile = useCallback(async (request: Record<string, unknown>) => {
-    const id = String(request["id"] ?? request["bindingId"] ?? "profile");
+  const updateProfile = useCallback(async (request: import("@vibestudio/shared/rpcMethods").RpcMethodArgs<typeof mainRpcMethods["permissions.updateAgentProfile"]>[0]) => {
+    const id = String(("id" in request ? request.id : "bindingId" in request ? request.bindingId : undefined) ?? "profile");
     setRevokingId(id);
     setError(null);
     try {
-      await rpc.call("main", "permissions.updateAgentProfile", [request]);
+      await rpc.call("main", mainRpcMethods["permissions.updateAgentProfile"], [request]);
       setProfiles(
-        await rpc.call<AgentAuthorityProfile[]>("main", "permissions.listAgentProfiles", [])
+        await rpc.call("main", mainRpcMethods["permissions.listAgentProfiles"], [])
       );
-      setGrants(await rpc.call<SavedPermissionGrant[]>("main", "permissions.list", []));
-      setSafety(await rpc.call<AuthoritySafetyStatus>("main", "permissions.safetyStatus", []));
+      setGrants(await rpc.call("main", mainRpcMethods["permissions.list"], []));
+      setSafety(await rpc.call("main", mainRpcMethods["permissions.safetyStatus"], []));
       setPending(
-        await rpc.call<PendingAuthorityRequest[]>("main", "permissions.listPendingRequests", [])
+        await rpc.call("main", mainRpcMethods["permissions.listPendingRequests"], [])
       );
       setNow(Date.now());
       setStatusMessage("Agent authority settings updated.");
@@ -2063,9 +2064,9 @@ function PermissionsPage() {
       setRevokingId("workspace-authority-lock");
       setError(null);
       try {
-        const next = await rpc.call<AuthoritySafetyStatus>(
+        const next = await rpc.call(
           "main",
-          "permissions.setWorkspaceAuthorityLock",
+          mainRpcMethods["permissions.setWorkspaceAuthorityLock"],
           [{ locked }]
         );
         setSafety(next);
@@ -2097,7 +2098,7 @@ function PermissionsPage() {
     setRevokingId(grant.id);
     setError(null);
     try {
-      await rpc.call("main", "permissions.revoke", [{ kind: grant.kind, id: grant.id }]);
+      await rpc.call("main", mainRpcMethods["permissions.revoke"], [{ kind: grant.kind, id: grant.id }]);
       setGrants((current) => current.filter((item) => item.id !== grant.id));
       setStatusMessage(`Revoked ${grant.capability ?? grant.scopeLabel}.`);
     } catch (err) {

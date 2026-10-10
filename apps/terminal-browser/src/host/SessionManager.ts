@@ -1,5 +1,6 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import {
-  SESSION_METHODS,
+  terminalSessionRpcMethods,
   decodeFrameData,
   encodeInput,
   type TerminalFrame,
@@ -9,7 +10,7 @@ import { VtSession } from "./VtSession.js";
 
 /** Minimal RPC surface the manager needs (injectable for tests). */
 export interface RpcLike {
-  call<T = unknown>(targetId: string, method: string, args: unknown[]): Promise<T>;
+  call: import("@vibestudio/rpc").RpcCaller["call"];
 }
 
 export type SessionStatus = "starting" | "running" | "errored" | "closed";
@@ -109,9 +110,9 @@ export class SessionManager {
     this.emitChange();
 
     try {
-      const entity = await this.opts.rpc.call<{ targetId: string; contextId?: string }>(
+      const entity = await this.opts.rpc.call(
         "main",
-        "runtime.createEntity",
+        mainRpcMethods["runtime.createEntity"],
         [
           {
             kind: "do",
@@ -123,7 +124,7 @@ export class SessionManager {
       );
       record.targetId = entity.targetId;
       this.byTarget.set(entity.targetId, sessionId);
-      await this.opts.rpc.call(entity.targetId, SESSION_METHODS.start, [
+      await this.opts.rpc.call(entity.targetId, terminalSessionRpcMethods.startSession, [
         {
           sessionId,
           hostPrincipalId: this.opts.hostPrincipalId,
@@ -157,7 +158,7 @@ export class SessionManager {
     const record = this.focused();
     if (!record || record.status !== "running") return;
     await this.opts.rpc
-      .call(record.targetId, SESSION_METHODS.onInput, [encodeInput(record.sessionId, bytes)])
+      .call(record.targetId, terminalSessionRpcMethods.onInput, [encodeInput(record.sessionId, bytes)])
       .catch(() => this.markErrored(record.sessionId, "input delivery failed"));
   }
 
@@ -169,7 +170,7 @@ export class SessionManager {
         record.vt.resize(size);
         if (record.status === "running") {
           await this.opts.rpc
-            .call(record.targetId, SESSION_METHODS.onResize, [
+            .call(record.targetId, terminalSessionRpcMethods.onResize, [
               { sessionId: record.sessionId, size },
             ])
             .catch(() => this.markErrored(record.sessionId, "resize delivery failed"));
@@ -186,7 +187,7 @@ export class SessionManager {
       prev.focused = false;
       if (prev.status === "running") {
         void this.opts.rpc
-          .call(prev.targetId, SESSION_METHODS.onBlur, [{ sessionId: prev.sessionId }])
+          .call(prev.targetId, terminalSessionRpcMethods.onBlur, [{ sessionId: prev.sessionId }])
           .catch((error) => console.warn("[terminal-browser] Session blur failed:", error));
       }
     }
@@ -196,11 +197,11 @@ export class SessionManager {
     this.focusedId = sessionId;
     if (next.status === "running") {
       void this.opts.rpc
-        .call(next.targetId, SESSION_METHODS.onFocus, [{ sessionId }])
+        .call(next.targetId, terminalSessionRpcMethods.onFocus, [{ sessionId }])
         .catch((error) => console.warn("[terminal-browser] Session focus failed:", error));
       // Ask the worker to repaint so the freshly-focused viewport is complete.
       void this.opts.rpc
-        .call(next.targetId, SESSION_METHODS.repaint, [{ sessionId }])
+        .call(next.targetId, terminalSessionRpcMethods.repaint, [{ sessionId }])
         .catch((error) => console.warn("[terminal-browser] Session repaint failed:", error));
     }
     this.emitChange();
@@ -220,7 +221,7 @@ export class SessionManager {
     if (!record) return;
     if (record.status === "running") {
       await this.opts.rpc
-        .call(record.targetId, SESSION_METHODS.onClose, [{ sessionId, reason }])
+        .call(record.targetId, terminalSessionRpcMethods.onClose, [{ sessionId, reason }])
         .catch((error) => console.warn("[terminal-browser] Session close delivery failed:", error));
     }
     record.vt.dispose();

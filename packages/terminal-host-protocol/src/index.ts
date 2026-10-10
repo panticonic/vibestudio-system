@@ -1,3 +1,4 @@
+import { createReceiverRpcMethods } from "@vibestudio/shared/rpcMethods";
 /**
  * @workspace/terminal-host-protocol
  *
@@ -120,3 +121,17 @@ export function encodeInput(sessionId: string, bytes: Uint8Array): TerminalInput
 export function decodeInputData(event: Pick<TerminalInputEvent, "data">): Uint8Array {
   return fromBase64(event.data);
 }
+
+/** The terminal session protocol owns the host-to-session callable surface. */
+export interface TerminalSession {
+  startSession(args: StartTerminalSessionArgs): Promise<void>;
+  onInput(event: TerminalInputEvent): Promise<void>;
+  onResize(event: TerminalResizeEvent): Promise<void>;
+  onFocus(event: { sessionId: string }): Promise<void>;
+  onBlur(event: { sessionId: string }): Promise<void>;
+  onClose(event: { sessionId: string; reason?: string }): Promise<void>;
+  repaint(event: { sessionId: string }): Promise<void>;
+}
+export const terminalSessionRpcMethods = createReceiverRpcMethods<TerminalSession>(
+  ["startSession", "onInput", "onResize", "onFocus", "onBlur", "onClose", "repaint"], "terminal",
+);

@@ -3,11 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { DURABLE_OBJECT_FRAMEWORK_RPC_METHODS } from "@vibestudio/durable";
 import { createTestDO } from "@vibestudio/durable/test-utils";
 import { rpcExposedMethodNames } from "@vibestudio/rpc";
+import { wireCallerFor } from "@vibestudio/rpc/internal";
 import { developmentBuiltinMethods } from "@vibestudio/service-schemas/development";
 import { DevelopmentDO } from "./DevelopmentDO.js";
 
+class TestDevelopmentDO extends DevelopmentDO {
+  wireCallerForTest() {
+    return wireCallerFor(this.rpc);
+  }
+}
+
 async function development() {
-  return createTestDO(DevelopmentDO, {
+  return createTestDO(TestDevelopmentDO, {
     WORKER_SOURCE: "vibestudio/internal",
     WORKER_CLASS_NAME: "DevelopmentDO",
     __objectKey: "workspace",
@@ -33,10 +40,7 @@ describe("DevelopmentDO", () => {
       }
       throw new Error(`Unexpected ${method}`);
     });
-    Object.defineProperty(instance, "rpc", {
-      value: { call: rpcCall },
-      configurable: true,
-    });
+    vi.spyOn(instance.wireCallerForTest(), "call").mockImplementation(rpcCall);
 
     const recipes = await callAs(
       { callerId: "panel:development", callerKind: "panel", userId: "alice" },
@@ -55,6 +59,7 @@ describe("DevelopmentDO", () => {
       "main",
       "developmentNative.describeHost",
       [],
+      undefined,
     );
   });
 
@@ -141,10 +146,7 @@ describe("DevelopmentDO", () => {
         throw new Error(`Unexpected ${method}`);
       },
     );
-    Object.defineProperty(instance, "rpc", {
-      value: { call: rpcCall },
-      configurable: true,
-    });
+    vi.spyOn(instance.wireCallerForTest(), "call").mockImplementation(rpcCall);
 
     const opened = await callAs(
       { callerId: "panel:development", callerKind: "panel", userId: "alice" },
@@ -218,6 +220,7 @@ describe("DevelopmentDO", () => {
           checkout: "/checkouts/base",
         }),
       ],
+      undefined,
     );
     expect(rpcCall).toHaveBeenCalledWith(
       "main",
@@ -229,6 +232,7 @@ describe("DevelopmentDO", () => {
           checkout: "/checkouts/base",
         },
       ],
+      undefined,
     );
   });
 });

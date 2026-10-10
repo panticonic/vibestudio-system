@@ -1,3 +1,5 @@
+import { createReceiverRpcMethods } from "@vibestudio/shared/rpcMethods";
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import type {
   RpcClient,
@@ -178,7 +180,7 @@ describe("MobileRpcClient Iroh transport", () => {
     );
     expect(client.selfId).toBe(`shell:${DEVICE_ID}`);
     expect(client.status).toBe("connected");
-    await expect(client.call("main", "demo.hello", ["world"])).resolves.toEqual(
+    await expect(client.call("main", testRpcMethods["demo.hello"], ["world"])).resolves.toEqual(
       { ok: true },
     );
     expect(rpc.call).toHaveBeenCalledWith(
@@ -265,20 +267,20 @@ describe("MobileRpcClient Iroh transport", () => {
 
     await client.connectAndWait();
 
-    await expect(client.call("main", "workspace.getInfo", [])).resolves.toEqual(
+    await expect(client.call("main", mainRpcMethods["workspace.getInfo"], [])).resolves.toEqual(
       {
         workspace: true,
       },
     );
     await expect(
-      client.call("main", "shellApproval.listPending", [], {
+      client.call("main", mainRpcMethods["shellApproval.listPending"], [], {
         destination: { kind: "hub" },
       }),
     ).resolves.toEqual({
       hub: true,
     });
     await expect(
-      client.call("main", "hubControl.lookalikeWorkspaceMethod", []),
+      client.call("main", testRpcMethods["hubControl.lookalikeWorkspaceMethod"], []),
     ).resolves.toEqual({ workspace: true });
     expect(workspaceCall).toHaveBeenCalledWith(
       "main",
@@ -650,17 +652,17 @@ describe("MobileRpcClient session ownership", () => {
         }),
     );
     const client = new MobileRpcClient({ connectWorkspace: factory });
-    const first = client.call("main", "read", []);
+    const first = client.call("main", testRpcMethods.read, []);
     const retired = expect(first).rejects.toThrow("superseded");
     await Promise.resolve();
     await client.close();
-    const second = client.call("main", "read", []);
+    const second = client.call("main", testRpcMethods.read, []);
     await Promise.resolve();
     const abandoned = makeConnection();
     pending[0]!(abandoned);
     await retired;
     expect(abandoned.close).toHaveBeenCalledTimes(1);
-    const third = client.call("main", "read", []);
+    const third = client.call("main", testRpcMethods.read, []);
     expect(factory).toHaveBeenCalledTimes(2);
     pending[1]!(
       makeConnection({
@@ -815,7 +817,7 @@ describe("MobileRpcClient shared initial connection job", () => {
       const first = client.connectAndWait();
       await backoff;
       const second = client.connectAndWait(1);
-      const write = client.call("main", "write", ["value"]);
+      const write = client.call("main", testRpcMethods.write, ["value"]);
       expect(factory).toHaveBeenCalledTimes(1);
       expect(mutation).not.toHaveBeenCalled();
       await jest.advanceTimersByTimeAsync(500);
@@ -884,7 +886,7 @@ describe("MobileRpcClient shared initial connection job", () => {
       client.expose("owned-handler", async () => undefined);
       client.on("owned-event", () => undefined);
       try {
-        const request = client.call("main", "write", []);
+        const request = client.call("main", testRpcMethods.write, []);
         await closeStarted;
         const connected = client.connectAndWait();
         expect(factory).toHaveBeenCalledTimes(1);
@@ -956,7 +958,7 @@ it("makes every reconnect caller await retirement and preserves failed cleanup f
   try {
     await client.connectAndWait();
     client.reconnect();
-    const request = client.call("main", "write", []);
+    const request = client.call("main", testRpcMethods.write, []);
     const rejected = expect(request).rejects.toThrow(
       "resources could not all be closed",
     );
@@ -967,7 +969,7 @@ it("makes every reconnect caller await retirement and preserves failed cleanup f
     expect(factory).toHaveBeenCalledTimes(1);
     failClose(new Error("native cleanup failed"));
     await Promise.all([rejected, connectionRejected]);
-    await expect(client.call("main", "write", [])).rejects.toThrow(
+    await expect(client.call("main", testRpcMethods.write, [])).rejects.toThrow(
       "resources could not all be closed",
     );
     await expect(client.close()).rejects.toThrow(
@@ -985,3 +987,5 @@ it("makes every reconnect caller await retirement and preserves failed cleanup f
     warned.mockRestore();
   }
 });
+
+const testRpcMethods = createReceiverRpcMethods<{ "demo.hello"(name: string): Promise<{ ok: boolean }>; "hubControl.lookalikeWorkspaceMethod"(): Promise<unknown>; read(): Promise<string>; write(value?: string): Promise<string> }>(["demo.hello", "hubControl.lookalikeWorkspaceMethod", "read", "write"]);

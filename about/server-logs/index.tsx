@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 /**
  * Server Logs — a live tail of the workspace server's own host logs.
  *
@@ -62,9 +63,9 @@ interface LogEnvelope {
 interface LogStats {
   bufferSize: number;
   totalCaptured: number;
-  oldestSeq: number;
+  oldestSeq: number | null;
   latestSeq: number;
-  byLevel: Record<Level, number>;
+  byLevel: Partial<Record<Level, number>>;
   byTag: Array<{ tag: string; count: number }>;
 }
 
@@ -415,7 +416,7 @@ function ServerLogsPage() {
         await events.subscribe("server-log:append");
 
         // 2. Seed with the recent buffer.
-        const seed = await rpc.call<LogEnvelope>("main", "serverLog.tail", [500]);
+        const seed = await rpc.call("main", mainRpcMethods["serverLog.tail"], [500]);
         if (cancelled) return;
         bootIdRef.current = seed.serverBootId;
         setMeta(seed);
@@ -423,7 +424,7 @@ function ServerLogsPage() {
         ingest(seed.records, seed.serverBootId, true);
 
         // 3. Close any race gap between the seed snapshot and the live stream.
-        const gap = await rpc.call<LogEnvelope>("main", "serverLog.query", [
+        const gap = await rpc.call("main", mainRpcMethods["serverLog.query"], [
           { sinceSeq: lastSeqRef.current },
         ]);
         if (cancelled) return;
@@ -451,7 +452,7 @@ function ServerLogsPage() {
 
   const loadStats = useCallback(() => {
     rpc
-      .call<LogStats>("main", "serverLog.stats", [])
+      .call("main", mainRpcMethods["serverLog.stats"], [])
       .then((s) => setStats(s))
       .catch(() => {});
   }, []);
@@ -524,7 +525,7 @@ function ServerLogsPage() {
   const searchServer = useCallback(async () => {
     if (!q) return;
     try {
-      const res = await rpc.call<LogEnvelope>("main", "serverLog.query", [
+      const res = await rpc.call("main", mainRpcMethods["serverLog.query"], [
         { contains: search.trim(), level: minLevel, limit: 1000 },
       ]);
       if (res.serverBootId !== bootIdRef.current) {

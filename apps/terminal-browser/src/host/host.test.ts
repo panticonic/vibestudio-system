@@ -1,9 +1,15 @@
+import { RuntimeEntityHandleSchema } from "@vibestudio/service-schemas/runtime";
+import { schemaRpcMock } from "@vibestudio/rpc/test-utils";
 import { describe, it, expect } from "vitest";
 import { VtSession } from "./VtSession.js";
 import { classifyChord, parseNavKey } from "./inputRouter.js";
 import { SessionManager, type RpcLike } from "./SessionManager.js";
 import { registerHostService } from "./HostService.js";
-import { encodeFrame, HOST_METHODS, SESSION_METHODS } from "@workspace/terminal-host-protocol";
+import {
+  encodeFrame,
+  HOST_METHODS,
+  SESSION_METHODS,
+} from "@workspace/terminal-host-protocol";
 import type { RpcClient, RpcRequestContext } from "@vibestudio/rpc";
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
@@ -77,13 +83,32 @@ function fakeRpc(): {
   calls: Array<{ target: string; method: string; args: unknown[] }>;
 } {
   const calls: Array<{ target: string; method: string; args: unknown[] }> = [];
-  const rpc: RpcLike = {
-    async call<T>(target: string, method: string, args: unknown[]): Promise<T> {
+  const rpc: RpcLike = schemaRpcMock({
+    async call(
+      target: string,
+      method: string,
+      args: unknown[],
+    ): Promise<unknown> {
       calls.push({ target, method, args });
-      if (method === "runtime.createEntity") return { targetId: "do:term:1" } as T;
-      return undefined as T;
+      if (method === "runtime.createEntity") {
+        const input = args[0] as {
+          execution: { source: string };
+          contextId?: string;
+        };
+        return RuntimeEntityHandleSchema.parse({
+          id: "do:term:1",
+          targetId: "do:term:1",
+          kind: "do",
+          source: {
+            repoPath: input.execution.source,
+            effectiveVersion: "state:test",
+          },
+          contextId: input.contextId ?? "context:test",
+        });
+      }
+      return undefined;
     },
-  };
+  });
   return { rpc, calls };
 }
 
@@ -92,7 +117,11 @@ describe("SessionManager", () => {
 
   it("spawns a session via createEntity + startSession and focuses it", async () => {
     const { rpc, calls } = fakeRpc();
-    const sm = new SessionManager({ rpc, hostPrincipalId: "app:host", viewport });
+    const sm = new SessionManager({
+      rpc,
+      hostPrincipalId: "app:host",
+      viewport,
+    });
     const record = await sm.open({
       source: "workers/terminal-chat",
       className: "TerminalChatWorker",
@@ -106,13 +135,19 @@ describe("SessionManager", () => {
       className: "TerminalChatWorker",
     });
     expect(calls[1]?.method).toBe(SESSION_METHODS.start);
-    expect((calls[1]?.args[0] as { hostPrincipalId: string }).hostPrincipalId).toBe("app:host");
+    expect(
+      (calls[1]?.args[0] as { hostPrincipalId: string }).hostPrincipalId,
+    ).toBe("app:host");
     expect(sm.focused()?.sessionId).toBe(record.sessionId);
   });
 
   it("writes ordered frames into the session VT and drops stale seq", async () => {
     const { rpc } = fakeRpc();
-    const sm = new SessionManager({ rpc, hostPrincipalId: "app:host", viewport });
+    const sm = new SessionManager({
+      rpc,
+      hostPrincipalId: "app:host",
+      viewport,
+    });
     const r = await sm.open({ source: "s", className: "C", title: "T" });
     await sm.onFrame(encodeFrame(r.sessionId, "stdout", enc("line A\n"), 0));
     await sm.onFrame(encodeFrame(r.sessionId, "stdout", enc("STALE\n"), 0)); // dup seq dropped
@@ -124,16 +159,27 @@ describe("SessionManager", () => {
 
   it("routes input to the focused session", async () => {
     const { rpc, calls } = fakeRpc();
-    const sm = new SessionManager({ rpc, hostPrincipalId: "app:host", viewport });
+    const sm = new SessionManager({
+      rpc,
+      hostPrincipalId: "app:host",
+      viewport,
+    });
     const r = await sm.open({ source: "s", className: "C", title: "T" });
     calls.length = 0;
     await sm.sendInput(enc("x"));
-    expect(calls[0]).toMatchObject({ target: r.targetId, method: SESSION_METHODS.onInput });
+    expect(calls[0]).toMatchObject({
+      target: r.targetId,
+      method: SESSION_METHODS.onInput,
+    });
   });
 
   it("closes a session and clears focus", async () => {
     const { rpc } = fakeRpc();
-    const sm = new SessionManager({ rpc, hostPrincipalId: "app:host", viewport });
+    const sm = new SessionManager({
+      rpc,
+      hostPrincipalId: "app:host",
+      viewport,
+    });
     const r = await sm.open({ source: "s", className: "C", title: "T" });
     await sm.close(r.sessionId);
     expect(sm.list()).toHaveLength(0);
@@ -145,7 +191,8 @@ describe("HostService caller ownership", () => {
   function setup() {
     const handlers = new Map<string, (req: RpcRequestContext) => unknown>();
     const hostRpc = {
-      expose: (m: string, h: (req: RpcRequestContext) => unknown) => handlers.set(m, h),
+      expose: (m: string, h: (req: RpcRequestContext) => unknown) =>
+        handlers.set(m, h),
     } as unknown as RpcClient;
     const { rpc: workerRpc } = fakeRpc(); // createEntity -> targetId "do:term:1"
     const sessions = new SessionManager({
@@ -153,23 +200,34 @@ describe("HostService caller ownership", () => {
       hostPrincipalId: "app:host",
       viewport: { columns: 40, rows: 6 },
     });
-    const rejected: Array<{ method: string; caller: string; session: string }> = [];
+    const rejected: Array<{ method: string; caller: string; session: string }> =
+      [];
     registerHostService(hostRpc, {
       sessions,
       setRealRawMode: () => {},
       isOverlayOpen: () => false,
-      onRejected: (method, caller, session) => rejected.push({ method, caller, session }),
+      onRejected: (method, caller, session) =>
+        rejected.push({ method, caller, session }),
     });
     return { handlers, sessions, rejected, hostRpc };
   }
 
   it("authorizes by strict owner-match and rejects all other callers", async () => {
     const { handlers, sessions, rejected, hostRpc } = setup();
-    const rec = await sessions.open({ source: "s", className: "C", title: "T" });
+    const rec = await sessions.open({
+      source: "s",
+      className: "C",
+      title: "T",
+    });
     expect(sessions.ownerOf(rec.sessionId)).toBe("do:term:1"); // the worker's principal
 
     const onFrame = handlers.get(HOST_METHODS.onFrame)!;
-    const frame = encodeFrame(rec.sessionId, "stdout", new TextEncoder().encode("hi\n"), 0);
+    const frame = encodeFrame(
+      rec.sessionId,
+      "stdout",
+      new TextEncoder().encode("hi\n"),
+      0,
+    );
 
     // An unrelated principal (e.g. a panel) → rejected, nothing applied.
     onFrame({
@@ -181,7 +239,11 @@ describe("HostService caller ownership", () => {
       rpc: hostRpc,
     } as RpcRequestContext);
     expect(rejected).toEqual([
-      { method: HOST_METHODS.onFrame, caller: "panel:evil", session: rec.sessionId },
+      {
+        method: HOST_METHODS.onFrame,
+        caller: "panel:evil",
+        session: rec.sessionId,
+      },
     ]);
 
     // Strict owner → accepted.
@@ -202,20 +264,31 @@ describe("HostService caller ownership", () => {
       rpc: hostRpc,
     } as RpcRequestContext);
     expect(rejected).toEqual([
-      { method: HOST_METHODS.onFrame, caller: "panel:evil", session: rec.sessionId },
+      {
+        method: HOST_METHODS.onFrame,
+        caller: "panel:evil",
+        session: rec.sessionId,
+      },
       { method: HOST_METHODS.onFrame, caller: "main", session: rec.sessionId },
     ]);
 
     // Apply a fresh-seq frame directly (await the async VT write) for the grid assertion.
     await sessions.onFrame(
-      encodeFrame(rec.sessionId, "stdout", new TextEncoder().encode("hi\n"), 10)
+      encodeFrame(
+        rec.sessionId,
+        "stdout",
+        new TextEncoder().encode("hi\n"),
+        10,
+      ),
     );
     expect(rec.vt.grid()[0]).toBe("hi");
   });
 
   it("rejects setRawMode from an unrelated principal", () => {
     const { handlers, rejected, hostRpc } = setup();
-    const setRaw = handlers.get(HOST_METHODS.setRawMode)! as (req: RpcRequestContext) => {
+    const setRaw = handlers.get(HOST_METHODS.setRawMode)! as (
+      req: RpcRequestContext,
+    ) => {
       ok: boolean;
       reason?: string;
     };
@@ -228,6 +301,8 @@ describe("HostService caller ownership", () => {
       rpc: hostRpc,
     } as RpcRequestContext);
     expect(result).toEqual({ ok: false, reason: "not-authorized" });
-    expect(rejected.some((r) => r.method === HOST_METHODS.setRawMode)).toBe(true);
+    expect(rejected.some((r) => r.method === HOST_METHODS.setRawMode)).toBe(
+      true,
+    );
   });
 });

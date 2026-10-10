@@ -1,3 +1,4 @@
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import { Platform } from "react-native";
 import type {
   BrowserImportAcquisitionOption,
@@ -28,7 +29,7 @@ import {
 } from "./mobileBrowserImportNative";
 import { getNativeAppStorage, type NativeAppStorage } from "./nativeAppStorage";
 import { browserVaultNativeMethods } from "@vibestudio/service-schemas/browserVaultNative";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+
 
 type PublicDataType = Extract<BrowserImportDataType, "bookmarks" | "history">;
 type ProviderFrame =
@@ -507,12 +508,7 @@ export class MobileBrowserImportProvider {
   private async runSensitive(operation: SensitiveOperation): Promise<void> {
     let terminal: DurableSensitiveStatus;
     try {
-      const browserVault = createTypedServiceClient(
-        "browserVaultNative",
-        browserVaultNativeMethods,
-        (service, method, args) =>
-          this.rpc.call("main", `${service}.${method}`, args),
-      );
+      const browserVault = createTypedRpcServiceClient(this.rpc, { targetId: "main", namespace: "browserVaultNative" }, browserVaultNativeMethods);
       const parsed = await this.parse(operation.sourceId, ["passwords"]);
       const passwords = parsed.items.passwords;
       let count: SensitiveBrowserImportCount = {

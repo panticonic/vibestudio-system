@@ -1,3 +1,5 @@
+import { schemaRpcMock } from "@vibestudio/rpc/test-utils";
+import type { RpcWireCaller } from "@vibestudio/rpc/internal";
 /**
  * Live native Session / protected ModelPort proof against real local servers and
  * weights. The test host supplies an explicit execution owner; it does not
@@ -137,32 +139,33 @@ async function withLocalAgent(
     const loads: string[] = [];
     const rpcForContext = (
       nativeContext: import("@panticonic/pi-chord").Context,
-    ): RpcCaller => ({
-      async call<T>(...invocation: Parameters<RpcCaller["call"]>) {
-        const [target, method, args, options] = invocation;
-        context.abortSignal?.throwIfAborted();
-        expect(target).toBe("main");
-        expect(method).toBe("extensions.invoke");
-        expect(options?.signal).toBe(nativeContext.abortSignal);
-        const [extension, name, input] = args;
-        if (
-          extension !== "@workspace-extensions/local-models" ||
-          !Array.isArray(input)
-        )
-          throw new Error("Unexpected protected local model invocation");
-        let value: unknown;
-        if (name === "ensureLoaded" && typeof input[0] === "string") {
-          loads.push(input[0]);
-          value = await local.ensureLoaded(input[0]);
-        } else if (name === "getLoopbackAuth")
-          value = await local.getLoopbackAuth();
-        else throw new Error(`Unexpected local model method ${String(name)}`);
-        return value as T;
-      },
-      stream: () => {
-        throw new Error("Local host fixture has no RPC streams");
-      },
-    });
+    ): RpcCaller =>
+      schemaRpcMock({
+        async call(...invocation: Parameters<RpcWireCaller["call"]>) {
+          const [target, method, args, options] = invocation;
+          context.abortSignal?.throwIfAborted();
+          expect(target).toBe("main");
+          expect(method).toBe("extensions.invoke");
+          expect(options?.signal).toBe(nativeContext.abortSignal);
+          const [extension, name, input] = args;
+          if (
+            extension !== "@workspace-extensions/local-models" ||
+            !Array.isArray(input)
+          )
+            throw new Error("Unexpected protected local model invocation");
+          let value: unknown;
+          if (name === "ensureLoaded" && typeof input[0] === "string") {
+            loads.push(input[0]);
+            value = await local.ensureLoaded(input[0]);
+          } else if (name === "getLoopbackAuth")
+            value = await local.getLoopbackAuth();
+          else throw new Error(`Unexpected local model method ${String(name)}`);
+          return value;
+        },
+        stream: () => {
+          throw new Error("Local host fixture has no RPC streams");
+        },
+      });
     const calls: Array<{ a: number; b: number; taskId: number }> = [];
     const addParameters = Type.Object({
       a: Type.Number(),

@@ -223,6 +223,7 @@ vi.mock("./hardware.js", () => ({
       chosenBackend: "cpu",
       chosenGpu: null,
       tier: hardwareMock.tier,
+      probedAt: 1,
       notes: [],
     })),
   })),

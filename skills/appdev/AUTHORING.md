@@ -131,14 +131,15 @@ app resolves the service through the runtime and calls narrow RPC methods:
 
 ```ts
 import { rpc, workers } from "@workspace/runtime";
+import { todoStoreRpcMethods } from "@workspace-workers/todo-store/contract";
 
 const store = await workers.resolveService("example.todos.v1", "project-123");
 if (store.kind !== "durable-object") throw new Error("Expected DO service");
 
-await rpc.call(store.targetId, "upsertTodo", [
+await rpc.call(store.targetId, todoStoreRpcMethods.upsertTodo, [
   { title: "Review mobile pairing" },
 ]);
-const todos = await rpc.call(store.targetId, "listTodos", []);
+const todos = await rpc.call(store.targetId, todoStoreRpcMethods.listTodos, []);
 ```
 
 Select the provider export in `meta/vibestudio.yml`. Service details belong to

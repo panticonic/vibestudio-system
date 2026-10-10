@@ -1,3 +1,4 @@
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import type { RpcClient } from "@vibestudio/rpc";
 import type { ApprovalDecisionId } from "@vibestudio/shared/approvalContract";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
@@ -6,7 +7,7 @@ import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellA
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+
 
 /**
  * Thin wrapper over the existing global shell-approval queue. The terminal
@@ -36,11 +37,7 @@ export interface ApprovalsClient {
 }
 
 export function createApprovalsClient(rpc: RpcClient): ApprovalsClient {
-  const shellApproval = createTypedServiceClient(
-    "shellApproval",
-    shellApprovalMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args)
-  );
+  const shellApproval = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "shellApproval" }, shellApprovalMethods);
   const events = new EventsClient(rpc);
   let changeListeners = 0;
   return {

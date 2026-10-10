@@ -1,3 +1,4 @@
+import { mainRpcMethod } from "@vibestudio/service-schemas/mainRpc";
 import { gatewayMethods } from "@vibestudio/service-schemas/gateway";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 import type { RpcClient } from "@vibestudio/rpc";
@@ -8,7 +9,7 @@ export function createWorkspaceIcons(rpc: Pick<RpcClient, "stream">) {
   const pending = new Map<string, Promise<string>>();
   const cancellation = new AbortController();
   const gateway = createTypedServiceClient("gateway", gatewayMethods, (service, method, args) =>
-    rpc.stream("main", `${service}.${method}`, args, { signal: cancellation.signal })
+    rpc.stream("main", mainRpcMethod(`${service}.${method}`), args, { signal: cancellation.signal })
   );
   return {
     load(source: string, icon: string, version?: string, state?: string): Promise<string> {

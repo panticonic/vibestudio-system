@@ -14,13 +14,29 @@ server directly.
 From agent eval, read the extension's state:
 
 ```ts
+const { localModelsExtensionMethods } =
+  await import("@workspace/model-catalog/localModels");
 const extension = "@workspace-extensions/local-models";
-const [status, models] = await Promise.all([
-  services.extensions.invoke(extension, "status", []),
-  services.extensions.invoke(extension, "listModels", []),
+const [statusValue, modelsValue] = await Promise.all([
+  services.extensions.invoke(
+    extension,
+    localModelsExtensionMethods.status.method,
+    [],
+  ),
+  services.extensions.invoke(
+    extension,
+    localModelsExtensionMethods.listModels.method,
+    [],
+  ),
 ]);
+const status = localModelsExtensionMethods.status.result.parse(statusValue);
+const models = localModelsExtensionMethods.listModels.result.parse(modelsValue);
 return { status, models };
 ```
+
+Extension invocation rejects when the owning operation fails. Successful
+results are decoded with the shared method descriptors above, so malformed
+wire data remains an error instead of being treated as a partial status.
 
 The preferred local model is `local:qwen3.8-27b`, on hardware where
 `listModels` offers it. `status.fallback.modelRef` is a small emergency

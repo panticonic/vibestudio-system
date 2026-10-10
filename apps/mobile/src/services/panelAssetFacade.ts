@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 /**
  * panelAssetFacade — loopback panel-asset HTTP/1.1 server for React Native.
  *
@@ -215,7 +216,7 @@ export async function startPanelAssetFacade(
       // verifies the exact bytes before releasing the shared key claim. A live
       // WebView miss still asks for gzip and remains the owner if it arrived first.
       fetchPath: async (path) => {
-        const result = await transport.streamReadable("main", "gateway.fetch", [
+        const result = await transport.streamReadable("main", mainRpcMethods["gateway.fetch"], [
           { path, method: "GET", headers: {}, gzip: false },
         ]);
         if (result.status !== 200) {
@@ -474,7 +475,7 @@ async function handleRequest(
     bridgeCrossings += 1;
     const result = await transport.streamReadable(
       "main",
-      "gateway.fetch",
+      mainRpcMethods["gateway.fetch"],
       [{ path: gatewayPath, method: "GET", headers: forwardHeaders, gzip: true }],
       { signal: requestAbort.signal },
     );

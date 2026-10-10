@@ -1,3 +1,5 @@
+import { schemaRpcMock } from "@vibestudio/rpc/test-utils";
+import type { RpcWireCaller } from "@vibestudio/rpc/internal";
 import { describe, expect, it } from "vitest";
 import { createModels, createProvider, Type } from "@panticonic/pi-ai";
 import { openAICompletionsApi } from "@panticonic/pi-ai/api/openai-completions.lazy";
@@ -87,8 +89,8 @@ describe("native local provider admission", () => {
         defineExtension({ name: "native-local-regression", tools: [add] }),
       );
       const invoked: string[] = [];
-      const rpc: RpcCaller = {
-        async call<T>(...invocation: Parameters<RpcCaller["call"]>) {
+      const rpc: RpcCaller = schemaRpcMock({
+        async call(...invocation: Parameters<RpcWireCaller["call"]>) {
           const [_target, method, args, options] = invocation;
           options?.signal?.throwIfAborted();
           expect(method).toBe("extensions.invoke");
@@ -104,12 +106,12 @@ describe("native local provider admission", () => {
                   }
                 : undefined;
           if (!value) throw new Error("Unexpected local method");
-          return value as T;
+          return value;
         },
         stream: () => {
           throw new Error("Component has no RPC stream");
         },
-      };
+      });
       let requests = 0;
       const session = await openBoundAgentSession(
         new MemoryStorage(),

@@ -155,7 +155,8 @@ When testing pairing or remote-server state without a shell UI:
    `runtime.supervision.describe` or `logs`; each returned row carries the
    `identity` that `health` and `restart` take.
 4. From app, panel, worker, or eval contexts, use `serverLog.query/tail/stats`
-   (`services.serverLog.*` in eval, raw `rpc.call("main", "serverLog.*", ...)`
-   elsewhere) or the `about/server-logs` viewer for host server logs such as
+   (`services.serverLog.*` in eval, or a descriptor from
+   `@vibestudio/service-schemas/mainRpc` with `rpc.call("main", ...)` elsewhere)
+   or the `about/server-logs` viewer for host server logs such as
    pairing, reconnect, app reconcile, gateway, and shutdown events. See
    `../server-logs/SKILL.md`.

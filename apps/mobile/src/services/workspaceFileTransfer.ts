@@ -1,3 +1,4 @@
+import { mainRpcMethod } from "@vibestudio/service-schemas/mainRpc";
 import { runtimeMethods } from "@vibestudio/service-schemas/runtime";
 import { vcsMethods } from "@vibestudio/service-schemas/vcs";
 import { blobstoreMethods } from "@vibestudio/service-schemas/blobstore";
@@ -12,7 +13,7 @@ async function clientFor(
 ) {
   const { client } = await directory.open(workspaceId);
   const call = (service: string, method: string, args: unknown[]) =>
-    client.transport.call("main", `${service}.${method}`, args);
+    client.transport.call("main", mainRpcMethod(`${service}.${method}`), args);
   return {
     workspaceId,
     runtime: createTypedServiceClient("runtime", runtimeMethods, call),

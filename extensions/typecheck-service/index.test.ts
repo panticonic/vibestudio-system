@@ -1,3 +1,4 @@
+import { schemaRpcMock } from "@vibestudio/rpc/test-utils";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -13,12 +14,17 @@ import {
 import { activate } from "./index.js";
 
 function tempPanel(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibestudio-typecheck-extension-"));
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "vibestudio-typecheck-extension-"),
+  );
   fs.writeFileSync(
     path.join(dir, "package.json"),
-    JSON.stringify({ name: "panel-under-test", version: "0.0.0" })
+    JSON.stringify({ name: "panel-under-test", version: "0.0.0" }),
   );
-  fs.writeFileSync(path.join(dir, "index.tsx"), "const value: number = 'nope';\n");
+  fs.writeFileSync(
+    path.join(dir, "index.tsx"),
+    "const value: number = 'nope';\n",
+  );
   return dir;
 }
 
@@ -30,9 +36,14 @@ async function api(
         contextId?: string;
         chainContextId?: string;
       },
-  contextProjectionsPath = path.join(os.tmpdir(), "vibestudio-context-projections"),
+  contextProjectionsPath = path.join(
+    os.tmpdir(),
+    "vibestudio-context-projections",
+  ),
   workspaceRoot = os.tmpdir(),
-  ensureMaterialized: (scope: string | string[] | "all") => Promise<void> = async () => {}
+  ensureMaterialized: (
+    scope: string | string[] | "all",
+  ) => Promise<void> = async () => {},
 ) {
   const callerInfo = typeof caller === "string" ? { callerId: caller } : caller;
   return activate({
@@ -42,8 +53,8 @@ async function api(
       },
     },
     fs: { ensureMaterialized },
-    rpc: {
-      async call<T>(_target: string, method: string): Promise<T> {
+    rpc: schemaRpcMock({
+      async call(_target: string, method: string): Promise<unknown> {
         expect(method).toBe("build.prepareTypecheck");
         return {
           stateHash: "state:test",
@@ -51,16 +62,18 @@ async function api(
           nodeModulesPaths: [],
           workspacePackages: {},
           moduleConditions: [],
-        } as T;
+        };
       },
-    },
+    }),
     invocation: {
       current: () =>
         callerInfo
           ? {
               caller: {
                 callerId: callerInfo.callerId,
-                ...(callerInfo.contextId ? { contextId: callerInfo.contextId } : {}),
+                ...(callerInfo.contextId
+                  ? { contextId: callerInfo.contextId }
+                  : {}),
               },
               ...(callerInfo.chainContextId
                 ? { chainCaller: { contextId: callerInfo.chainContextId } }
@@ -83,8 +96,14 @@ describe("@workspace-extensions/typecheck-service", () => {
 
     try {
       const result = await service.check(panelPath);
-      expect(result.diagnostics.some((diagnostic) => diagnostic.severity === "error")).toBe(true);
-      expect(result.checkedFiles.some((file) => file.endsWith("index.tsx"))).toBe(true);
+      expect(
+        result.diagnostics.some(
+          (diagnostic) => diagnostic.severity === "error",
+        ),
+      ).toBe(true);
+      expect(
+        result.checkedFiles.some((file) => file.endsWith("index.tsx")),
+      ).toBe(true);
     } finally {
       fs.rmSync(panelPath, { recursive: true, force: true });
     }
@@ -111,7 +130,9 @@ describe("@workspace-extensions/typecheck-service", () => {
     expect(result.FS_TYPE_DEFINITIONS).toBe(FS_TYPE_DEFINITIONS);
     expect(result.PATH_TYPE_DEFINITIONS).toBe(PATH_TYPE_DEFINITIONS);
     expect(result.GLOBAL_TYPE_DEFINITIONS).toBe(GLOBAL_TYPE_DEFINITIONS);
-    expect(result.TS_LIB_FILES["lib.es5.d.ts"]).toBe(TS_LIB_FILES["lib.es5.d.ts"]);
+    expect(result.TS_LIB_FILES["lib.es5.d.ts"]).toBe(
+      TS_LIB_FILES["lib.es5.d.ts"],
+    );
     expect(result.typeDefinitionFiles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -123,29 +144,44 @@ describe("@workspace-extensions/typecheck-service", () => {
         expect.objectContaining({
           filePath: "file:///vibestudio/globals.d.ts",
         }),
-      ])
+      ]),
     );
   });
 
   it("accepts an explicit context matching the authenticated caller", async () => {
     const contextProjectionsPath = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
+      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
-    const panelPath = path.join(contextProjectionsPath, "ctx-1", "panels", "my-app");
+    const panelPath = path.join(
+      contextProjectionsPath,
+      "ctx-1",
+      "panels",
+      "my-app",
+    );
     fs.mkdirSync(panelPath, { recursive: true });
     fs.writeFileSync(
       path.join(panelPath, "package.json"),
-      JSON.stringify({ name: "context-panel", version: "0.0.0" })
+      JSON.stringify({ name: "context-panel", version: "0.0.0" }),
     );
-    fs.writeFileSync(path.join(panelPath, "index.tsx"), "const value: number = 'context-error';\n");
-    const service = await api({ callerId: "panel:test", contextId: "ctx-1" }, contextProjectionsPath);
+    fs.writeFileSync(
+      path.join(panelPath, "index.tsx"),
+      "const value: number = 'context-error';\n",
+    );
+    const service = await api(
+      { callerId: "panel:test", contextId: "ctx-1" },
+      contextProjectionsPath,
+    );
 
     try {
       const result = await service.checkPanel("panels/my-app", {
         contextId: "ctx-1",
       });
       expect(result.errorCount).toBeGreaterThan(0);
-      expect(result.diagnostics.some((diagnostic) => diagnostic.file.includes("ctx-1"))).toBe(true);
+      expect(
+        result.diagnostics.some((diagnostic) =>
+          diagnostic.file.includes("ctx-1"),
+        ),
+      ).toBe(true);
     } finally {
       fs.rmSync(contextProjectionsPath, { recursive: true, force: true });
     }
@@ -156,44 +192,73 @@ describe("@workspace-extensions/typecheck-service", () => {
     const attempts = [
       () => service.checkPanel("panels/test", { contextId: "other" }),
       () => service.check("panels/test", undefined, undefined, "other"),
-      () => service.getTypeInfo("panels/test", "index.ts", 1, 1, undefined, "other"),
-      () => service.getCompletions("panels/test", "index.ts", 1, 1, undefined, "other"),
+      () =>
+        service.getTypeInfo(
+          "panels/test",
+          "index.ts",
+          1,
+          1,
+          undefined,
+          "other",
+        ),
+      () =>
+        service.getCompletions(
+          "panels/test",
+          "index.ts",
+          1,
+          1,
+          undefined,
+          "other",
+        ),
       () => service.getBrowserTypeDefinitions({ contextId: "other" }),
     ];
-    for (const attempt of attempts) await expect(attempt()).rejects.toThrow("scoped to the caller's context");
+    for (const attempt of attempts)
+      await expect(attempt()).rejects.toThrow("scoped to the caller's context");
   });
 
   it("infers checkPanel context from the current extension invocation", async () => {
     const contextProjectionsPath = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
+      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
-    const panelPath = path.join(contextProjectionsPath, "ctx-auto", "panels", "my-app");
+    const panelPath = path.join(
+      contextProjectionsPath,
+      "ctx-auto",
+      "panels",
+      "my-app",
+    );
     fs.mkdirSync(panelPath, { recursive: true });
     fs.writeFileSync(
       path.join(panelPath, "package.json"),
-      JSON.stringify({ name: "context-panel", version: "0.0.0" })
+      JSON.stringify({ name: "context-panel", version: "0.0.0" }),
     );
-    fs.writeFileSync(path.join(panelPath, "index.tsx"), "const value: number = 'context-error';\n");
+    fs.writeFileSync(
+      path.join(panelPath, "index.tsx"),
+      "const value: number = 'context-error';\n",
+    );
     const service = await api(
       { callerId: "worker:agent", chainContextId: "ctx-auto" },
-      contextProjectionsPath
+      contextProjectionsPath,
     );
 
     try {
       const result = await service.checkPanel("panels/my-app");
       expect(result.errorCount).toBeGreaterThan(0);
-      expect(result.diagnostics.some((diagnostic) => diagnostic.file.includes("ctx-auto"))).toBe(
-        true
-      );
+      expect(
+        result.diagnostics.some((diagnostic) =>
+          diagnostic.file.includes("ctx-auto"),
+        ),
+      ).toBe(true);
     } finally {
       fs.rmSync(contextProjectionsPath, { recursive: true, force: true });
     }
   });
 
   it("resolves workspace packages from the context tree", async () => {
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibestudio-typecheck-source-"));
+    const workspaceRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "vibestudio-typecheck-source-"),
+    );
     const contextProjectionsPath = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
+      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
     const contextRoot = path.join(contextProjectionsPath, "ctx-workspace");
     const sourcePackage = path.join(workspaceRoot, "packages", "shared");
@@ -212,7 +277,7 @@ describe("@workspace-extensions/typecheck-service", () => {
     fs.mkdirSync(sourcePackage, { recursive: true });
     fs.writeFileSync(
       path.join(workspaceRoot, "pnpm-workspace.yaml"),
-      "packages:\n  - 'packages/*'\n"
+      "packages:\n  - 'packages/*'\n",
     );
     fs.writeFileSync(path.join(sourcePackage, "package.json"), sharedManifest);
     fs.writeFileSync(path.join(sourcePackage, "index.ts"), sharedSource);
@@ -220,17 +285,28 @@ describe("@workspace-extensions/typecheck-service", () => {
     fs.mkdirSync(contextPackage, { recursive: true });
     fs.writeFileSync(path.join(contextPackage, "package.json"), sharedManifest);
     fs.writeFileSync(path.join(contextPackage, "index.ts"), sharedSource);
-    const admittedDependency = path.join(admittedPackage, "node_modules", "owner-only-types");
+    const admittedDependency = path.join(
+      admittedPackage,
+      "node_modules",
+      "owner-only-types",
+    );
     fs.mkdirSync(admittedDependency, { recursive: true });
-    fs.writeFileSync(path.join(admittedPackage, "package.json"), sharedManifest);
+    fs.writeFileSync(
+      path.join(admittedPackage, "package.json"),
+      sharedManifest,
+    );
     fs.writeFileSync(path.join(admittedPackage, "index.ts"), sharedSource);
     fs.writeFileSync(
       path.join(admittedDependency, "package.json"),
-      JSON.stringify({ name: "owner-only-types", version: "1.0.0", types: "index.d.ts" })
+      JSON.stringify({
+        name: "owner-only-types",
+        version: "1.0.0",
+        types: "index.d.ts",
+      }),
     );
     fs.writeFileSync(
       path.join(admittedDependency, "index.d.ts"),
-      "export declare const ownerValue: number;\n"
+      "export declare const ownerValue: number;\n",
     );
     fs.mkdirSync(panelPath, { recursive: true });
     fs.writeFileSync(
@@ -239,11 +315,11 @@ describe("@workspace-extensions/typecheck-service", () => {
         name: "@workspace-panels/my-app",
         version: "0.0.0",
         dependencies: { "@workspace/shared": "workspace:*" },
-      })
+      }),
     );
     fs.writeFileSync(
       path.join(panelPath, "index.ts"),
-      "import { fromShared } from '@workspace/shared';\nconst value: number = fromShared;\n"
+      "import { fromShared } from '@workspace/shared';\nconst value: number = fromShared;\n",
     );
 
     const service = await activate({
@@ -253,8 +329,8 @@ describe("@workspace-extensions/typecheck-service", () => {
         },
       },
       fs: { ensureMaterialized: async () => {} },
-      rpc: {
-        async call<T>(_target: string, method: string): Promise<T> {
+      rpc: schemaRpcMock({
+        async call(_target: string, method: string): Promise<unknown> {
           expect(method).toBe("build.prepareTypecheck");
           return {
             stateHash: "state:test",
@@ -262,9 +338,9 @@ describe("@workspace-extensions/typecheck-service", () => {
             nodeModulesPaths: [],
             workspacePackages: { "@workspace/shared": admittedPackage },
             moduleConditions: [],
-          } as T;
+          };
         },
-      },
+      }),
       invocation: {
         current: () => ({
           caller: { callerId: "worker:agent" },
@@ -280,14 +356,14 @@ describe("@workspace-extensions/typecheck-service", () => {
         expect.objectContaining({
           code: 2307,
           message: expect.stringContaining("@workspace/shared"),
-        })
+        }),
       );
       expect(result.errorCount).toBe(0);
       expect(result.diagnostics).not.toContainEqual(
         expect.objectContaining({
           code: 2307,
           message: expect.stringContaining("owner-only-types"),
-        })
+        }),
       );
 
       fs.writeFileSync(
@@ -297,10 +373,10 @@ describe("@workspace-extensions/typecheck-service", () => {
           version: "0.0.1",
           exports: { ".": "./index.ts" },
           dependencies: { "owner-only-types": "1.0.0" },
-        })
+        }),
       );
       await expect(service.checkPanel("panels/my-app")).rejects.toThrow(
-        "Admitted package does not match the exact semantic manifest: @workspace/shared"
+        "Admitted package does not match the exact semantic manifest: @workspace/shared",
       );
     } finally {
       fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -309,33 +385,41 @@ describe("@workspace-extensions/typecheck-service", () => {
   });
 
   it("discovers live userland packages without pnpm workspace membership", async () => {
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibestudio-typecheck-source-"));
+    const workspaceRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "vibestudio-typecheck-source-"),
+    );
     const contextProjectionsPath = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
+      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
     const sharedPath = path.join(workspaceRoot, "packages", "shared");
     const panelPath = path.join(workspaceRoot, "panels", "my-app");
     fs.mkdirSync(sharedPath, { recursive: true });
     fs.mkdirSync(panelPath, { recursive: true });
-    fs.writeFileSync(path.join(workspaceRoot, "pnpm-workspace.yaml"), "packages: []\n");
+    fs.writeFileSync(
+      path.join(workspaceRoot, "pnpm-workspace.yaml"),
+      "packages: []\n",
+    );
     fs.writeFileSync(
       path.join(sharedPath, "package.json"),
       JSON.stringify({
         name: "@workspace/shared",
         exports: { ".": "./index.ts" },
-      })
+      }),
     );
-    fs.writeFileSync(path.join(sharedPath, "index.ts"), "export const value = 1;\n");
+    fs.writeFileSync(
+      path.join(sharedPath, "index.ts"),
+      "export const value = 1;\n",
+    );
     fs.writeFileSync(
       path.join(panelPath, "package.json"),
       JSON.stringify({
         name: "@workspace-panels/my-app",
         dependencies: { "@workspace/shared": "workspace:*" },
-      })
+      }),
     );
     fs.writeFileSync(
       path.join(panelPath, "index.ts"),
-      "import { value } from '@workspace/shared';\nconst result: number = value;\n"
+      "import { value } from '@workspace/shared';\nconst result: number = value;\n",
     );
     const service = await api(undefined, contextProjectionsPath, workspaceRoot);
 
@@ -346,7 +430,7 @@ describe("@workspace-extensions/typecheck-service", () => {
         expect.objectContaining({
           code: 2307,
           message: expect.stringContaining("@workspace/shared"),
-        })
+        }),
       );
     } finally {
       fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -355,14 +439,20 @@ describe("@workspace-extensions/typecheck-service", () => {
   });
 
   it("resolves workspace packages from source/state layout without a workspace manifest", async () => {
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibestudio-typecheck-source-"));
+    const workspaceRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "vibestudio-typecheck-source-"),
+    );
     const contextProjectionsPath = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
+      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
     const contextRoot = path.join(contextProjectionsPath, "ctx-source-layout");
     const sourceRuntime = path.join(workspaceRoot, "packages", "runtime");
     const contextRuntime = path.join(contextRoot, "packages", "runtime");
-    const contextOnlyPackage = path.join(contextRoot, "packages", "context-only");
+    const contextOnlyPackage = path.join(
+      contextRoot,
+      "packages",
+      "context-only",
+    );
     const panelPath = path.join(contextRoot, "panels", "my-app");
 
     fs.mkdirSync(sourceRuntime, { recursive: true });
@@ -372,9 +462,12 @@ describe("@workspace-extensions/typecheck-service", () => {
         name: "@workspace/runtime",
         version: "0.0.0",
         exports: { ".": "./index.ts" },
-      })
+      }),
     );
-    fs.writeFileSync(path.join(sourceRuntime, "index.ts"), "export const contextId = 'ctx';\n");
+    fs.writeFileSync(
+      path.join(sourceRuntime, "index.ts"),
+      "export const contextId = 'ctx';\n",
+    );
 
     fs.mkdirSync(contextRuntime, { recursive: true });
     fs.writeFileSync(
@@ -383,9 +476,12 @@ describe("@workspace-extensions/typecheck-service", () => {
         name: "@workspace/runtime",
         version: "0.0.0",
         exports: { ".": "./index.ts" },
-      })
+      }),
     );
-    fs.writeFileSync(path.join(contextRuntime, "index.ts"), "export const contextId = 'ctx';\n");
+    fs.writeFileSync(
+      path.join(contextRuntime, "index.ts"),
+      "export const contextId = 'ctx';\n",
+    );
 
     fs.mkdirSync(contextOnlyPackage, { recursive: true });
     fs.writeFileSync(
@@ -394,9 +490,12 @@ describe("@workspace-extensions/typecheck-service", () => {
         name: "@workspace/context-only",
         version: "0.0.0",
         exports: { ".": "./index.ts" },
-      })
+      }),
     );
-    fs.writeFileSync(path.join(contextOnlyPackage, "index.ts"), "export const helper = 'ok';\n");
+    fs.writeFileSync(
+      path.join(contextOnlyPackage, "index.ts"),
+      "export const helper = 'ok';\n",
+    );
 
     fs.mkdirSync(panelPath, { recursive: true });
     fs.writeFileSync(
@@ -408,11 +507,11 @@ describe("@workspace-extensions/typecheck-service", () => {
           "@workspace/context-only": "workspace:*",
           "@workspace/runtime": "workspace:*",
         },
-      })
+      }),
     );
     fs.writeFileSync(
       path.join(panelPath, "index.ts"),
-      "import { helper } from '@workspace/context-only';\nimport { contextId } from '@workspace/runtime';\nconst value: string = contextId + helper;\n"
+      "import { helper } from '@workspace/context-only';\nimport { contextId } from '@workspace/runtime';\nconst value: string = contextId + helper;\n",
     );
 
     const service = await activate({
@@ -422,8 +521,8 @@ describe("@workspace-extensions/typecheck-service", () => {
         },
       },
       fs: { ensureMaterialized: async () => {} },
-      rpc: {
-        async call<T>(_target: string, method: string): Promise<T> {
+      rpc: schemaRpcMock({
+        async call(_target: string, method: string): Promise<unknown> {
           expect(method).toBe("build.prepareTypecheck");
           return {
             stateHash: "state:test",
@@ -431,9 +530,9 @@ describe("@workspace-extensions/typecheck-service", () => {
             nodeModulesPaths: [],
             workspacePackages: {},
             moduleConditions: [],
-          } as T;
+          };
         },
-      },
+      }),
       invocation: {
         current: () => ({
           caller: { callerId: "worker:agent" },
@@ -449,7 +548,7 @@ describe("@workspace-extensions/typecheck-service", () => {
         expect.objectContaining({
           code: 2307,
           message: expect.stringMatching(/@workspace\/(context-only|runtime)/),
-        })
+        }),
       );
       expect(result.errorCount).toBe(0);
     } finally {
@@ -459,12 +558,19 @@ describe("@workspace-extensions/typecheck-service", () => {
   });
 
   it("does not fall back to a live-source package absent from the semantic context", async () => {
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibestudio-typecheck-source-"));
+    const workspaceRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "vibestudio-typecheck-source-"),
+    );
     const contextProjectionsPath = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
+      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
     const sourcePackage = path.join(workspaceRoot, "packages", "source-only");
-    const panelPath = path.join(contextProjectionsPath, "ctx-exact", "panels", "my-app");
+    const panelPath = path.join(
+      contextProjectionsPath,
+      "ctx-exact",
+      "panels",
+      "my-app",
+    );
 
     fs.mkdirSync(sourcePackage, { recursive: true });
     fs.writeFileSync(
@@ -473,9 +579,12 @@ describe("@workspace-extensions/typecheck-service", () => {
         name: "@workspace/source-only",
         version: "0.0.0",
         exports: { ".": "./index.ts" },
-      })
+      }),
     );
-    fs.writeFileSync(path.join(sourcePackage, "index.ts"), "export const sourceOnly = 1;\n");
+    fs.writeFileSync(
+      path.join(sourcePackage, "index.ts"),
+      "export const sourceOnly = 1;\n",
+    );
     fs.mkdirSync(panelPath, { recursive: true });
     fs.writeFileSync(
       path.join(panelPath, "package.json"),
@@ -483,16 +592,16 @@ describe("@workspace-extensions/typecheck-service", () => {
         name: "@workspace-panels/my-app",
         version: "0.0.0",
         dependencies: { "@workspace/source-only": "workspace:*" },
-      })
+      }),
     );
     fs.writeFileSync(
       path.join(panelPath, "index.ts"),
-      "import { sourceOnly } from '@workspace/source-only';\nconsole.log(sourceOnly);\n"
+      "import { sourceOnly } from '@workspace/source-only';\nconsole.log(sourceOnly);\n",
     );
     const service = await api(
       { callerId: "worker:agent", chainContextId: "ctx-exact" },
       contextProjectionsPath,
-      workspaceRoot
+      workspaceRoot,
     );
 
     try {
@@ -501,7 +610,7 @@ describe("@workspace-extensions/typecheck-service", () => {
         expect.objectContaining({
           code: 2307,
           message: expect.stringContaining("@workspace/source-only"),
-        })
+        }),
       );
     } finally {
       fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -511,7 +620,7 @@ describe("@workspace-extensions/typecheck-service", () => {
 
   it("surfaces exact-context materialization failures", async () => {
     const contextProjectionsPath = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
+      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
     const failure = new Error("semantic projection unavailable");
     const service = await api(
@@ -521,7 +630,7 @@ describe("@workspace-extensions/typecheck-service", () => {
       async (scope) => {
         expect(scope).toBe("all");
         throw failure;
-      }
+      },
     );
 
     try {
@@ -533,20 +642,25 @@ describe("@workspace-extensions/typecheck-service", () => {
 
   it("rejects malformed package metadata in the semantic context", async () => {
     const contextProjectionsPath = fs.mkdtempSync(
-      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-")
+      path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
-    const packagePath = path.join(contextProjectionsPath, "ctx-invalid", "panels", "my-app");
+    const packagePath = path.join(
+      contextProjectionsPath,
+      "ctx-invalid",
+      "panels",
+      "my-app",
+    );
     fs.mkdirSync(packagePath, { recursive: true });
     fs.writeFileSync(path.join(packagePath, "package.json"), "{ not json");
     fs.writeFileSync(path.join(packagePath, "index.ts"), "export {};\n");
     const service = await api(
       { callerId: "worker:agent", chainContextId: "ctx-invalid" },
-      contextProjectionsPath
+      contextProjectionsPath,
     );
 
     try {
       await expect(service.checkPanel("panels/my-app")).rejects.toThrow(
-        /Invalid package metadata in semantic context/
+        /Invalid package metadata in semantic context/,
       );
     } finally {
       fs.rmSync(contextProjectionsPath, { recursive: true, force: true });
@@ -554,7 +668,9 @@ describe("@workspace-extensions/typecheck-service", () => {
   });
 
   it("resolves relative source panel paths without an invocation context", async () => {
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibestudio-typecheck-source-"));
+    const workspaceRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "vibestudio-typecheck-source-"),
+    );
     const runtimePackage = path.join(workspaceRoot, "packages", "runtime");
     const panelPath = path.join(workspaceRoot, "panels", "my-app");
 
@@ -565,9 +681,12 @@ describe("@workspace-extensions/typecheck-service", () => {
         name: "@workspace/runtime",
         version: "0.0.0",
         exports: { ".": "./index.ts" },
-      })
+      }),
     );
-    fs.writeFileSync(path.join(runtimePackage, "index.ts"), "export const contextId = 'source';\n");
+    fs.writeFileSync(
+      path.join(runtimePackage, "index.ts"),
+      "export const contextId = 'source';\n",
+    );
 
     fs.mkdirSync(panelPath, { recursive: true });
     fs.writeFileSync(
@@ -576,17 +695,17 @@ describe("@workspace-extensions/typecheck-service", () => {
         name: "@workspace-panels/my-app",
         version: "0.0.0",
         dependencies: { "@workspace/runtime": "workspace:*" },
-      })
+      }),
     );
     fs.writeFileSync(
       path.join(panelPath, "index.ts"),
-      "import { contextId } from '@workspace/runtime';\nconst value: string = contextId;\n"
+      "import { contextId } from '@workspace/runtime';\nconst value: string = contextId;\n",
     );
 
     const service = await api(
       undefined,
       path.join(workspaceRoot, "state", ".context-projections", "v5"),
-      workspaceRoot
+      workspaceRoot,
     );
 
     try {
@@ -599,7 +718,7 @@ describe("@workspace-extensions/typecheck-service", () => {
 
   it("auto-detects panel source from canonical panel ID", async () => {
     const service = await api(
-      "panel:tree/workspace~extensions~@workspace-extensions~typecheck-service/abc123"
+      "panel:tree/workspace~extensions~@workspace-extensions~typecheck-service/abc123",
     );
 
     const result = await service.checkPanel();

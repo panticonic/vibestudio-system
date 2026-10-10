@@ -33,6 +33,7 @@ import type {
   ServerKind,
   ServerState,
 } from "@workspace/model-catalog/localModels";
+import { localModelsExtensionMethods } from "@workspace/model-catalog/localModels";
 import { createHardwareProfiler } from "./hardware.js";
 import { createEngineInstaller } from "./engine.js";
 import {
@@ -1156,11 +1157,13 @@ export async function activate(ctx: Ctx) {
 
   const api = {
     async status(): Promise<LocalModelsStatus> {
-      return status();
+      return localModelsExtensionMethods.status.result.parse(await status());
     },
 
     async listModels(): Promise<LocalModelEntry[]> {
-      return listModels();
+      return localModelsExtensionMethods.listModels.result.parse(
+        await listModels(),
+      );
     },
 
     async ensureLoaded(modelId: string): Promise<{ baseUrl: string }> {
@@ -1244,7 +1247,9 @@ export async function activate(ctx: Ctx) {
     },
 
     async getHardwareProfile(refresh?: boolean): Promise<HardwareProfile> {
-      return probeHardware(refresh === true);
+      return localModelsExtensionMethods.getHardwareProfile.result.parse(
+        await probeHardware(refresh === true),
+      );
     },
 
     async searchCatalog(query?: string): Promise<CuratedModel[]> {
@@ -1252,12 +1257,17 @@ export async function activate(ctx: Ctx) {
       const tierFiltered = CURATED_CATALOG.filter(
         (model) => !hw || model.quantByTier[hw.tier] !== undefined,
       );
-      if (!query || !query.trim()) return tierFiltered;
+      if (!query || !query.trim())
+        return localModelsExtensionMethods.searchCatalog.result.parse(
+          tierFiltered,
+        );
       const needle = query.trim().toLowerCase();
-      return tierFiltered.filter(
-        (model) =>
-          model.displayName.toLowerCase().includes(needle) ||
-          model.hfRepo.toLowerCase().includes(needle),
+      return localModelsExtensionMethods.searchCatalog.result.parse(
+        tierFiltered.filter(
+          (model) =>
+            model.displayName.toLowerCase().includes(needle) ||
+            model.hfRepo.toLowerCase().includes(needle),
+        ),
       );
     },
 
@@ -1389,7 +1399,9 @@ export async function activate(ctx: Ctx) {
       which: ServerKind,
       lines?: number,
     ): Promise<string[]> {
-      return supervisor.tailLog(which, lines ?? 200);
+      return localModelsExtensionMethods.tailServerLogLines.result.parse(
+        supervisor.tailLog(which, lines ?? 200),
+      );
     },
 
     /** Streaming NDJSON log tail (streamingMethods). */
@@ -1402,7 +1414,7 @@ export async function activate(ctx: Ctx) {
     },
 
     async capabilities(): Promise<LocalModelsCapabilities> {
-      return {
+      return localModelsExtensionMethods.capabilities.result.parse({
         managementPanel: { source: "about/local-models" },
         serverLogs: {
           utility: {
@@ -1414,7 +1426,7 @@ export async function activate(ctx: Ctx) {
             stateArgs: { openLog: "main" },
           },
         },
-      };
+      });
     },
   };
 

@@ -1,3 +1,4 @@
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import React from "react";
 import { render } from "ink";
 import { createRpcClient, type RpcClient } from "@vibestudio/rpc";
@@ -10,7 +11,7 @@ import { createApprovalsClient } from "./approvals/approvalsClient.js";
 import { TerminalBrowser } from "./host/TerminalBrowser.js";
 import type { LogLine } from "./ui/LogsView.js";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 
 function requiredEnv(name: string): string {
@@ -97,11 +98,7 @@ export async function main(): Promise<void> {
   const appId = requiredEnv("VIBESTUDIO_TERMINAL_APP_ID");
   const logSink = createLogSink();
   const { rpc, close } = await connect(appId, logSink);
-  const workspaceClient = createTypedServiceClient(
-    "workspace",
-    workspaceMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args)
-  );
+  const workspaceClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "workspace" }, workspaceMethods);
 
   const workspace = (await workspaceClient.getInfo()) as {
     config?: { id?: string };

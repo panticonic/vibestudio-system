@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { DurableObjectBase, schemaRpc } from "@workspace/runtime/worker/kernel";
 import {
   PhoneDeviceDiscoverySchema,
@@ -24,7 +25,7 @@ export class PhoneProvisioningDO extends DurableObjectBase {
     for (const desktop of desktops) {
       try {
         const local = PhoneProviderSchema.array().parse(
-          await this.rpc.call("main", "phoneNativeEndpoint.providers", [
+          await this.rpc.call("main", mainRpcMethods["phoneNativeEndpoint.providers"], [
             { clientId: desktop.clientId },
           ]),
         );
@@ -64,7 +65,7 @@ export class PhoneProvisioningDO extends DurableObjectBase {
     for (const target of targets) {
       try {
         const local = PhoneDeviceDiscoverySchema.parse(
-          await this.rpc.call("main", "phoneNativeEndpoint.devices", [
+          await this.rpc.call("main", mainRpcMethods["phoneNativeEndpoint.devices"], [
             {
               clientId: target.clientId,
               query: query ? { ...query, providerId: undefined } : undefined,
@@ -97,7 +98,7 @@ export class PhoneProvisioningDO extends DurableObjectBase {
   @schemaRpc()
   async prepare(input: Pick<PhoneProvisionArgs, "providerId" | "platform">) {
     const target = await this.select(input.providerId);
-    return this.rpc.call("main", "phoneNativeEndpoint.prepare", [
+    return this.rpc.call("main", mainRpcMethods["phoneNativeEndpoint.prepare"], [
       {
         clientId: target.clientId,
         input: { platform: input.platform },
@@ -109,14 +110,14 @@ export class PhoneProvisioningDO extends DurableObjectBase {
   async readiness(input: { deviceId: string }) {
     this.requireUser();
     return PhoneWorkspaceReadinessSchema.parse(
-      await this.rpc.call("main", "phoneNativeEndpoint.readiness", [input]),
+      await this.rpc.call("main", mainRpcMethods["phoneNativeEndpoint.readiness"], [input]),
     );
   }
 
   @schemaRpc()
   async provision(input: PhoneProvisionArgs): Promise<Response> {
     const target = await this.select(input.providerId);
-    return this.rpc.stream("main", "phoneNativeEndpoint.provision", [
+    return this.rpc.stream("main", mainRpcMethods["phoneNativeEndpoint.provision"], [
       {
         clientId: target.clientId,
         input: { ...input, providerId: target.clientId },
@@ -126,9 +127,9 @@ export class PhoneProvisioningDO extends DurableObjectBase {
 
   private async desktops(): Promise<PhoneNativeDesktop[]> {
     this.requireUser();
-    return this.rpc.call<PhoneNativeDesktop[]>(
+    return this.rpc.call(
       "main",
-      "phoneNativeEndpoint.desktops",
+      mainRpcMethods["phoneNativeEndpoint.desktops"],
       [],
     );
   }

@@ -499,6 +499,8 @@
     }
   },
   "dependencies": {
+    "@workspace-workers/quickfire-service": "workspace:*",
+    "@workspace-workers/pubsub-channel": "workspace:*",
     "@workspace/workspace-transfer": "workspace:*",
     "@vibestudio/browser-data": "workspace:*",
     "@vibestudio/browser-import-archive": "workspace:*",

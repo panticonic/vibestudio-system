@@ -1,3 +1,4 @@
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 /**
  * Mobile RPC client for React Native — Iroh transport.
  *
@@ -20,7 +21,7 @@ import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
 import { Platform } from "react-native";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { authMethods } from "@vibestudio/service-schemas/auth";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+
 import {
   loadShellCredential,
   MobileConnectionAggregateError,
@@ -232,19 +233,19 @@ export class MobileRpcClient implements Pick<
     };
   }
 
-  async call<T = unknown>(
+  async call<Args extends unknown[], Result>(
     targetId: string,
-    method: string,
-    args: unknown[],
+    method: import("@vibestudio/rpc").RpcMethod<Args, Result>,
+    args: NoInfer<Args>,
     options?: RpcCallOptions,
-  ): Promise<T> {
+  ): Promise<Result> {
     const workspaceRpc = await this.ensureRpc();
     const hub = options?.destination?.kind === "hub";
     const selected = hub ? this.controlRpc : workspaceRpc;
     if (!selected)
       throw new Error("Stable hub control connection not established");
     const selectedOptions = optionsForSelectedPipe(options, hub);
-    return selected.call<T>(targetId, method, args, selectedOptions);
+    return selected.call(targetId, method, args, selectedOptions);
   }
 
   expose<TArgs extends unknown[], TReturn>(
@@ -264,10 +265,10 @@ export class MobileRpcClient implements Pick<
     });
   }
 
-  async stream(
+  async stream<Args extends unknown[], Result>(
     targetId: string,
-    method: string,
-    args: unknown[],
+    method: import("@vibestudio/rpc").RpcMethod<Args, Result>,
+    args: NoInfer<Args>,
     options?: RpcStreamOptions,
   ): Promise<Response> {
     const workspaceRpc = await this.ensureRpc();
@@ -289,10 +290,10 @@ export class MobileRpcClient implements Pick<
    * panel-asset façade (B2) reads panel bundles through this. `options.body`
    * streams a request body on the same request-owned QUIC stream.
    */
-  async streamReadable(
+  async streamReadable<Args extends unknown[], Result>(
     targetId: string,
-    method: string,
-    args: unknown[],
+    method: import("@vibestudio/rpc").RpcMethod<Args, Result>,
+    args: NoInfer<Args>,
     options?: RpcStreamOptions,
   ): ReturnType<RpcClient["streamReadable"]> {
     const workspaceRpc = await this.ensureRpc();
@@ -325,11 +326,7 @@ export class MobileRpcClient implements Pick<
     const rpc = await this.ensureRpc();
     const connection = this.connection;
     if (!connection) throw new Error("Iroh connection not established");
-    const authClient = createTypedServiceClient(
-      "auth",
-      authMethods,
-      (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-    );
+    const authClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "auth" }, authMethods);
     const session = connection.transport.openSession({
       // Reuse the lease's connectionId and grant for the runtime ENTITY id (not
       // the slot id) so the server's authorizePanelConnection(callerId,

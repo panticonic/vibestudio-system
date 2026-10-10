@@ -1,9 +1,10 @@
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import { createRpcClient, type RpcClient } from "@vibestudio/rpc";
 import { NodeWsLike } from "@vibestudio/rpc/transports/nodeWsLike";
 import { createServerWsTransport } from "@vibestudio/shell-core/transport/serverWsTransport";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
 import { runtimeMethods } from "@vibestudio/service-schemas/runtime";
-import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import WebSocket from "ws";
 
@@ -67,16 +68,8 @@ export async function main(): Promise<void> {
   if (command !== "status") throw new Error(`Unknown remote-cli command: ${command}`);
 
   const { rpc, close } = await connect();
-  const workspaceClient = createTypedServiceClient(
-    "workspace",
-    workspaceMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args)
-  );
-  const runtimeClient = createTypedServiceClient(
-    "runtime",
-    runtimeMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args)
-  );
+  const workspaceClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "workspace" }, workspaceMethods);
+  const runtimeClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "runtime" }, runtimeMethods);
   printBootstrapSummary();
   const workspace = await workspaceClient.getInfo();
   console.log(`Connected as ${requiredEnv("VIBESTUDIO_TERMINAL_APP_ID")}`);

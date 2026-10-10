@@ -1,3 +1,6 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
+import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
+import { mobileNativeMethods } from "@vibestudio/service-schemas/mobileNative";
 import type { ExtensionContext } from "@vibestudio/extension";
 
 export type Api = Awaited<ReturnType<typeof activate>>;
@@ -9,58 +12,55 @@ declare module "@vibestudio/extension" {
 
 /** Userland presentation for the installed host's native mobile executor. */
 export async function activate(ctx: ExtensionContext) {
-  const call = <T>(method: string, ...args: unknown[]) =>
-    ctx.rpc.call<T>("main", `mobileNative.${method}`, ...args);
-  const stream = (method: string, arg: unknown) =>
-    ctx.rpc.stream("main", `mobileNative.${method}`, [arg]);
+  const native = createTypedRpcServiceClient(ctx.rpc, { targetId: "main", namespace: "mobileNative" }, mobileNativeMethods);
   ctx.health.healthy({
     summary: "Host mobile executor available through reviewed RPC",
   });
 
   return {
-    doctor: () => call("doctor"),
-    listDevices: () => call("listDevices"),
-    listIosSimulators: () => call("listIosSimulators"),
+    doctor: () => native.doctor(),
+    listDevices: () => native.listDevices(),
+    listIosSimulators: () => native.listIosSimulators(),
     buildAndroid: (input?: { device?: string; architectures?: string[] }) =>
-      call("buildAndroid", input),
+      native.buildAndroid(input),
     installAndroid: (input?: {
       device?: string;
       resetApp?: boolean;
       launch?: boolean;
-    }) => call("installAndroid", input),
+    }) => native.installAndroid(input),
     installIos: (input?: {
       device?: string;
       simulator?: boolean;
       configuration?: "Debug" | "Release" | "Internal";
       launch?: boolean;
-    }) => call("installIos", input),
+    }) => native.installIos(input),
     launchAndroid: (input?: { device?: string; packageName?: string }) =>
-      call("launchAndroid", input),
+      native.launchAndroid(input),
     launchIos: (input?: { device?: string; bundleId?: string }) =>
-      call("launchIos", input),
+      native.launchIos(input),
     clearAndroidApp: (input?: { device?: string; packageName?: string }) =>
-      call("clearAndroidApp", input),
+      native.clearAndroidApp(input),
     adbReverse: (input: { device?: string; ports: Array<[number, number]> }) =>
-      call("adbReverse", input),
-    screenshot: (input?: { device?: string }) => call("screenshot", input),
+      native.adbReverse(input),
+    screenshot: (input?: { device?: string }) => native.screenshot(input),
     screenshotIos: (input?: { device?: string }) =>
-      call("screenshotIos", input),
+      native.screenshotIos(input),
     verify: (input?: { device?: string; packageName?: string }) =>
-      call("verify", input),
+      native.verify(input),
     verifyWorkspaceReady: (input?: {
       device?: string;
       packageName?: string;
       sinceMs?: number;
       timeoutMs?: number;
-    }) => call("verifyWorkspaceReady", input),
+    }) => native.verifyWorkspaceReady(input),
     logcat: (input?: {
       device?: string;
       packageName?: string;
       filter?: string;
-    }) => stream("logcat", input),
+    }) => ctx.rpc.stream("main", mainRpcMethods["mobileNative.logcat"], [input]),
     logsIos: (input?: { device?: string; predicate?: string }) =>
-      stream("logsIos", input),
+      ctx.rpc.stream("main", mainRpcMethods["mobileNative.logsIos"], [input]),
     shell: (input: { device?: string; command: string; args?: string[] }) =>
-      stream("shell", input),
+      ctx.rpc.stream("main", mainRpcMethods["mobileNative.shell"], [input]),
   };
 }

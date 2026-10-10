@@ -1,3 +1,4 @@
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 /**
  * About Page - Shell panel showing application information.
  */
@@ -47,7 +48,7 @@ function AboutPage() {
     setLoading(true);
     setInfoError(null);
     rpc
-      .call<AppInfo>("main", "app.getInfo", [])
+      .call("main", mainRpcMethods["app.getInfo"], [])
       .then(setAppInfo)
       .catch((err) => setInfoError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false));

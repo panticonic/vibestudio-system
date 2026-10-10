@@ -1,3 +1,4 @@
+import { schemaRpcMock } from "@vibestudio/rpc/test-utils";
 import { MobileAccountProfileClient } from "./accountProfileClient";
 
 const profile = {
@@ -9,7 +10,7 @@ const profile = {
 };
 
 function createClient() {
-  const transport = { call: jest.fn<Promise<unknown>, [string, string, unknown[]]>() };
+  const transport = schemaRpcMock({ call: jest.fn<Promise<unknown>, [string, string, unknown[]]>() });
   return { transport, client: new MobileAccountProfileClient(transport) };
 }
 
