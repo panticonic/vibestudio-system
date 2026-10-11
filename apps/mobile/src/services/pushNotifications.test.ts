@@ -5,6 +5,8 @@ const scope = {
   workspaceId: "project",
 };
 const notificationKey = (id: string) => workspaceNotificationKey(scope, id);
+const callsForMethod = (transport: { call: jest.Mock }, name: string) =>
+  transport.call.mock.calls.filter(([, method]) => method?.name === name);
 import { AppState, NativeModules } from "react-native";
 import { waitFor } from "@testing-library/react-native";
 import {
@@ -21,6 +23,7 @@ import {
   SYNCING_NOTIFICATION_BODY,
 } from "./backgroundActionQueue";
 import { setApprovedAppCapabilities } from "./appCapabilities";
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 
 type RecoveryKind = "resubscribe" | "cold-recover";
 
@@ -125,8 +128,12 @@ function createShellClient(
   const transport = {
     status,
     call: jest.fn(
-      async (_target: string, method: string, _args: unknown[] = []) => {
-        if (method === "shellApproval.listPending") {
+      async (
+        _target: string,
+        method: { name: string },
+        _args: unknown[] = [],
+      ) => {
+        if (method.name === "shellApproval.listPending") {
           return [{ approvalId: "approval-1" }];
         }
         return undefined;
@@ -142,18 +149,21 @@ function createShellClient(
     transport,
     shellApproval: {
       listPending: jest.fn(() =>
-        transport.call("main", "shellApproval.listPending", []),
+        transport.call("main", mainRpcMethods["shellApproval.listPending"], []),
       ),
       resolve: jest.fn((approvalId: string, decision: string) =>
-        transport.call("main", "shellApproval.resolve", [approvalId, decision]),
+        transport.call("main", mainRpcMethods["shellApproval.resolve"], [
+          approvalId,
+          decision,
+        ]),
       ),
     },
     push: {
       register: jest.fn((request: unknown) =>
-        transport.call("main", "push.register", [request]),
+        transport.call("main", mainRpcMethods["push.register"], [request]),
       ),
       unregister: jest.fn((clientId: string) =>
-        transport.call("main", "push.unregister", [clientId]),
+        transport.call("main", mainRpcMethods["push.unregister"], [clientId]),
       ),
     },
   };
@@ -192,10 +202,8 @@ describe("pushNotifications", () => {
 
     expect(cleanup).toEqual(expect.any(Function));
     expect(mockMessagingFactory).not.toHaveBeenCalled();
-    expect(shellClient.transport.call).not.toHaveBeenCalledWith(
-      "main",
-      "push.register",
-      expect.any(Array),
+    expect(callsForMethod(shellClient.transport, "push.register")).toHaveLength(
+      0,
     );
   });
 
@@ -206,26 +214,24 @@ describe("pushNotifications", () => {
     mockListeners.tokenRefresh?.("token-2");
     await Promise.resolve();
 
-    expect(shellClient.transport.call).toHaveBeenCalledWith(
-      "main",
-      "push.register",
+    expect(
+      callsForMethod(shellClient.transport, "push.register").map(
+        (call) => call[2],
+      ),
+    ).toEqual([
       [
         expect.objectContaining({
           token: "token-1",
           platform: expect.stringMatching(/^(android|ios)$/),
         }),
       ],
-    );
-    expect(shellClient.transport.call).toHaveBeenCalledWith(
-      "main",
-      "push.register",
       [
         expect.objectContaining({
           token: "token-2",
           platform: expect.stringMatching(/^(android|ios)$/),
         }),
       ],
-    );
+    ]);
   });
 
   it("resolves foreground deny actions immediately and cancels notification", async () => {
@@ -243,11 +249,14 @@ describe("pushNotifications", () => {
       },
     });
 
-    expect(shellClient.transport.call).toHaveBeenCalledWith(
-      "main",
-      "shellApproval.resolve",
-      ["approval-1", "deny"],
-    );
+    expect(
+      callsForMethod(shellClient.transport, "shellApproval.resolve").some(
+        (call) =>
+          call[0] === "main" &&
+          call[2]?.[0] === "approval-1" &&
+          call[2]?.[1] === "deny",
+      ),
+    ).toBe(true);
     expect(mockNotifee.cancelNotification).toHaveBeenCalledWith(
       notificationKey("approval-1"),
     );
@@ -468,11 +477,14 @@ describe("pushNotifications", () => {
       mockListeners.recovery.get(kind)?.();
 
       await waitFor(() =>
-        expect(shellClient.transport.call).toHaveBeenCalledWith(
-          "main",
-          "shellApproval.resolve",
-          ["approval-1", "session"],
-        ),
+        expect(
+          callsForMethod(shellClient.transport, "shellApproval.resolve").some(
+            (call) =>
+              call[0] === "main" &&
+              call[2]?.[0] === "approval-1" &&
+              call[2]?.[1] === "session",
+          ),
+        ).toBe(true),
       );
       expect(mockNotifee.cancelNotification).toHaveBeenCalledWith(
         notificationKey("approval-1"),

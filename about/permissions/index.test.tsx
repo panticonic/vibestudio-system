@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { Theme } from "@radix-ui/themes";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import AboutPanelRoot from "./index";
 
 const mocks = vi.hoisted(() => ({
@@ -19,14 +27,24 @@ vi.mock("@workspace/runtime", () => ({
 // tooltip/portal providers this screen relies on. The mock keeps that and drops
 // only the panel-runtime theme plumbing.
 vi.mock("@workspace/about-shared/ui", () => ({
-  AboutThemeRoot: ({ children }: { children: ReactNode }) => <Theme>{children}</Theme>,
-  AboutPage: ({ children, actions }: { children: ReactNode; actions?: ReactNode }) => (
+  AboutThemeRoot: ({ children }: { children: ReactNode }) => (
+    <Theme>{children}</Theme>
+  ),
+  AboutPage: ({
+    children,
+    actions,
+  }: {
+    children: ReactNode;
+    actions?: ReactNode;
+  }) => (
     <main>
       {actions}
       {children}
     </main>
   ),
-  Section: ({ children }: { children: ReactNode }) => <section>{children}</section>,
+  Section: ({ children }: { children: ReactNode }) => (
+    <section>{children}</section>
+  ),
 }));
 
 let focus: () => void;
@@ -90,31 +108,33 @@ type Responses = {
 };
 
 function stubResponses(responses: Responses = {}) {
-  mocks.call.mockReset().mockImplementation((target: string, method: string) => {
-    if (blockRefresh && target === "main") return new Promise(() => {});
-    switch (method) {
-      case "permissions.list":
-        return Promise.resolve(responses.grants ?? []);
-      case "permissions.listAgentProfiles":
-        return Promise.resolve(responses.profiles ?? []);
-      case "permissions.listPendingRequests":
-        return Promise.resolve(responses.pending ?? []);
-      case "build.listUnits":
-        return Promise.resolve(responses.units ?? []);
-      case "governance.list":
-        return Promise.resolve(responses.governance ?? []);
-      case "permissions.safetyStatus":
-        return Promise.resolve(
-          responses.safety ?? {
-            workspaceLocked: false,
-            activeAgentCount: 0,
-            pendingAcquisitionCount: 0,
-          }
-        );
-      default:
-        return Promise.resolve([]);
-    }
-  });
+  mocks.call
+    .mockReset()
+    .mockImplementation((target: string, method: { name: string }) => {
+      if (blockRefresh && target === "main") return new Promise(() => {});
+      switch (method.name) {
+        case "permissions.list":
+          return Promise.resolve(responses.grants ?? []);
+        case "permissions.listAgentProfiles":
+          return Promise.resolve(responses.profiles ?? []);
+        case "permissions.listPendingRequests":
+          return Promise.resolve(responses.pending ?? []);
+        case "build.listUnits":
+          return Promise.resolve(responses.units ?? []);
+        case "governance.list":
+          return Promise.resolve(responses.governance ?? []);
+        case "permissions.safetyStatus":
+          return Promise.resolve(
+            responses.safety ?? {
+              workspaceLocked: false,
+              activeAgentCount: 0,
+              pendingAcquisitionCount: 0,
+            },
+          );
+        default:
+          return Promise.resolve([]);
+      }
+    });
 }
 
 describe("Permissions", () => {
@@ -132,7 +152,9 @@ describe("Permissions", () => {
 
     expect(screen.getByLabelText("Loading permissions")).toBeTruthy();
     expect(await screen.findByLabelText("Permission view")).toBeTruthy();
-    await waitFor(() => expect(screen.queryByLabelText("Loading permissions")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Loading permissions")).toBeNull(),
+    );
 
     blockRefresh = true;
     act(() => focus());
@@ -156,7 +178,9 @@ describe("Permissions", () => {
     expect(await screen.findByText("Agent authority is locked")).toBeTruthy();
     expect(screen.getByText("Locked by You")).toBeTruthy();
     expect(screen.getByText("2 hours ago")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Unlock agent authority/ })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Unlock agent authority/ }),
+    ).toBeTruthy();
   });
 
   it("shows what the waiting count counts", async () => {
@@ -195,9 +219,11 @@ describe("Permissions", () => {
     expect(row).toBeTruthy();
     expect(screen.queryByText(/You chose lasting access/)).toBeNull();
 
-    const disclosure = [...container.querySelectorAll("button[aria-expanded]")].find((button) =>
-      button.textContent?.includes("Open a website")
-    ) as HTMLButtonElement | undefined;
+    const disclosure = [
+      ...container.querySelectorAll("button[aria-expanded]"),
+    ].find((button) => button.textContent?.includes("Open a website")) as
+      | HTMLButtonElement
+      | undefined;
     expect(disclosure?.getAttribute("aria-expanded")).toBe("false");
     await act(async () => {
       fireEvent.click(disclosure as HTMLButtonElement);
@@ -214,7 +240,11 @@ describe("Permissions", () => {
       grants: [
         savedGrant(),
         savedGrant({ id: "grant-2", capability: "Send a message" }),
-        savedGrant({ id: "grant-3", callerLabel: "about/mail", capability: "Read your files" }),
+        savedGrant({
+          id: "grant-3",
+          callerLabel: "about/mail",
+          capability: "Read your files",
+        }),
       ],
     });
     render(<AboutPanelRoot />);
@@ -231,18 +261,24 @@ describe("Permissions", () => {
     stubResponses({
       grants: [
         savedGrant(),
-        savedGrant({ id: "grant-3", callerLabel: "about/mail", capability: "Read your files" }),
+        savedGrant({
+          id: "grant-3",
+          callerLabel: "about/mail",
+          capability: "Read your files",
+        }),
       ],
     });
     render(<AboutPanelRoot />);
     await screen.findByLabelText("Permission view");
     await selectTab(/Saved/);
 
-    const filter = (await screen.findByLabelText("Filter permissions")) as HTMLInputElement;
+    const filter = (await screen.findByLabelText(
+      "Filter permissions",
+    )) as HTMLInputElement;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(
         window.HTMLInputElement.prototype,
-        "value"
+        "value",
       )?.set;
       setter?.call(filter, "mail");
       filter.dispatchEvent(new Event("input", { bubbles: true }));
@@ -299,15 +335,23 @@ describe("Permissions", () => {
 
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Revoke this permission?")).toBeTruthy();
-    expect(within(dialog).getByText("The next matching action asks again.")).toBeTruthy();
+    expect(
+      within(dialog).getByText("The next matching action asks again."),
+    ).toBeTruthy();
     // Nothing has been revoked yet: the confirmation is the action.
-    expect(mocks.call).not.toHaveBeenCalledWith("main", "permissions.revoke", expect.anything());
+    expect(mocks.call).not.toHaveBeenCalledWith(
+      "main",
+      mainRpcMethods["permissions.revoke"],
+      expect.anything(),
+    );
 
     act(() => within(dialog).getByRole("button", { name: "Revoke" }).click());
     await waitFor(() =>
-      expect(mocks.call).toHaveBeenCalledWith("main", "permissions.revoke", [
-        { kind: "capability", id: "grant-1" },
-      ])
+      expect(mocks.call).toHaveBeenCalledWith(
+        "main",
+        mainRpcMethods["permissions.revoke"],
+        [{ kind: "capability", id: "grant-1" }],
+      ),
     );
   });
 
@@ -315,6 +359,10 @@ describe("Permissions", () => {
     render(<AboutPanelRoot />);
     await screen.findByLabelText("Permission view");
 
-    expect(mocks.call).toHaveBeenCalledWith("main", "governance.list", [{ limit: 200 }]);
+    expect(mocks.call).toHaveBeenCalledWith(
+      "main",
+      mainRpcMethods["governance.list"],
+      [{ limit: 200 }],
+    );
   });
 });

@@ -90,15 +90,25 @@ const entries = [
     pendingApprovalCount: 0,
   },
 ];
+function workspace(privateRole: "personal" | "system") {
+  const entry = entries.find(
+    (candidate) => candidate.privateRole === privateRole,
+  );
+  if (!entry) throw new Error(`Missing ${privateRole} workspace fixture`);
+  return structuredClone(entry);
+}
 function fixture() {
   const account = {
     control: {
       rpc: {
-        call: jest.fn(async (_target, method) => {
-          if (method === "hubControl.ensureUserWorkspaces")
-            return { personal: entries[1], system: entries[0] };
-          if (method === "shellApproval.listPending") return [];
-          return entries;
+        call: jest.fn(async (_target, method: { name: string }) => {
+          if (method.name === "hubControl.ensureUserWorkspaces")
+            return {
+              personal: workspace("personal"),
+              system: workspace("system"),
+            };
+          if (method.name === "shellApproval.listPending") return [];
+          return structuredClone(entries);
         }),
       },
     },
@@ -202,10 +212,13 @@ describe("mobile workspace directory", () => {
     };
     (account.control.rpc.call as jest.Mock).mockImplementation(
       async (_target, method) => {
-        if (method === "hubControl.ensureUserWorkspaces")
-          return { personal: entries[1], system: entries[0] };
-        if (method === "shellApproval.listPending") return [request];
-        return entries;
+        if (method.name === "hubControl.ensureUserWorkspaces")
+          return {
+            personal: workspace("personal"),
+            system: workspace("system"),
+          };
+        if (method.name === "shellApproval.listPending") return [request];
+        return structuredClone(entries);
       },
     );
 

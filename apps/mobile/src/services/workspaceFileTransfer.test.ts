@@ -52,12 +52,12 @@ function fixture(privateTarget = false) {
       client: {
         panels,
         transport: {
-          call: async (_target: string, method: string) => {
-            calls.push(`${workspaceId}:${method}`);
-            if (method === "vcs.mainState")
+          call: async (_target: string, method: { name: string }) => {
+            calls.push(`${workspaceId}:${method.name}`);
+            if (method.name === "vcs.mainState")
               return { kind: "event", eventId: "target-main" };
-            if (method === "vcs.resolveRepository") return null;
-            if (method === "vcs.status")
+            if (method.name === "vcs.resolveRepository") return null;
+            if (method.name === "vcs.status")
               return {
                 contextId: "review-fresh-id",
                 committed: { kind: "event", eventId: "target-main" },
@@ -67,8 +67,8 @@ function fixture(privateTarget = false) {
                 clean: true,
                 workingCounts: { applications: 0, workUnits: 0, changes: 0 },
               };
-            if (method === "runtime.createContext") return createContext();
-            throw new Error(`Unexpected ${method}`);
+            if (method.name === "runtime.createContext") return createContext();
+            throw new Error(`Unexpected ${method.name}`);
           },
         },
       },

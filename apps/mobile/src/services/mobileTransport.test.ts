@@ -163,8 +163,16 @@ describe("MobileRpcClient Iroh transport", () => {
   });
 
   it("loads the stored Iroh credential, reconnects, and delegates RPC calls", async () => {
+    const call = jest.fn(
+      async (
+        _target: string,
+        _method: { name: string },
+        _args: unknown[],
+        _options?: unknown,
+      ) => ({ ok: true }),
+    );
     const rpc = makeRpc({
-      call: jest.fn(async () => ({ ok: true })),
+      call,
     });
     const connection = makeConnection({ rpc });
     mockReconnectMobileSession.mockResolvedValue(connection);
@@ -180,15 +188,20 @@ describe("MobileRpcClient Iroh transport", () => {
     );
     expect(client.selfId).toBe(`shell:${DEVICE_ID}`);
     expect(client.status).toBe("connected");
-    await expect(client.call("main", testRpcMethods["demo.hello"], ["world"])).resolves.toEqual(
-      { ok: true },
-    );
-    expect(rpc.call).toHaveBeenCalledWith(
-      "main",
-      "demo.hello",
-      ["world"],
-      undefined,
-    );
+    await expect(
+      client.call("main", testRpcMethods["demo.hello"], ["world"]),
+    ).resolves.toEqual({
+      ok: true,
+    });
+    expect(
+      call.mock.calls.some(
+        ([target, method, args, options]) =>
+          target === "main" &&
+          method?.name === "demo.hello" &&
+          args[0] === "world" &&
+          options === undefined,
+      ),
+    ).toBe(true);
   });
 
   it("exposes shell presentation handlers before connect and reattaches them after reconnect", async () => {
@@ -255,8 +268,22 @@ describe("MobileRpcClient Iroh transport", () => {
   });
 
   it("routes only typed hub destinations over the retained stable hub pipe", async () => {
-    const workspaceCall = jest.fn(async () => ({ workspace: true }));
-    const hubCall = jest.fn(async () => ({ hub: true }));
+    const workspaceCall = jest.fn(
+      async (
+        _target: string,
+        _method: { name: string },
+        _args: unknown[],
+        _options?: unknown,
+      ) => ({ workspace: true }),
+    );
+    const hubCall = jest.fn(
+      async (
+        _target: string,
+        _method: { name: string },
+        _args: unknown[],
+        _options?: unknown,
+      ) => ({ hub: true }),
+    );
     mockReconnectMobileSession.mockResolvedValue(
       makeConnection({
         rpc: makeRpc({ call: workspaceCall }),
@@ -267,11 +294,11 @@ describe("MobileRpcClient Iroh transport", () => {
 
     await client.connectAndWait();
 
-    await expect(client.call("main", mainRpcMethods["workspace.getInfo"], [])).resolves.toEqual(
-      {
-        workspace: true,
-      },
-    );
+    await expect(
+      client.call("main", mainRpcMethods["workspace.getInfo"], []),
+    ).resolves.toEqual({
+      workspace: true,
+    });
     await expect(
       client.call("main", mainRpcMethods["shellApproval.listPending"], [], {
         destination: { kind: "hub" },
@@ -280,20 +307,30 @@ describe("MobileRpcClient Iroh transport", () => {
       hub: true,
     });
     await expect(
-      client.call("main", testRpcMethods["hubControl.lookalikeWorkspaceMethod"], []),
+      client.call(
+        "main",
+        testRpcMethods["hubControl.lookalikeWorkspaceMethod"],
+        [],
+      ),
     ).resolves.toEqual({ workspace: true });
-    expect(workspaceCall).toHaveBeenCalledWith(
-      "main",
-      "workspace.getInfo",
-      [],
-      undefined,
-    );
-    expect(hubCall).toHaveBeenCalledWith(
-      "main",
-      "shellApproval.listPending",
-      [],
-      undefined,
-    );
+    expect(
+      workspaceCall.mock.calls.some(
+        ([target, method, args, options]) =>
+          target === "main" &&
+          method?.name === "workspace.getInfo" &&
+          args.length === 0 &&
+          options === undefined,
+      ),
+    ).toBe(true);
+    expect(
+      hubCall.mock.calls.some(
+        ([target, method, args, options]) =>
+          target === "main" &&
+          method?.name === "shellApproval.listPending" &&
+          args.length === 0 &&
+          options === undefined,
+      ),
+    ).toBe(true);
   });
 
   it("retries transient initial Iroh reconnect failures", async () => {
@@ -400,8 +437,16 @@ describe("MobileRpcClient Iroh transport", () => {
       | Parameters<IrohConnection["transport"]["openSession"]>[0]
       | null = null;
     let tokenSeenByReady = "";
+    const call = jest.fn(
+      async (
+        _target: string,
+        _method: { name: string },
+        _args: unknown[],
+        _options?: unknown,
+      ) => ({ token: "panel-grant-123" }),
+    );
     const rpc = makeRpc({
-      call: jest.fn(async () => ({ token: "panel-grant-123" })),
+      call,
     });
     const panelSession = makeSession({
       ready: jest.fn(async () => {
@@ -432,9 +477,15 @@ describe("MobileRpcClient Iroh transport", () => {
         clientPlatform: "mobile",
       }),
     );
-    expect(rpc.call).toHaveBeenCalledWith("main", "auth.grantConnection", [
-      "panel:runtime-1",
-    ]);
+    expect(
+      call.mock.calls.some(
+        ([target, method, args, options]) =>
+          target === "main" &&
+          method?.name === "auth.grantConnection" &&
+          args[0] === "panel:runtime-1" &&
+          options === undefined,
+      ),
+    ).toBe(true);
     expect(tokenSeenByReady).toBe("panel-grant-123");
   });
 
@@ -988,4 +1039,9 @@ it("makes every reconnect caller await retirement and preserves failed cleanup f
   }
 });
 
-const testRpcMethods = createReceiverRpcMethods<{ "demo.hello"(name: string): Promise<{ ok: boolean }>; "hubControl.lookalikeWorkspaceMethod"(): Promise<unknown>; read(): Promise<string>; write(value?: string): Promise<string> }>(["demo.hello", "hubControl.lookalikeWorkspaceMethod", "read", "write"]);
+const testRpcMethods = createReceiverRpcMethods<{
+  "demo.hello"(name: string): Promise<{ ok: boolean }>;
+  "hubControl.lookalikeWorkspaceMethod"(): Promise<unknown>;
+  read(): Promise<string>;
+  write(value?: string): Promise<string>;
+}>(["demo.hello", "hubControl.lookalikeWorkspaceMethod", "read", "write"]);

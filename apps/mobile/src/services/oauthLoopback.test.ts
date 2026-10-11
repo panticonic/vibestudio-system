@@ -1,6 +1,7 @@
 import { Linking, NativeModules, Platform } from "react-native";
 import { handleExternalOpen } from "./oauthLoopback";
 import { setApprovedAppCapabilities } from "./appCapabilities";
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 
 const mockOpenURL = jest.fn(async () => undefined);
 const mockStart = jest.fn(async () => undefined);
@@ -13,20 +14,27 @@ const mockStop = jest.fn(async () => undefined);
 const mockAuthSessionStart = jest.fn(async () => ({
   url: "vibestudio://oauth/callback/openai-codex?code=code-1&state=state-1",
 }));
-const mockCall = jest.fn(async (_target: string, _method: string, _args: unknown[] = []) => undefined);
+const mockCall = jest.fn(
+  async (_target: string, _method: unknown, _args: unknown[] = []) => undefined,
+);
 
 function createShellClient() {
   return {
     transport: { call: mockCall },
     credentialService: {
       forwardOAuthCallback: (request: unknown) =>
-        mockCall("main", "credentials.forwardOAuthCallback", [request]),
+        mockCall("main", mainRpcMethods["credentials.forwardOAuthCallback"], [
+          request,
+        ]),
     },
   } as never;
 }
 
 beforeEach(() => {
-  Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
+  Object.defineProperty(Platform, "OS", {
+    value: "android",
+    configurable: true,
+  });
   setApprovedAppCapabilities(["open-external"]);
   (Linking as unknown as { openURL: typeof mockOpenURL }).openURL = mockOpenURL;
   (NativeModules as unknown as { OAuthLoopback: unknown }).OAuthLoopback = {
@@ -34,7 +42,9 @@ beforeEach(() => {
     wait: mockWait,
     stop: mockStop,
   };
-  (NativeModules as unknown as { VibestudioAuthSession: unknown }).VibestudioAuthSession = {
+  (
+    NativeModules as unknown as { VibestudioAuthSession: unknown }
+  ).VibestudioAuthSession = {
     start: mockAuthSessionStart,
   };
   mockOpenURL.mockClear();
@@ -60,7 +70,7 @@ describe("oauthLoopback", () => {
     await expect(
       handleExternalOpen(createShellClient(), {
         url: "https://auth.openai.com/oauth/authorize?redirect_uri=https%3A%2F%2Fexample.test%2F_r%2Fs%2Fcredentials%2Foauth%2Fcallback",
-      })
+      }),
     ).rejects.toThrow(/Android loopback callback/);
 
     expect(mockOpenURL).not.toHaveBeenCalled();
@@ -109,13 +119,17 @@ describe("oauthLoopback", () => {
       expectedState: "state-1",
       timeoutMs: 60_000,
     });
-    expect(mockCall).toHaveBeenCalledWith("main", "credentials.forwardOAuthCallback", [
-      {
-        transactionId: "tx-1",
-        url: "http://localhost:1455/auth/callback?code=code-1&state=state-1",
-        state: "state-1",
-      },
-    ]);
+    expect(mockCall).toHaveBeenCalledWith(
+      "main",
+      mainRpcMethods["credentials.forwardOAuthCallback"],
+      [
+        {
+          transactionId: "tx-1",
+          url: "http://localhost:1455/auth/callback?code=code-1&state=state-1",
+          state: "state-1",
+        },
+      ],
+    );
     expect(mockStop).not.toHaveBeenCalled();
   });
 
@@ -142,13 +156,17 @@ describe("oauthLoopback", () => {
     });
     expect(mockOpenURL).not.toHaveBeenCalled();
     expect(mockStart).not.toHaveBeenCalled();
-    expect(mockCall).toHaveBeenCalledWith("main", "credentials.forwardOAuthCallback", [
-      {
-        transactionId: "tx-1",
-        url: "vibestudio://oauth/callback/openai-codex?code=code-1&state=state-1",
-        state: "state-1",
-      },
-    ]);
+    expect(mockCall).toHaveBeenCalledWith(
+      "main",
+      mainRpcMethods["credentials.forwardOAuthCallback"],
+      [
+        {
+          transactionId: "tx-1",
+          url: "vibestudio://oauth/callback/openai-codex?code=code-1&state=state-1",
+          state: "state-1",
+        },
+      ],
+    );
   });
 
   it("refuses Android loopback handoffs on iOS", async () => {
@@ -166,7 +184,7 @@ describe("oauthLoopback", () => {
           state: "state-1",
           timeoutMs: 60_000,
         },
-      })
+      }),
     ).rejects.toThrow(/app-scheme OAuth/);
 
     expect(mockStart).not.toHaveBeenCalled();
@@ -189,7 +207,7 @@ describe("oauthLoopback", () => {
           state: "state-1",
           timeoutMs: 60_000,
         },
-      })
+      }),
     ).rejects.toThrow(/browser unavailable/);
 
     expect(mockStop).toHaveBeenCalled();

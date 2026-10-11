@@ -25,15 +25,15 @@ beforeEach(() => {
   mock.call
     .mockReset()
     .mockImplementation(
-      async (_target: string, method: string, args: unknown[]) => {
-        if (method === "adblock.getConfig") return { ...config };
-        if (method === "adblock.getStats")
+      async (_target: string, method: { name: string }, args: unknown[]) => {
+        if (method.name === "adblock.getConfig") return { ...config };
+        if (method.name === "adblock.getStats")
           return { blockedRequests: 42, blockedElements: 10 };
-        if (method === "adblock.removeCustomList")
+        if (method.name === "adblock.removeCustomList")
           config.customLists = config.customLists.filter(
             (url) => url !== args[0],
           );
-        if (method === "adblock.removeFromWhitelist")
+        if (method.name === "adblock.removeFromWhitelist")
           config.whitelist = config.whitelist.filter(
             (domain) => domain !== args[0],
           );

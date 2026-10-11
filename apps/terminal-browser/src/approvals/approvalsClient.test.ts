@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RpcClient } from "@vibestudio/rpc";
+import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { encodeEventWatchRecord } from "@vibestudio/shared/events";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
@@ -135,18 +136,21 @@ function installReviewResolution(): InstallReviewResolution {
 
 function fakeRpc(pending: PendingApproval[]) {
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
-  const rpc = {
-    call: vi.fn(async (_target: string, method: string, _args: unknown[]) => {
-      if (method === "shellApproval.listPending") return pending;
+  const call = vi.fn(
+    async (_target: string, method: { name: string }, _args: unknown[]) => {
+      if (method.name === "shellApproval.listPending") return pending;
       // Resolving a review answers with what actually happened; the typed client
       // parses that answer, so a mock that returns nothing fails the contract
       // rather than the call under test.
-      if (method === "shellApproval.resolveInstallReview")
+      if (method.name === "shellApproval.resolveInstallReview")
         return installReviewResolution();
       return undefined;
-    }),
+    },
+  );
+  const rpc = {
+    call,
     stream: vi.fn(
-      async (_target: string, _method: string, args: unknown[]) =>
+      async (_target: string, _method: unknown, args: unknown[]) =>
         new Response(
           new ReadableStream({
             start(next) {
@@ -165,6 +169,7 @@ function fakeRpc(pending: PendingApproval[]) {
   } as unknown as RpcClient;
   return {
     rpc,
+    call,
     emit(payload: unknown) {
       controller?.enqueue(
         encodeEventWatchRecord({
@@ -212,7 +217,7 @@ describe("createApprovalsClient", () => {
   });
 
   it("resolves an install review through resolveInstallReview, never the decision-id path", async () => {
-    const { rpc } = fakeRpc([]);
+    const { rpc, call } = fakeRpc([]);
     const client = createApprovalsClient(rpc);
     const resolution = {
       decision: "install" as const,
@@ -221,11 +226,12 @@ describe("createApprovalsClient", () => {
 
     await client.resolveInstallReview("install-1", resolution);
 
-    expect(rpc.call).toHaveBeenCalledWith(
-      "main",
-      "shellApproval.resolveInstallReview",
-      ["install-1", resolution],
-    );
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0]?.[0]).toBe("main");
+    expect(call.mock.calls[0]?.[1]).toMatchObject({
+      name: mainRpcMethods["shellApproval.resolveInstallReview"].name,
+    });
+    expect(call.mock.calls[0]?.[2]).toEqual(["install-1", resolution]);
   });
 
   it("watches the shared shell approval queue", async () => {
@@ -240,7 +246,7 @@ describe("createApprovalsClient", () => {
     unsubscribe();
     expect(rpc.stream).toHaveBeenCalledWith(
       "main",
-      "events.watch",
+      mainRpcMethods["events.watch"],
       [["shell-approval:pending-changed"], expect.any(String)],
       expect.objectContaining({ bodyIdleTimeoutMs: null }),
     );
