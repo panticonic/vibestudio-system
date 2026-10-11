@@ -15,8 +15,7 @@ import { externalOpenMethods } from "@vibestudio/service-schemas/externalOpen";
 
 import {
   responseEnvelopeFor,
-  rpcErrorKindOf,
-  rpcErrorDataOf,
+  serializeRpcFailure,
   RpcBoundaryError,
   createBridgeStreamRelay,
   stampEnvelopeCaller,
@@ -317,11 +316,11 @@ export function createBridgeAdapter(deps: {
           callerKind: "shell",
           workspaceId: deps.workspaceId,
         },
-        { type: "response", requestId: request.requestId, error: { message: error instanceof Error ? error.message : String(error), errorKind: rpcErrorKindOf(error), ...(error instanceof RpcBoundaryError && error.code
-            ? { code: error.code }
-            : {}), ...(rpcErrorDataOf(error) !== undefined
-            ? { errorData: rpcErrorDataOf(error) }
-            : {}) } },
+        {
+          type: "response",
+          requestId: request.requestId,
+          error: serializeRpcFailure(error),
+        },
       );
     }
     assertCurrent();
@@ -417,7 +416,11 @@ export function createBridgeAdapter(deps: {
         }
         case "openExternal": {
           const [url, options] = args as [string, OpenExternalOptions?];
-          const externalOpen = createTypedRpcServiceClient(deps.transport, { targetId: "main", namespace: "externalOpen" }, externalOpenMethods);
+          const externalOpen = createTypedRpcServiceClient(
+            deps.transport,
+            { targetId: "main", namespace: "externalOpen" },
+            externalOpenMethods,
+          );
           await externalOpen.openExternal(url, options);
           return;
         }

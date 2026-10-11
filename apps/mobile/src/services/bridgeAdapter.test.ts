@@ -2,6 +2,8 @@ import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { createBridgeAdapter } from "./bridgeAdapter";
 import {
   createRpcClient,
+  deserializeRpcFailure,
+  formatRpcFailure,
   type RpcConnectionStatus,
   type RpcEnvelope,
 } from "@vibestudio/rpc";
@@ -603,9 +605,10 @@ describe("bridgeAdapter upload streams", () => {
     ]);
 
     await waitFor(() => expect(delivered.at(-1)?.msg.kind).toBe("error"));
-    expect((delivered.at(-1)?.msg as { message?: string }).message).toMatch(
-      /require the Iroh transport/,
-    );
+    expect(delivered.at(-1)?.msg).toMatchObject({
+      kind: "error",
+      error: { message: expect.stringMatching(/require the Iroh transport/) },
+    });
   });
 
   it("closePanelSession tears down the panel's upload relay", async () => {
@@ -763,6 +766,38 @@ describe("bridgeAdapter native app navigation", () => {
     expect(f.session.send).not.toHaveBeenCalled();
   });
 
+  it("preserves independent native navigation failures through the response carrier", async () => {
+    const f = fixture();
+    const original = new AggregateError(
+      [
+        new Error("Navigation rejected", {
+          cause: new Error("Panel lease retired"),
+        }),
+        new Error("Renderer disconnected"),
+      ],
+      "Native navigation failed",
+    );
+    f.openShellSurface.mockImplementation(() => {
+      throw original;
+    });
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.openShellSurface", [
+        { kind: "settings", section: "connection" },
+      ]),
+    ]);
+    const envelope = f.deliverToPanel.mock.calls.at(-1)?.[1] as RpcEnvelope;
+    expect(envelope.message.type).toBe("response");
+    if (envelope.message.type !== "response" || !("error" in envelope.message))
+      throw new Error("Expected a native navigation failure response");
+    const detail = formatRpcFailure(
+      deserializeRpcFailure(envelope.message.error),
+    );
+    expect(detail).toContain("Native navigation failed");
+    expect(detail).toContain("Navigation rejected");
+    expect(detail).toContain("Panel lease retired");
+    expect(detail).toContain("Renderer disconnected");
+  });
+
   it("describes only supported mobile native surfaces", async () => {
     const f = fixture();
     await f.adapter.handle("panel:tree/a", "postEnvelope", [
@@ -823,7 +858,7 @@ describe("bridgeAdapter native app navigation", () => {
           message: expect.objectContaining({
             type: "response",
             requestId: "native-request",
-            error: expect.any(String),
+            error: expect.objectContaining({ message: expect.any(String) }),
           }),
         }),
       );
@@ -840,8 +875,10 @@ describe("bridgeAdapter native app navigation", () => {
       "panel:tree/a",
       expect.objectContaining({
         message: expect.objectContaining({
-          errorCode: "EACCES",
-          errorKind: "access",
+          error: expect.objectContaining({
+            code: "EACCES",
+            errorKind: "access",
+          }),
         }),
       }),
     );

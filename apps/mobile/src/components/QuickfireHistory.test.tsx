@@ -56,7 +56,7 @@ it("shows useful previews and expands every payload with shared history controls
   expect(getByText("path · 1 line")).toBeTruthy();
   expect(getByText("src/panel.ts")).toBeTruthy();
   expect(getByText("Unique output diagnostic")).toBeTruthy();
-  expect(getByText("Model: Provider / Model")).toBeTruthy();
+  expect(getByText("Provider / Model")).toBeTruthy();
   fireEvent.press(getByLabelText("Collapse all history details"));
   expect(queryByText("Unique output diagnostic")).toBeNull();
 });

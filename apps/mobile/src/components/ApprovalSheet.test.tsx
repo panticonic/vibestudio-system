@@ -1213,7 +1213,7 @@ describe("ApprovalSheet", () => {
     expect(getByText("Act on Shell's context")).toBeTruthy();
     expect(
       getByText(
-        "This can affect files and running work in a different part of your project.",
+        "This permission gives the requester access to the destination branch's files and running work.",
       ),
     ).toBeTruthy();
     expect(getByTestId("approval-accent-stripe").props.style).toEqual(

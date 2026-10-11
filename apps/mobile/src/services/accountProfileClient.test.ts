@@ -10,7 +10,9 @@ const profile = {
 };
 
 function createClient() {
-  const transport = schemaRpcMock({ call: jest.fn<Promise<unknown>, [string, string, unknown[]]>() });
+  const transport = schemaRpcMock({
+    call: jest.fn<Promise<unknown>, [string, string, unknown[]]>(),
+  });
   return { transport, client: new MobileAccountProfileClient(transport) };
 }
 
@@ -19,14 +21,28 @@ describe("MobileAccountProfileClient", () => {
     const { client, transport } = createClient();
     transport.call.mockResolvedValueOnce(profile);
     await expect(client.refresh()).resolves.toEqual(profile);
-    expect(transport.call).toHaveBeenLastCalledWith("main", "account.getProfile", []);
+    expect(transport.call).toHaveBeenLastCalledWith(
+      "main",
+      "account.getProfile",
+      [],
+      undefined,
+    );
 
-    const update = { displayName: "Ada Byron", handle: "ada-byron", color: "#abcd" };
+    const update = {
+      displayName: "Ada Byron",
+      handle: "ada-byron",
+      color: "#abcd",
+    };
     const updated = { ...profile, ...update };
     transport.call.mockResolvedValueOnce(updated);
 
     await expect(client.update(update)).resolves.toEqual(updated);
-    expect(transport.call).toHaveBeenLastCalledWith("main", "hubControl.updateProfile", [update]);
+    expect(transport.call).toHaveBeenLastCalledWith(
+      "main",
+      "hubControl.updateProfile",
+      [update],
+      undefined,
+    );
     expect(client.current).toEqual(updated);
   });
 
@@ -34,10 +50,12 @@ describe("MobileAccountProfileClient", () => {
     const { client, transport } = createClient();
     transport.call.mockResolvedValueOnce(profile);
     await client.refresh();
-    transport.call.mockRejectedValueOnce(new Error('Handle "taken" is already taken'));
+    transport.call.mockRejectedValueOnce(
+      new Error('Handle "taken" is already taken'),
+    );
 
     await expect(client.update({ handle: "taken" })).rejects.toThrow(
-      'Handle "taken" is already taken'
+      'Handle "taken" is already taken',
     );
     expect(client.current).toEqual(profile);
   });
