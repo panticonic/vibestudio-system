@@ -200,6 +200,7 @@ describe("development history paging", () => {
           version: 2,
           freshSchemaFingerprint: target,
           durableWorkQueues: [],
+          nativeOwner: false,
         },
       },
       { db },
