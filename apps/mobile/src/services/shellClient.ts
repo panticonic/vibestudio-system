@@ -3,7 +3,8 @@ import { channelRpcMethods } from "@workspace-workers/pubsub-channel/contract";
 import { modelSettingsRpcMethods } from "@workspace/model-catalog/rpc-contract";
 import { quickfireRpcMethods } from "@workspace-workers/quickfire-service/contract";
 import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
-import { createDurableObjectServiceClient, createGadServiceClient } from "@vibestudio/service-schemas/clients/durableObjectServiceClient";
+import { createDurableObjectServiceClient } from "@vibestudio/service-schemas/clients/durableObjectServiceClient";
+import { createGadServiceClient } from "@vibestudio/service-schemas/clients/gadServiceClient";
 import {
   MODEL_SETTINGS_SERVICE_PROTOCOL,
   type ModelSettingsSnapshot,
