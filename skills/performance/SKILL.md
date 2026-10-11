@@ -133,6 +133,26 @@ a repeat as a verified cache hit only when the build keys match. Report initial,
 lazy, and total bytes separately, and don't add emitted artifact bytes to sealed
 source bytes.
 
+For memory investigations, account for the whole owned process tree, not only
+the Node server: an esbuild service is a child process and may hold most of the
+compiler's RSS. Record parent/child identities, peak memory for the tree (or
+its OS resource group), and active compile/build keys with their phases before
+completion. A successful build receipt is too late to explain a compiler that
+was killed before it could produce one. The BuildV2 three-lane limit is local
+to one Node process; separate workspace servers do not share it, so it is not a
+host-wide memory budget. Disk-backed build or dependency caches protect RAM
+from scratch files, but do not bound compiler heap or resident memory.
+
+When reproducing memory pressure, use an explicit OS memory quota where the
+platform provides one, and observe it from an owner outside the constrained
+process group so a killed workload cannot take its evidence collector with it.
+Keep the evidence bounded and include the exact build identities and process
+ownership. On cancellation or quota failure, stop through the workload's
+authoritative owner and join the complete process tree before retiring its
+scratch data; do not infer completion from elapsed time or remove a cache while
+an owned compiler may still be using it. Treat a memory-limit termination as
+evidence to investigate, not as a production fallback policy.
+
 Check bundle attribution before splitting code. Confirm that an import is
 unused with coverage or ownership evidence. Request executable module contents
 only in a separate, justified source-attribution investigation.
