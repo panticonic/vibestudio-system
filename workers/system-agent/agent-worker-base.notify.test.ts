@@ -145,7 +145,7 @@ class TestNotifyWorker extends SystemAgentWorker {
   ): Promise<never> {
     this.steers.push({ toolCallId, runId, message });
     return {
-      content: [{ type: "text", text: `sent to subagent ${runId}` }],
+      output: [{ type: "text", text: `sent to subagent ${runId}` }],
       details: { runId },
     } as never;
   }
@@ -809,7 +809,7 @@ describe("discovery", () => {
     const hit = await executeTool(discover, { query: "email" } as never, {
       callId: "call-3",
     });
-    const text = hit.content
+    const text = hit.output
       ?.map((block) => (block.type === "text" ? block.text : ""))
       .join("");
     expect(text).toContain("agent:gmail@ch-mail");
@@ -826,7 +826,7 @@ describe("discovery", () => {
       } as never,
       { callId: "call-4" },
     );
-    const missText = miss.content
+    const missText = miss.output
       ?.map((block) => (block.type === "text" ? block.text : ""))
       .join("");
     // An empty result must point somewhere, or the agent's next move is a guess.

@@ -81,7 +81,7 @@ describe("native local provider admission", () => {
         async execute(args, _api, context) {
           context.abortSignal?.throwIfAborted();
           calls.push(args.a + args.b);
-          return { content: [{ type: "text", text: String(args.a + args.b) }] };
+          return { output: [{ type: "text", text: String(args.a + args.b) }] };
         },
       };
       const registry = createRegistry();
@@ -116,6 +116,7 @@ describe("native local provider admission", () => {
       const session = await openBoundAgentSession(
         new MemoryStorage(),
         {
+          generation: 1,
           runtimeId: "do:tests/local:NativeLocal:component",
           contextId: "ctx-native-local-component",
           incarnation: "component-incarnation",

@@ -180,7 +180,7 @@ async function withLocalAgent(
         nativeContext.abortSignal?.throwIfAborted();
         calls.push({ a: args.a, b: args.b, taskId: api.taskId });
         return {
-          content: [{ type: "text", text: String(args.a + args.b) }],
+          output: [{ type: "text", text: String(args.a + args.b) }],
           details: { sum: args.a + args.b },
         };
       },
@@ -192,6 +192,7 @@ async function withLocalAgent(
     session = await openBoundAgentSession(
       new MemoryStorage(),
       {
+        generation: 1,
         runtimeId: "do:tests/local:NativeLocal:live",
         contextId: "ctx-live-local",
         incarnation: "host-fixture-local-incarnation",
