@@ -151,6 +151,7 @@
   },
   "devDependencies": {
     "vitest": "^3.2.7",
-    "@workspace/agentic-protocol": "workspace:*"
+    "@workspace/agentic-protocol": "workspace:*",
+    "@panticonic/pi-durable": "1.1.0-vibestudio.1"
   }
 }
