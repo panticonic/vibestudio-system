@@ -101,9 +101,11 @@ function panelOpenInstruction(value: unknown): {
 export function NotificationBar() {
   const navigationHost = useWorkspaceNavigationHost();
   const openCommandAgent = useSetAtom(openCommandAgentAtom);
-  const { app, browserEnvironment, extensions, notification, panel, supervisedUnits } = useShellWorkspaceClient();
+  const { app, browserEnvironment, extensions, notification, panel, supervisedUnits } =
+    useShellWorkspaceClient();
 
   const [notifications, setNotifications] = useState<Map<string, NotificationPayload>>(new Map());
+  const [operationErrors, setOperationErrors] = useState<Map<string, string>>(new Map());
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const timerCleanups = useRef<Map<string, () => void>>(new Map());
   const barRef = useRef<HTMLDivElement>(null);
@@ -122,7 +124,12 @@ export function NotificationBar() {
   useShellEvent("notification:show", showNotification);
   useDirectShellEvent("notification:show", showNotification);
 
-  const dismissNotification = useCallback((id: string) => {
+  const removeNotification = useCallback((id: string) => {
+    setOperationErrors((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
     setNotifications((prev) => {
       const next = new Map(prev);
       next.delete(id);
@@ -139,18 +146,28 @@ export function NotificationBar() {
       cleanup();
       timerCleanups.current.delete(id);
     }
-    // Report dismissal to server so waitForAction() resolves immediately
-    // instead of hanging for the full timeout
-    void notification.reportAction(id, "dismiss").catch((error) => {
-      console.warn("[NotificationBar] Failed to report dismissal:", error);
-    });
   }, []);
 
-  const handleDismissRequest = useCallback(
-    (payload: { id: string }) => {
-      dismissNotification(payload.id);
+  const showOperationError = useCallback((id: string, error: unknown) => {
+    timerCleanups.current.get(id)?.();
+    setOperationErrors((prev) => new Map(prev).set(id, userFacingError(error)));
+  }, []);
+
+  const dismissNotification = useCallback(
+    async (id: string) => {
+      try {
+        await notification.reportAction(id, "dismiss");
+        removeNotification(id);
+      } catch (error) {
+        showOperationError(id, error);
+      }
     },
-    [dismissNotification]
+    [notification, removeNotification, showOperationError]
+  );
+
+  const handleDismissRequest = useCallback(
+    (payload: { id: string }) => removeNotification(payload.id),
+    [removeNotification]
   );
 
   useShellEvent("notification:dismiss", handleDismissRequest);
@@ -159,24 +176,12 @@ export function NotificationBar() {
   const handleAction = useCallback(
     async (notificationId: string, action: NonNullable<NotificationPayload["actions"]>[number]) => {
       const actionId = action.id;
-      const showActionError = async (title: string, error: unknown): Promise<void> => {
-        try {
-          await notification.show({
-            type: "error",
-            title,
-            message: userFacingError(error),
-            ttl: 0,
-          });
-        } catch (notificationError) {
-          console.warn("[NotificationBar] Failed to show action error:", notificationError);
-        }
-      };
       // Main-side actions can fail (updater unavailable, OAuth cancel while
       // disconnected). Keep the original notification visible in that case.
       try {
         await notification.reportAction(notificationId, actionId);
       } catch (err) {
-        await showActionError("Action failed", err);
+        showOperationError(notificationId, err);
         return;
       }
       try {
@@ -229,23 +234,32 @@ export function NotificationBar() {
           await panel.focus(action.command.panelId);
         }
       } catch (error) {
-        await showActionError("Action failed", error);
+        showOperationError(notificationId, error);
         return;
       }
-      dismissNotification(notificationId);
+      removeNotification(notificationId);
     },
-    [dismissNotification]
+    [
+      app,
+      browserEnvironment,
+      extensions,
+      notification,
+      panel,
+      supervisedUnits,
+      removeNotification,
+      showOperationError,
+    ]
   );
 
   // Auto-dismiss timers
   useEffect(() => {
     for (const [id, notif] of notifications) {
-      if (timerCleanups.current.has(id)) continue;
+      if (timerCleanups.current.has(id) || operationErrors.has(id)) continue;
       const ttl = notif.ttl ?? DEFAULT_TTLS[notif.type];
       if (ttl <= 0) continue;
 
       const timer = setTimeout(() => {
-        dismissNotification(id);
+        removeNotification(id);
       }, ttl);
       const cleanup = () => {
         clearTimeout(timer);
@@ -260,7 +274,7 @@ export function NotificationBar() {
         cleanup();
       }
     }
-  }, [notifications, dismissNotification]);
+  }, [notifications, operationErrors, removeNotification]);
 
   // Clean up all timers on unmount
   useEffect(() => {
@@ -314,6 +328,7 @@ export function NotificationBar() {
         onToggleExpanded={toggleExpanded}
         onAction={handleAction}
         onDismiss={dismissNotification}
+        operationError={operationErrors.get(current.id)}
         onFix={(failure) => {
           navigationHost?.focus();
           openCommandAgent({
@@ -338,6 +353,7 @@ function ToastNotification({
   onToggleExpanded,
   onAction,
   onDismiss,
+  operationError,
   onFix,
 }: {
   notification: NotificationPayload;
@@ -346,6 +362,7 @@ function ToastNotification({
   onToggleExpanded: (id: string) => void;
   onAction: (id: string, action: NonNullable<NotificationPayload["actions"]>[number]) => void;
   onDismiss: (id: string) => void;
+  operationError?: string;
   onFix: (notification: NotificationPayload) => void;
 }) {
   const multilineMessage = notification.message?.includes("\n") ? notification.message : null;
@@ -431,6 +448,11 @@ function ToastNotification({
           </Button>
         </Flex>
       </Flex>
+      {operationError && (
+        <Text role="alert" size="2" color="red" mx="3" mb="2">
+          {operationError}
+        </Text>
+      )}
       {expanded && hasExpandableContent && (
         <NotificationDetails
           notification={notification}

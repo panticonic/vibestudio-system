@@ -1,20 +1,10 @@
 // @vitest-environment jsdom
 
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { createStore, Provider } from "jotai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  EventName,
-  EventPayloads,
-  NotificationPayload,
-} from "@vibestudio/shared/events";
+import type { EventName, EventPayloads, NotificationPayload } from "@vibestudio/shared/events";
 
 const shellClient = vi.hoisted(() => ({
   applyUpdate: vi.fn(() => Promise.resolve({ applied: true })),
@@ -68,15 +58,12 @@ function renderBar() {
       <Theme>
         <NotificationBar />
       </Theme>
-    </Provider>,
+    </Provider>
   );
   return { store, ...view };
 }
 
-function emitShellEvent<E extends EventName>(
-  event: E,
-  payload: EventPayloads[E],
-) {
+function emitShellEvent<E extends EventName>(event: E, payload: EventPayloads[E]) {
   const callback = vi
     .mocked(useShellEvent)
     .mock.calls.find(([registeredEvent]) => registeredEvent === event)?.[1] as
@@ -88,10 +75,7 @@ function emitShellEvent<E extends EventName>(
   });
 }
 
-function emitDirectShellEvent<E extends EventName>(
-  event: E,
-  payload: EventPayloads[E],
-) {
+function emitDirectShellEvent<E extends EventName>(event: E, payload: EventPayloads[E]) {
   const callback = vi
     .mocked(useDirectShellEvent)
     .mock.calls.find(([registeredEvent]) => registeredEvent === event)?.[1] as
@@ -144,9 +128,7 @@ describe("NotificationBar", () => {
       mode: "quickfire",
       panelId: "panel:onboarding",
     });
-    const evidence = JSON.parse(
-      request!.prompt!.split("Notification details:\n\n")[1]!,
-    );
+    const evidence = JSON.parse(request!.prompt!.split("Notification details:\n\n")[1]!);
     expect(evidence).toMatchObject(payload);
     expect(request!.prompt!.length).toBeGreaterThan(4_000);
     expect(screen.getByText("Workspace update failed")).toBeTruthy();
@@ -191,7 +173,7 @@ describe("NotificationBar", () => {
             <NotificationBar />
           </div>
         </WorkspaceNavigationHostContext.Provider>
-      </Provider>,
+      </Provider>
     );
     try {
       emitDirectShellEvent("notification:show", {
@@ -209,16 +191,11 @@ describe("NotificationBar", () => {
       });
       expect(host.textContent).toContain("Your job finished");
       expect(view.container.textContent).not.toContain("Your job finished");
-      fireEvent.click(
-        screen.getByRole("button", { name: "Personal · Open workspace" }),
-      );
+      fireEvent.click(screen.getByRole("button", { name: "Personal · Open workspace" }));
       expect(focus).toHaveBeenCalledOnce();
       fireEvent.click(screen.getByRole("button", { name: "Open result" }));
       await waitFor(() =>
-        expect(shellClient.reportAction).toHaveBeenCalledWith(
-          "personal-job",
-          "open-result",
-        ),
+        expect(shellClient.reportAction).toHaveBeenCalledWith("personal-job", "open-result")
       );
       expect(shellClient.createPanel).toHaveBeenCalledWith("panels/chat", {
         focus: true,
@@ -267,9 +244,7 @@ describe("NotificationBar", () => {
       }
       return realSetTimeout(handler, timeout);
     }) as typeof window.setTimeout;
-    const setTimeout = vi
-      .spyOn(window, "setTimeout")
-      .mockImplementation(captureDismiss);
+    const setTimeout = vi.spyOn(window, "setTimeout").mockImplementation(captureDismiss);
     try {
       renderBar();
       emitDirectShellEvent("notification:show", {
@@ -284,15 +259,66 @@ describe("NotificationBar", () => {
       expect(dismissAtTtl).toBeTypeOf("function");
       act(() => dismissAtTtl?.());
       expect(screen.queryByText("Running Daily summary")).toBeNull();
-      await waitFor(() =>
-        expect(shellClient.reportAction).toHaveBeenCalledWith(
-          "mission-processing",
-          "dismiss",
-        ),
-      );
+      expect(shellClient.reportAction).not.toHaveBeenCalled();
     } finally {
       setTimeout.mockRestore();
     }
+  });
+
+  it("applies an owner dismissal without reporting another action", () => {
+    renderBar();
+    emitDirectShellEvent("notification:show", {
+      id: "owner-completed",
+      type: "info",
+      title: "Owner finished",
+      ttl: 0,
+    });
+    emitDirectShellEvent("notification:dismiss", { id: "owner-completed" });
+    expect(screen.queryByText("Owner finished")).toBeNull();
+    expect(shellClient.reportAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps a rejected user dismissal visible with its error until the user retries", async () => {
+    renderBar();
+    emitDirectShellEvent("notification:show", {
+      id: "pending-decision",
+      type: "consent",
+      title: "Choose an action",
+      ttl: 0,
+    });
+    shellClient.reportAction.mockRejectedValueOnce(new Error("Connection unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "Connection unavailable"
+    );
+    expect(screen.getByText("Choose an action")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    await waitFor(() => expect(screen.queryByText("Choose an action")).toBeNull());
+    expect(shellClient.reportAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows an action failure locally while preserving the notification", async () => {
+    renderBar();
+    emitDirectShellEvent("notification:show", {
+      id: "failed-action",
+      type: "info",
+      title: "Open workspace",
+      ttl: 0,
+      actions: [
+        {
+          id: "open",
+          label: "Open panel",
+          command: { type: "panel.open", source: "about/automations" },
+        },
+      ],
+    });
+    shellClient.reportAction.mockRejectedValueOnce(new Error("Server is offline"));
+    fireEvent.click(screen.getByRole("button", { name: "Open panel" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Server is offline");
+    expect(screen.getByText("Open workspace")).toBeTruthy();
+    expect(shellClient.show).not.toHaveBeenCalled();
+    expect(shellClient.createPanel).not.toHaveBeenCalled();
   });
 
   it("opens a notification's exact automation deep link", async () => {
@@ -317,13 +343,10 @@ describe("NotificationBar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View automation" }));
     await waitFor(() =>
-      expect(shellClient.createPanel).toHaveBeenCalledWith(
-        "about/automations",
-        {
-          focus: true,
-          stateArgs: { missionId: "msn_daily" },
-        },
-      ),
+      expect(shellClient.createPanel).toHaveBeenCalledWith("about/automations", {
+        focus: true,
+        stateArgs: { missionId: "msn_daily" },
+      })
     );
   });
 
@@ -374,9 +397,7 @@ describe("NotificationBar", () => {
     expect(screen.getByText("Extension")).toBeTruthy();
     expect(screen.getByText("@workspace-extensions/react-native")).toBeTruthy();
     expect(screen.getByText("Latest error")).toBeTruthy();
-    expect(
-      screen.getByText("Cannot find module typedServiceClient.js"),
-    ).toBeTruthy();
+    expect(screen.getByText("Cannot find module typedServiceClient.js")).toBeTruthy();
     expect(screen.getByText("Recent errors")).toBeTruthy();
     expect(screen.getByText(/Attempt 1/)).toBeTruthy();
     expect(screen.getByText(/Attempt 2/)).toBeTruthy();
@@ -443,7 +464,7 @@ describe("NotificationBar", () => {
       expect(shellClient.recoverExecution).toHaveBeenCalledWith(
         "do:workers/agent:Agent:one",
         digest,
-        "restore-exact",
+        "restore-exact"
       );
     });
   });
