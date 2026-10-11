@@ -164,11 +164,11 @@
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "@workspace/runtime": "workspace:*",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@vibestudio/rpc": "workspace:*"
   },
   "devDependencies": {
     "@vibestudio/durable": "workspace:*",
-    "@vibestudio/rpc": "workspace:*",
     "vitest": "^3.2.7"
   }
 }

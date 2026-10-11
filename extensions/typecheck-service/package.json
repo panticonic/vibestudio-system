@@ -78,6 +78,7 @@
   "dependencies": {
     "@vibestudio/shared": "workspace:*",
     "@vibestudio/typecheck": "workspace:*",
-    "@vibestudio/workspace-contracts": "workspace:*"
+    "@vibestudio/workspace-contracts": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*"
   }
 }

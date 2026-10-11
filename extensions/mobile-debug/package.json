@@ -197,7 +197,10 @@
       ]
     }
   },
-  "dependencies": {},
+  "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*"
+  },
   "devDependencies": {
     "@vibestudio/extension": "workspace:*"
   }
