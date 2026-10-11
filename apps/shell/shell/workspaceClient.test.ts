@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { type RpcClient } from "@vibestudio/rpc";
+import { schemaRpcMock } from "@vibestudio/rpc/test-utils";
 import type {
   NativePanelAdapterHandshakeResult,
   NativePanelApplyResult,
@@ -44,12 +45,12 @@ function nativeSession(workspaceId: string) {
       },
     ),
   };
-  const rpc = {
-    call: vi.fn().mockRejectedValue(new Error("server offline")),
+  const call = vi.fn().mockRejectedValue(new Error("server offline"));
+  const rpc = Object.assign(schemaRpcMock({ call }), {
+    selfId: workspaceId,
     on: vi.fn(() => () => {}),
     onStatusChange: vi.fn(() => () => {}),
-    selfId: workspaceId,
-  } as unknown as RpcClient;
+  }) as unknown as RpcClient;
   return {
     rpc,
     client: createShellWorkspaceClient(rpc, {
@@ -70,18 +71,28 @@ const slot = {
 describe("workspace-owned shell clients", () => {
   it("keeps contributed commands when a requested reload fails before runtime replacement", async () => {
     const host = nativeSession("personal");
-    const registration = vi.mocked(host.rpc.on).mock.calls.find(
-      ([event]) => event === HOST_COMMAND_CONTRIBUTION_EVENT,
-    );
-    if (!registration) throw new Error("Missing host command contribution receiver");
+    const registration = vi
+      .mocked(host.rpc.on)
+      .mock.calls.find(([event]) => event === HOST_COMMAND_CONTRIBUTION_EVENT);
+    if (!registration)
+      throw new Error("Missing host command contribution receiver");
     const receive = registration[1] as (event: unknown) => void;
     receive({
-      caller: { callerId: "runtime-1", callerKind: "panel", callerPanelId: "panel:tree/slot-1" },
+      caller: {
+        callerId: "runtime-1",
+        callerKind: "panel",
+        callerPanelId: "panel:tree/slot-1",
+      },
       payload: { commands: [{ id: "save", label: "Save" }] },
     });
-    await expect(host.client.panel.reload("panel:tree/slot-1")).rejects.toThrow("server offline");
+    await expect(host.client.panel.reload("panel:tree/slot-1")).rejects.toThrow(
+      "server offline",
+    );
     expect(await host.client.hostCommands.list()).toEqual([
-      { panelId: "panel:tree/slot-1", commands: [{ id: "save", label: "Save" }] },
+      {
+        panelId: "panel:tree/slot-1",
+        commands: [{ id: "save", label: "Save" }],
+      },
     ]);
     host.client.hostCommands.releaseRuntime("runtime-1");
     expect(await host.client.hostCommands.list()).toEqual([]);

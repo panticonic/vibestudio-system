@@ -16,7 +16,7 @@ describe("@workspace-extensions/mobile-debug", () => {
     const stream = vi.fn(async () => new Response("logs"));
     const healthy = vi.fn();
     const api = await activate({
-      rpc: { call, stream },
+      rpc: { call, stream, emit: vi.fn(), on: vi.fn() },
       health: { healthy },
     } as unknown as ExtensionContext);
 
@@ -41,7 +41,7 @@ describe("@workspace-extensions/mobile-debug", () => {
     const response = new Response("device logs");
     const stream = vi.fn(async () => response);
     const api = await activate({
-      rpc: { call: vi.fn(), stream },
+      rpc: { call: vi.fn(), stream, emit: vi.fn(), on: vi.fn() },
       health: { healthy: vi.fn() },
     } as unknown as ExtensionContext);
 

@@ -12,12 +12,18 @@ import { createShellPanelRuntime } from "./panelRuntime.js";
 
 describe("createShellPanelRuntime", () => {
   it("binds panel-handle focus to the native shell focus adapter", () => {
-    const rpc = { call: vi.fn() };
+    const rpc = { call: vi.fn(), emit: vi.fn(), on: vi.fn() };
     const focusPanel = vi.fn();
 
-    const runtime = createShellPanelRuntime({ rpc, focusPanel } as never);
+    const runtime = createShellPanelRuntime({
+      rpc,
+      focusPanel,
+    } as never);
 
     expect(runtime).toEqual({ kind: "panel-runtime" });
-    expect(mocks.createPanelRuntime).toHaveBeenCalledWith({ rpc, focusPanel });
+    expect(mocks.createPanelRuntime).toHaveBeenCalledWith({
+      rpc,
+      focusPanel,
+    });
   });
 });

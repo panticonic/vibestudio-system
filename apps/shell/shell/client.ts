@@ -170,7 +170,13 @@ function createOwnerRpc(destination: RpcDestination) {
         ? {
             stream: ((envelope, signal, body) => {
               if (closed)
-                return Promise.reject(new RpcBoundaryError("Workspace UI is closed", "transport", "CONNECTION_LOST"));
+                return Promise.reject(
+                  new RpcBoundaryError(
+                    "Workspace UI is closed",
+                    "transport",
+                    "CONNECTION_LOST",
+                  ),
+                );
               return transport.stream!(
                 {
                   ...envelope,
@@ -186,7 +192,13 @@ function createOwnerRpc(destination: RpcDestination) {
         ? {
             streamBody: ((envelope, signal, body) => {
               if (closed)
-                return Promise.reject(new RpcBoundaryError("Workspace UI is closed", "transport", "CONNECTION_LOST"));
+                return Promise.reject(
+                  new RpcBoundaryError(
+                    "Workspace UI is closed",
+                    "transport",
+                    "CONNECTION_LOST",
+                  ),
+                );
               return transport.streamBody!(
                 {
                   ...envelope,
@@ -199,7 +211,14 @@ function createOwnerRpc(destination: RpcDestination) {
           }
         : {}),
       send: (envelope) => {
-        if (closed) return Promise.reject(new RpcBoundaryError("Workspace UI is closed", "transport", "CONNECTION_LOST"));
+        if (closed)
+          return Promise.reject(
+            new RpcBoundaryError(
+              "Workspace UI is closed",
+              "transport",
+              "CONNECTION_LOST",
+            ),
+          );
         return transport.send({
           ...envelope,
           destination,
@@ -220,7 +239,12 @@ function createOwnerRpc(destination: RpcDestination) {
       },
       status: () => (closed ? "disconnected" : connection.status()),
       ready: async () => {
-        if (closed) throw new RpcBoundaryError("Workspace UI is closed", "transport", "CONNECTION_LOST");
+        if (closed)
+          throw new RpcBoundaryError(
+            "Workspace UI is closed",
+            "transport",
+            "CONNECTION_LOST",
+          );
         await connection.ready();
       },
       onStatusChange: (handler) => {
