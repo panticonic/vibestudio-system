@@ -65,13 +65,24 @@ class FakeServer {
     );
   }
 
-  rpc(): RpcClient {
+  /**
+   * `system`: the browser's app principal in System (only its session
+   * registry); `workspace`: this device's session in the shown workspace
+   * (apps, sessions, approvals).
+   */
+  rpc(scope: "system" | "workspace"): RpcClient {
+    const SYSTEM_ONLY = new Set(["workers.resolveService"]);
     const call = async (
       target: string,
       method: { name: string },
       args: unknown[]
     ): Promise<unknown> => {
       const name = method.name;
+      const systemCall =
+        SYSTEM_ONLY.has(name) || target.startsWith("do:workers/terminal-sessions:");
+      if (systemCall !== (scope === "system")) {
+        throw new Error(`${name} must not be called through the ${scope} connection`);
+      }
       if (target === "main") {
         switch (name) {
           case "runtime.createEntity": {
@@ -119,7 +130,9 @@ class FakeServer {
       if (target.startsWith("do:workers/terminal-sessions:")) {
         switch (name) {
           case "listSessions":
-            return [...this.registry.values()].sort((a, b) => b.lastAttachedAt - a.lastAttachedAt);
+            return [...this.registry.values()]
+              .filter((record) => record.workspaceId === args[0])
+              .sort((a, b) => b.lastAttachedAt - a.lastAttachedAt);
           case "recordSession": {
             const draft = args[0] as TerminalSessionRecord;
             const record = { ...draft, createdAt: Date.now(), lastAttachedAt: Date.now() };
@@ -164,6 +177,7 @@ class FakeServer {
       args: unknown[],
       options?: { signal?: AbortSignal }
     ): Promise<Response> => {
+      if (scope !== "workspace") throw new Error(`${method.name} must use the workspace connection`);
       if (method.name === "events.watch") {
         return new Response(
           new ReadableStream<Uint8Array>({
@@ -186,7 +200,11 @@ class FakeServer {
       }
       throw new Error(`unexpected stream ${method.name}`);
     };
-    return { call, stream, selfId: APP_ID } as unknown as RpcClient;
+    return {
+      call,
+      stream,
+      selfId: scope === "system" ? APP_ID : "shell:dev-1",
+    } as unknown as RpcClient;
   }
 }
 
@@ -247,10 +265,12 @@ function start(server = new FakeServer()) {
   const listeners = new Set<(state: TerminalServerConnectionState) => void>();
   const opened: string[] = [];
   const host: TerminalBrowserHost = {
-    contractVersion: 1,
-    rpc: server.rpc(),
+    contractVersion: 2,
+    rpc: server.rpc("system"),
     appId: APP_ID,
+    system: { id: "ws-system", name: "system" },
     workspace: { id: "ws-1", name: "demo" },
+    workspaceRpc: server.rpc("workspace"),
     server: { kind: "attached", endpoint: "http://127.0.0.1:1234" },
     stdin: tty.stdin as unknown as NodeJS.ReadStream,
     stdout: tty.stdout as unknown as NodeJS.WriteStream,
@@ -348,10 +368,22 @@ describe("terminal browser", () => {
     expect(server.attachStreams.length).toBe(2);
   });
 
-  it("resumes the most recent session on start", async () => {
+  it("resumes the most recent session of the shown workspace on start", async () => {
     const server = new FakeServer();
+    // More recent, but in another workspace: not this browser's to resume.
+    server.registry.set("s-elsewhere", {
+      sessionId: "s-elsewhere",
+      workspaceId: "ws-2",
+      source: APP_SOURCE,
+      className: APP_CLASS,
+      title: "Elsewhere",
+      contextId: "ctx-elsewhere",
+      createdAt: 1,
+      lastAttachedAt: 3,
+    });
     server.registry.set("s-old", {
       sessionId: "s-old",
+      workspaceId: "ws-1",
       source: APP_SOURCE,
       className: APP_CLASS,
       title: "Echo",
@@ -362,6 +394,7 @@ describe("terminal browser", () => {
     const app = start(server);
     running.push(app);
     await until(() => app.tty.text().includes("typed:"), "auto-resume");
+    expect(app.tty.text()).not.toContain("Elsewhere");
   });
 
   it("opens approvals by itself for the focused session and decides with a digit", async () => {
@@ -477,10 +510,12 @@ describe("terminal browser", () => {
     const tty = new FakeTty();
     (tty.stdout as { isTTY: boolean }).isTTY = false;
     const host = {
-      contractVersion: 1,
-      rpc: server.rpc(),
+      contractVersion: 2,
+      rpc: server.rpc("system"),
       appId: APP_ID,
+      system: { id: "ws-system", name: "system" },
       workspace: { id: "ws", name: "ws" },
+      workspaceRpc: server.rpc("workspace"),
       server: { kind: "attached", endpoint: "x" },
       stdin: tty.stdin,
       stdout: tty.stdout,

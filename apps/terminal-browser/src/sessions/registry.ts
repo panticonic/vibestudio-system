@@ -17,7 +17,7 @@ export interface TerminalApp {
   icon?: string;
 }
 
-/** Every terminal app in the workspace, alphabetically. */
+/** Every terminal app in the workspace `rpc` reaches, alphabetically. */
 export async function listTerminalApps(rpc: RpcClient): Promise<TerminalApp[]> {
   const sources = await rpc.call("main", mainRpcMethods["workers.listSources"], []);
   const apps: TerminalApp[] = [];
@@ -42,8 +42,9 @@ export async function createSessionContext(rpc: RpcClient): Promise<string> {
 
 /**
  * The browser's view of the server-side session registry
- * (`workers/terminal-sessions`): which sessions this person can resume, and
- * their terminal settings.
+ * (`workers/terminal-sessions` in the System workspace, reached as the
+ * browser's app principal): which sessions this person can resume in each
+ * workspace, and their terminal settings.
  */
 export class SessionRegistryClient {
   private readonly service: DurableObjectServiceClient<typeof terminalSessionRegistryRpcMethods>;
@@ -56,14 +57,15 @@ export class SessionRegistryClient {
     );
   }
 
-  async list(): Promise<TerminalSessionRecord[]> {
-    return (await this.service.call("listSessions")) as TerminalSessionRecord[];
+  /** This person's sessions in one workspace, most recently used first. */
+  async list(workspaceId: string): Promise<TerminalSessionRecord[]> {
+    return (await this.service.call("listSessions", workspaceId)) as TerminalSessionRecord[];
   }
 
   async record(
     session: Pick<
       TerminalSessionRecord,
-      "sessionId" | "source" | "className" | "title" | "contextId"
+      "sessionId" | "workspaceId" | "source" | "className" | "title" | "contextId"
     >
   ): Promise<TerminalSessionRecord> {
     return (await this.service.call("recordSession", session)) as TerminalSessionRecord;

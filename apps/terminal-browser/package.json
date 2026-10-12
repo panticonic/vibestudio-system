@@ -12,35 +12,7 @@
     },
     "authority": {
       "provides": [],
-      "requests": [
-        {
-          "capability": "approvals.decide",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "approvals.read",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "context.boundary",
-          "resource": {
-            "kind": "prefix",
-            "prefix": "context"
-          },
-          "tier": "critical",
-          "evidence": "bounded-dynamic"
-        }
-      ]
+      "requests": []
     },
     "description": "Browse and run terminal apps, resume sessions and answer approvals from any terminal."
   },

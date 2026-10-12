@@ -133,9 +133,11 @@ Behavior:
   imports it in-process, and calls its exported `run(host)`. The host contract
   is `TerminalBrowserHost` in
   `@vibestudio/shell-core/terminal/terminalBrowserHost`: an app-principal
-  `rpc` client, the workspace and server, `stdin`/`stdout`, connection state,
-  workspace listing, and `openExternal`/`readLocalFile`. `run` resolves with
-  `quit`, `switch-workspace`, or `connection-lost`.
+  `rpc` client for System, the shown `workspace` (Personal by default) with
+  `workspaceRpc` (the device's own session there, as the desktop shell uses
+  for the workspace it shows), the server, `stdin`/`stdout`, connection
+  state, workspace listing, and `openExternal`/`readLocalFile`. `run`
+  resolves with `quit`, `switch-workspace`, or `connection-lost`.
 - A new build reaches a terminal when the CLI loads the app again: on the next
   `vibestudio terminal`, or when the CLI reconnects after an update.
 

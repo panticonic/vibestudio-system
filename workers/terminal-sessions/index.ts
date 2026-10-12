@@ -20,6 +20,7 @@ const REGISTRY_RPC = {
 
 interface SessionRow {
   session_id: string;
+  workspace_id: string;
   source: string;
   class_name: string;
   title: string;
@@ -44,6 +45,7 @@ export class TerminalSessionsDO extends DurableObjectBase implements TerminalSes
     this.sql.exec(`CREATE TABLE terminal_sessions (
       owner TEXT NOT NULL,
       session_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
       source TEXT NOT NULL,
       class_name TEXT NOT NULL,
       title TEXT NOT NULL,
@@ -70,11 +72,13 @@ export class TerminalSessionsDO extends DurableObjectBase implements TerminalSes
   }
 
   @rpc({ ...REGISTRY_RPC, sensitivity: "read" })
-  async listSessions(): Promise<TerminalSessionRecord[]> {
+  async listSessions(workspaceId: string): Promise<TerminalSessionRecord[]> {
     const rows = this.sql
       .exec(
-        `SELECT * FROM terminal_sessions WHERE owner = ? ORDER BY last_attached_at DESC`,
-        this.owner()
+        `SELECT * FROM terminal_sessions WHERE owner = ? AND workspace_id = ?
+         ORDER BY last_attached_at DESC`,
+        this.owner(),
+        field(workspaceId, "workspaceId")
       )
       .toArray() as unknown as SessionRow[];
     return rows.map(toRecord);
@@ -84,10 +88,11 @@ export class TerminalSessionsDO extends DurableObjectBase implements TerminalSes
   async recordSession(
     session: Pick<
       TerminalSessionRecord,
-      "sessionId" | "source" | "className" | "title" | "contextId"
+      "sessionId" | "workspaceId" | "source" | "className" | "title" | "contextId"
     >
   ): Promise<TerminalSessionRecord> {
     const sessionId = field(session?.sessionId, "sessionId");
+    const workspaceId = field(session?.workspaceId, "workspaceId");
     const source = field(session?.source, "source");
     const className = field(session?.className, "className");
     const contextId = field(session?.contextId, "contextId");
@@ -95,12 +100,14 @@ export class TerminalSessionsDO extends DurableObjectBase implements TerminalSes
     const now = Date.now();
     this.sql.exec(
       `INSERT INTO terminal_sessions
-         (owner, session_id, source, class_name, title, context_id, created_at, last_attached_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         (owner, session_id, workspace_id, source, class_name, title, context_id,
+          created_at, last_attached_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (owner, session_id) DO UPDATE SET
          title = excluded.title, last_attached_at = excluded.last_attached_at`,
       this.owner(),
       sessionId,
+      workspaceId,
       source,
       className,
       title,
@@ -109,9 +116,14 @@ export class TerminalSessionsDO extends DurableObjectBase implements TerminalSes
       now
     );
     const row = this.row(sessionId);
-    if (row.source !== source || row.class_name !== className || row.context_id !== contextId) {
+    if (
+      row.workspace_id !== workspaceId ||
+      row.source !== source ||
+      row.class_name !== className ||
+      row.context_id !== contextId
+    ) {
       throw new Error(
-        `Terminal session ${sessionId} already exists for a different app or context`
+        `Terminal session ${sessionId} already exists for a different workspace, app or context`
       );
     }
     return toRecord(row);
@@ -193,6 +205,7 @@ export class TerminalSessionsDO extends DurableObjectBase implements TerminalSes
 function toRecord(row: SessionRow): TerminalSessionRecord {
   return {
     sessionId: row.session_id,
+    workspaceId: row.workspace_id,
     source: row.source,
     className: row.class_name,
     title: row.title,

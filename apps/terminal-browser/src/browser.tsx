@@ -182,8 +182,10 @@ export class TerminalBrowser {
   constructor(private readonly host: TerminalBrowserHost) {
     this.terminal = new TerminalOwnership({ stdin: host.stdin, stdout: host.stdout });
     this.router = new KeyRouter(this.settings.prefixKey);
+    // The browser's own state lives in System (its app principal); the
+    // workspace it shows owns the apps, their sessions and their approvals.
     this.registry = new SessionRegistryClient(host.rpc);
-    this.approvalsClient = createApprovalsClient(host.rpc);
+    this.approvalsClient = createApprovalsClient(host.workspaceRpc);
     this.connection = host.connectionState();
     const layout = this.layout();
     const onLayerFrame = () => this.compositor.invalidate();
@@ -361,7 +363,7 @@ export class TerminalBrowser {
 
   private async refreshResumable(): Promise<void> {
     try {
-      const rows = await this.registry.list();
+      const rows = await this.registry.list(this.host.workspace.id);
       const open = new Set(this.sessions.map((s) => s.sessionId));
       this.resumable = rows.filter((row) => !open.has(row.sessionId));
       this.registryProblem = null;
@@ -374,7 +376,7 @@ export class TerminalBrowser {
 
   private async refreshApps(): Promise<void> {
     try {
-      this.apps = await listTerminalApps(this.host.rpc);
+      this.apps = await listTerminalApps(this.host.workspaceRpc);
       this.appsProblem = null;
     } catch (error) {
       this.appsProblem = describeError(error);
@@ -870,8 +872,11 @@ export class TerminalBrowser {
         {this.appsProblem ? (
           <Text color="red" wrap="wrap">{`Could not list terminal apps: ${this.appsProblem}`}</Text>
         ) : (
-          <Text bold>This workspace has no terminal apps yet.</Text>
+          <Text bold>{`${this.host.workspace.name} has no terminal apps yet.`}</Text>
         )}
+        <Text wrap="wrap">
+          {`Other workspaces have their own (Server Logs is in ${this.host.system.name}): ${this.prefix()} w switches workspace.`}
+        </Text>
         <Text wrap="wrap">
           A terminal app is a worker whose package.json declares a terminal block, for example:
         </Text>
@@ -1430,7 +1435,7 @@ export class TerminalBrowser {
       return this.sessions[existing]!;
     }
     const session = new TerminalSessionClient(
-      this.host.rpc,
+      this.host.workspaceRpc,
       record,
       this.sessionSize(),
       this.sessionEvents()
@@ -1459,7 +1464,7 @@ export class TerminalBrowser {
     this.setNotice(`Starting ${app.title}…`);
     let contextId: string;
     try {
-      contextId = await createSessionContext(this.host.rpc);
+      contextId = await createSessionContext(this.host.workspaceRpc);
     } catch (error) {
       this.log("error", `Could not start ${app.title}: ${describeError(error)}`);
       this.setNotice(
@@ -1469,6 +1474,7 @@ export class TerminalBrowser {
     }
     const draft = {
       sessionId: `term-${randomUUID()}`,
+      workspaceId: this.host.workspace.id,
       source: app.source,
       className: app.className,
       title: app.title,

@@ -104,8 +104,10 @@ should:
 
 - export `run(host)` (contract: `TerminalBrowserHost` in
   `@vibestudio/shell-core/terminal/terminalBrowserHost`) and use the
-  app-principal `host.rpc`, `host.stdin`/`host.stdout`, and the host's
-  connection state; it never handles the device credential
+  app-principal `host.rpc` for its own System state, `host.workspaceRpc` for
+  the workspace it shows (`host.workspace`, the account's Personal workspace
+  unless the person chose another), `host.stdin`/`host.stdout`, and the
+  host's connection state; it never handles the device credential
 - return an exit (`quit`, `switch-workspace`, or `connection-lost`) instead of
   exiting the process; the CLI restores the terminal
 - use its app identity and manifest capabilities for privileged calls

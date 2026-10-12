@@ -7,7 +7,10 @@ description: Build or change a terminal app — a worker whose Durable Object re
 
 A terminal app is a sandboxed worker that renders an [Ink](https://github.com/vadimdemedes/ink)
 UI. People open it from the terminal browser (`vibestudio terminal`): every
-worker that declares `vibestudio.terminal` appears in its launcher. The browser
+worker that declares `vibestudio.terminal` appears in the launcher of the
+workspace it belongs to (the browser shows the person's Personal workspace by
+default and switches with the prefix key then `w`). Sessions run in that
+workspace, as the person's device, like panels the desktop shows. The browser
 is trusted chrome; your app's bytes never reach the real terminal, they are
 drawn into a grid the browser composes.
 
