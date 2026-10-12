@@ -390,6 +390,15 @@ describe("terminal browser", () => {
     await until(() => !tty.text().includes("Approvals (1)"), "overlay closes when queue empties");
   });
 
+  it("returns to the launcher when an overlay closes with nothing open", async () => {
+    const { tty } = launch();
+    await until(() => tty.text().includes("what would you like to open?"), "launcher");
+    tty.type(`${PREFIX}a`);
+    await until(() => tty.text().includes("Approvals (0)"), "approvals");
+    tty.type("\x1b");
+    await until(() => tty.text().includes("what would you like to open?"), "launcher again");
+  });
+
   it("asks before opening a URL for a session and reports the answer back", async () => {
     const { tty, opened } = launch();
     await until(() => tty.text().includes("Echo"), "launcher");
