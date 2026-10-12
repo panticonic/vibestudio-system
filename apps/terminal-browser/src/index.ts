@@ -1,24 +1,16 @@
-import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import React from "react";
 import { render } from "ink";
-import { createRpcClient, type RpcClient } from "@vibestudio/rpc";
-import { NodeWsLike } from "@vibestudio/rpc/transports/nodeWsLike";
-import { createServerWsTransport } from "@vibestudio/shell-core/transport/serverWsTransport";
-import WebSocket from "ws";
+import type {
+  TerminalBrowserExit,
+  TerminalBrowserHost,
+} from "@vibestudio/shell-core/terminal/terminalBrowserHost";
 import { SessionManager } from "./host/SessionManager.js";
 import { registerHostService } from "./host/HostService.js";
 import { createApprovalsClient } from "./approvals/approvalsClient.js";
 import { TerminalBrowser } from "./host/TerminalBrowser.js";
 import type { LogLine } from "./ui/LogsView.js";
-import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
 
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
-
-function requiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
-  return value;
-}
 
 /** Minimal append-only log sink shared by the runner events + the LogsView. */
 interface LogSink {
@@ -43,78 +35,37 @@ function createLogSink(): LogSink {
   };
 }
 
-async function connect(appId: string, logSink: LogSink) {
-  const token = requiredEnv("VIBESTUDIO_TERMINAL_APP_RPC_TOKEN");
-  const connectionId = requiredEnv("VIBESTUDIO_TERMINAL_APP_CONNECTION_ID");
-  const transport = createServerWsTransport({
-    selfId: appId,
-    serverUrl: requiredEnv("VIBESTUDIO_TERMINAL_APP_GATEWAY_URL"),
-    connectionId,
-    logPrefix: "TerminalBrowser",
-    getAuthMessageFields: () => ({
-      connectionId,
-      clientLabel: "Vibestudio Terminal",
-      clientPlatform: "desktop",
-      oauthCallbackMode: "client-loopback",
-    }),
-    adapter: {
-      now: () => Date.now(),
-      getAuthToken: async () => token,
-      createSocket: (url, protocols) => new NodeWsLike(new WebSocket(url, protocols)),
-    },
-  });
-  const rpc: RpcClient = createRpcClient({
-    selfId: appId,
-    callerKind: "app",
-    transport,
-  });
-
-  transport.onStatusChange?.((status) => {
-    if (status === "disconnected") process.exit(0);
-  });
-  await transport.connectAndWait();
+/**
+ * Entry point called by `vibestudio terminal` (see
+ * `@vibestudio/shell-core/terminal/terminalBrowserHost`). The CLI owns the RPC
+ * connection, the app identity and any server it started; the browser owns
+ * the TTY until this promise settles.
+ */
+export async function run(
+  host: TerminalBrowserHost,
+): Promise<TerminalBrowserExit> {
+  const { rpc, stdin, stdout } = host;
+  const logSink = createLogSink();
   const events = new EventsClient(rpc);
   for (const event of ["apps:lifecycle", "apps:status"] as const) {
     events.on(event, (payload) => {
-      logSink.push({ level: "info", source: event, message: JSON.stringify(payload) });
+      logSink.push({
+        level: "info",
+        source: event,
+        message: JSON.stringify(payload),
+      });
     });
   }
   await events.subscribeAll(["apps:lifecycle", "apps:status"]);
-  return { rpc, close: () => transport.close() };
-}
 
-export async function main(): Promise<void> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    // The interactive host needs a real terminal. The supervised terminal-app
-    // runner pipes stdio (for headless CLIs), so the browser must be launched
-    // attached to an interactive TTY — see docs/terminal-apps.md.
-    console.error(
-      "terminal-browser must run attached to an interactive TTY " +
-        "(stdin/stdout are not TTYs in this environment)."
-    );
-    process.exit(1);
-  }
-
-  const appId = requiredEnv("VIBESTUDIO_TERMINAL_APP_ID");
-  const logSink = createLogSink();
-  const { rpc, close } = await connect(appId, logSink);
-  const workspaceClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "workspace" }, workspaceMethods);
-
-  const workspace = (await workspaceClient.getInfo()) as {
-    config?: { id?: string };
-  };
-  const workspaceId = workspace.config?.id;
-  if (!workspaceId) {
-    throw new Error("Workspace discovery did not return an authoritative workspace ID");
-  }
-
+  const viewport = () => ({
+    columns: stdout.columns ?? 80,
+    rows: Math.max(1, (stdout.rows ?? 24) - 2), // reserve header + footer
+  });
   const sessions = new SessionManager({
     rpc,
-    hostPrincipalId: appId,
-    viewport: {
-      columns: process.stdout.columns ?? 80,
-      rows: Math.max(1, (process.stdout.rows ?? 24) - 2), // reserve header + footer
-    },
+    hostPrincipalId: host.appId,
+    viewport: viewport(),
   });
 
   const hostState = { overlayOpen: false };
@@ -122,7 +73,7 @@ export async function main(): Promise<void> {
     sessions,
     // Host keeps the real TTY in raw mode while running; only allow enabling.
     setRealRawMode: (enabled) => {
-      if (enabled) process.stdin.setRawMode?.(true);
+      if (enabled) stdin.setRawMode?.(true);
     },
     isOverlayOpen: () => hostState.overlayOpen,
   });
@@ -134,38 +85,32 @@ export async function main(): Promise<void> {
     return React.createElement(TerminalBrowser, {
       sessions,
       approvals,
-      workspaceId,
+      workspaceId: host.workspace.id,
       logs: logSink.lines,
       hostState,
     });
   };
 
-  const instance = render(React.createElement(HostRoot), { exitOnCtrlC: false });
-
-  process.stdout.on("resize", () => {
-    void sessions.resize({
-      columns: process.stdout.columns ?? 80,
-      rows: Math.max(1, (process.stdout.rows ?? 24) - 2),
-    });
+  const instance = render(React.createElement(HostRoot), {
+    exitOnCtrlC: false,
+    stdin,
+    stdout,
   });
 
-  process.on("message", (message) => {
-    if ((message as { type?: string })?.type === "shutdown") {
-      void sessions.closeAll("host shutdown").finally(() => {
-        instance.unmount();
-        close();
-      });
-    }
+  const onResize = () => void sessions.resize(viewport());
+  stdout.on("resize", onResize);
+  let exit: TerminalBrowserExit = { kind: "quit" };
+  const stopWatchingConnection = host.onConnectionState((state) => {
+    if (state.phase !== "lost") return;
+    exit = { kind: "connection-lost", cause: state.cause };
+    instance.unmount();
   });
-
-  await instance.waitUntilExit();
-  await sessions.closeAll("host exit");
-  close();
-}
-
-if (process.env["VIBESTUDIO_TERMINAL_APP_GATEWAY_URL"]) {
-  main().catch((error) => {
-    console.error(error instanceof Error ? error.stack || error.message : String(error));
-    process.exit(1);
-  });
+  try {
+    await instance.waitUntilExit();
+  } finally {
+    stopWatchingConnection();
+    stdout.off("resize", onResize);
+    await sessions.closeAll("host exit").catch(() => undefined);
+  }
+  return exit;
 }
