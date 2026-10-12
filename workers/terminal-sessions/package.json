@@ -1,0 +1,36 @@
+{
+  "name": "@workspace-workers/terminal-sessions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "title": "Terminal Sessions",
+    "description": "Remembers each person's terminal browser sessions and settings so they can be resumed from any device.",
+    "icon": "🖥️",
+    "kind": "worker",
+    "entry": "index.ts",
+    "durable": {
+      "classes": [
+        {
+          "className": "TerminalSessionsDO"
+        }
+      ]
+    },
+    "authority": {
+      "provides": [],
+      "requests": []
+    }
+  },
+  "dependencies": {
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@vibestudio/rpc": "workspace:*",
+    "vitest": "^3.2.7"
+  },
+  "exports": {
+    "./contract": "./contract.ts",
+    ".": "./index.ts"
+  }
+}
