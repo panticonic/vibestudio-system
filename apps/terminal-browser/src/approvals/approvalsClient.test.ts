@@ -136,17 +136,14 @@ function installReviewResolution(): InstallReviewResolution {
 
 function fakeRpc(pending: PendingApproval[]) {
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
-  const call = vi.fn(
-    async (_target: string, method: { name: string }, _args: unknown[]) => {
-      if (method.name === "shellApproval.listPending") return pending;
-      // Resolving a review answers with what actually happened; the typed client
-      // parses that answer, so a mock that returns nothing fails the contract
-      // rather than the call under test.
-      if (method.name === "shellApproval.resolveInstallReview")
-        return installReviewResolution();
-      return undefined;
-    },
-  );
+  const call = vi.fn(async (_target: string, method: { name: string }, _args: unknown[]) => {
+    if (method.name === "shellApproval.listPending") return pending;
+    // Resolving a review answers with what actually happened; the typed client
+    // parses that answer, so a mock that returns nothing fails the contract
+    // rather than the call under test.
+    if (method.name === "shellApproval.resolveInstallReview") return installReviewResolution();
+    return undefined;
+  });
   const rpc = {
     call,
     stream: vi.fn(
@@ -160,11 +157,11 @@ function fakeRpc(pending: PendingApproval[]) {
                   kind: "watching",
                   events: args[0] as never,
                   epoch: "test-epoch",
-                }),
+                })
               );
             },
-          }),
-        ),
+          })
+        )
     ),
   } as unknown as RpcClient;
   return {
@@ -177,7 +174,7 @@ function fakeRpc(pending: PendingApproval[]) {
           event: "shell-approval:pending-changed",
           payload,
           sequence: 1,
-        }),
+        })
       );
     },
   };
@@ -188,10 +185,7 @@ describe("createApprovalsClient", () => {
     const { rpc } = fakeRpc([startupUnitApproval(), runtimeApproval()]);
     const client = createApprovalsClient(rpc);
 
-    await expect(client.list()).resolves.toEqual([
-      startupUnitApproval(),
-      runtimeApproval(),
-    ]);
+    await expect(client.list()).resolves.toEqual([startupUnitApproval(), runtimeApproval()]);
   });
 
   it("shows a later extension review in the running queue, because the app can host it", async () => {
@@ -210,10 +204,7 @@ describe("createApprovalsClient", () => {
     const { rpc } = fakeRpc([extensionReview, runtimeApproval()]);
     const client = createApprovalsClient(rpc);
 
-    await expect(client.list()).resolves.toEqual([
-      extensionReview,
-      runtimeApproval(),
-    ]);
+    await expect(client.list()).resolves.toEqual([extensionReview, runtimeApproval()]);
   });
 
   it("resolves an install review through resolveInstallReview, never the decision-id path", async () => {
@@ -248,7 +239,7 @@ describe("createApprovalsClient", () => {
       "main",
       mainRpcMethods["events.watch"],
       [["shell-approval:pending-changed"], expect.any(String)],
-      expect.objectContaining({ bodyIdleTimeoutMs: null }),
+      expect.objectContaining({ bodyIdleTimeoutMs: null })
     );
   });
 });

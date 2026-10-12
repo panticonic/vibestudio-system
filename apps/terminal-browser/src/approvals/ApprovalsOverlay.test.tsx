@@ -152,8 +152,14 @@ function installReviewApproval(parts: InstallReviewPart[]): PendingApproval {
 
 describe("ApprovalsOverlay — unit-install-review", () => {
   it.each(["lucide:orbit", "orbit", "🎯 Mission", "./../icon.svg"])(
-    "renders a kind glyph instead of invalid identity text %s", (icon) => {
-      const text = renderToText(<ApprovalsOverlay pending={[installReviewApproval([part(0, { icon })])]} selectedIndex={0} />);
+    "renders a kind glyph instead of invalid identity text %s",
+    (icon) => {
+      const text = renderToText(
+        <ApprovalsOverlay
+          pending={[installReviewApproval([part(0, { icon })])]}
+          selectedIndex={0}
+        />
+      );
       expect(text).not.toContain(icon);
       expect(text).toContain("⚙");
     }
@@ -413,5 +419,65 @@ describe("installAcceptanceFrom — per-part selection reaches the resolution pa
     const acceptance = installAcceptanceFrom(approval, selection);
 
     expect(acceptance.allowNow.map((entry) => entry.identityKey)).toEqual(["b"]);
+  });
+});
+
+describe("ApprovalsOverlay — bounded height", () => {
+  function capability(index: number): PendingApproval {
+    return {
+      kind: "capability",
+      approvalId: `cap-${index}`,
+      callerId: `do:workers/x:X:${index}`,
+      callerKind: "do",
+      repoPath: "workers/x",
+      effectiveVersion: "ev",
+      requestedAt: index,
+      capability: "server-logs.read",
+      title: `Request number ${index}`,
+    };
+  }
+
+  it("keeps a long queue within its height, shows the selection and the decision keys", () => {
+    const pending = Array.from({ length: 30 }, (_, i) => capability(i));
+    const text = renderToText(
+      <ApprovalsOverlay pending={pending} selectedIndex={20} height={14} />
+    );
+    const lines = text.split("\n");
+    expect(lines).toHaveLength(14);
+    expect(text).toContain("21. Request number 20");
+    expect(text).not.toContain("1. Request number 0\n");
+    expect(text).toMatch(/\d+ above, \d+ below/);
+    expect(text).toContain("[1] once");
+    expect(text).toContain("PgUp/PgDn scroll");
+  });
+
+  it("scrolls a long install review without moving the decision keys", () => {
+    const parts = Array.from({ length: 12 }, (_, i) => part(i));
+    const approval = installReviewApproval(parts);
+    const top = renderToText(
+      <ApprovalsOverlay pending={[approval]} selectedIndex={0} height={16} />
+    );
+    const scrolled = renderToText(
+      <ApprovalsOverlay pending={[approval]} selectedIndex={0} height={16} detailScroll={6} />
+    );
+    expect(top.split("\n")).toHaveLength(16);
+    expect(scrolled.split("\n")).toHaveLength(16);
+    expect(top).toContain("Part 0");
+    expect(scrolled).not.toContain("Part 0 ");
+    expect(scrolled).toContain("Part 5");
+    for (const frame of [top, scrolled]) expect(frame).toContain("[1]");
+  });
+
+  it("reports the detail height so the owner can clamp scrolling", () => {
+    const heights: number[] = [];
+    renderToText(
+      <ApprovalsOverlay
+        pending={[installReviewApproval(Array.from({ length: 12 }, (_, i) => part(i)))]}
+        selectedIndex={0}
+        height={16}
+        onDetailHeight={(rows) => heights.push(rows)}
+      />
+    );
+    expect(heights.at(-1)).toBeGreaterThan(16);
   });
 });

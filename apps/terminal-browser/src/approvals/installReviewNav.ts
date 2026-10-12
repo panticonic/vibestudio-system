@@ -10,8 +10,8 @@ import {
   installAcceptanceFrom,
   selectedRowKeys,
   type InstallSelection,
-} from "../ui/ApprovalsOverlay.js";
-import type { NavKey } from "./inputRouter.js";
+} from "./ApprovalsOverlay.js";
+import type { NavKey } from "../input/tokenizer.js";
 
 export type PendingUnitInstallReviewApproval = Extract<
   PendingApproval,

@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
+import { Scrollable } from "../ui/Scrollable.js";
 import {
   getApprovalCallerPresentation,
   getInstallReviewActionCopy,
@@ -47,20 +48,31 @@ export interface ApprovalsOverlayProps {
   /**
    * Which part of the current install review is focused for inspection — the
    * same index-into-a-list mechanic `selectedIndex` already uses for the
-   * approval list itself, so a host that wires part navigation reuses the
-   * established pattern rather than a new one. Defaults to the first part, so
-   * a review always shows full detail for at least one part.
+   * approval list itself. Defaults to the first part, so a review always shows
+   * full detail for at least one part.
    */
   partIndex?: number;
   /** Per-part selection for the current install review (see `InstallSelection`). */
   installSelection?: InstallSelection;
   /**
    * The clearable row key the host has expanded the focused part into, if
-   * any (`installReviewNav.ts`'s row-focus mode). Highlights that row the
-   * same way `selectedIndex`/`partIndex` highlight their own focus, so a
+   * any (`installReviewNav.ts`'s row-focus mode). Highlights that row so a
    * terminal user can see which permission ⎵ will toggle.
    */
   focusedRowKey?: string;
+  /**
+   * Rows available to the overlay. When set, the queue shows a window around
+   * the selected approval and the detail scrolls (`detailScroll`) so neither
+   * a long queue nor a long review can push the decision keys off screen.
+   * Unset renders everything (used by tests and plain-text exports).
+   */
+  height?: number;
+  /** Rows the detail pane is scrolled down. */
+  detailScroll?: number;
+  /** Reports the detail's natural height so the owner can clamp `detailScroll`. */
+  onDetailHeight?: (rows: number) => void;
+  /** Why the overlay opened by itself, e.g. "Requested by Server Logs (this tab)". */
+  origin?: string;
 }
 
 function summarizeTitle(a: PendingApproval): string {
@@ -99,9 +111,10 @@ function genericDetail(a: PendingApproval): string {
 }
 
 /**
- * Host-owned, un-spoofable approvals overlay over the global shell queue. While
- * it's open the focused session's input is suspended and its output buffered,
- * so a worker cannot paint a fake prompt over it.
+ * Host-owned, un-spoofable approvals overlay over the global shell queue. It is
+ * browser chrome: session output never reaches the cells it occupies, so a
+ * session cannot paint a fake prompt over it, and session input is suspended
+ * while it is open.
  */
 export function ApprovalsOverlay({
   pending,
@@ -109,42 +122,106 @@ export function ApprovalsOverlay({
   partIndex,
   installSelection,
   focusedRowKey,
+  height,
+  detailScroll = 0,
+  onDetailHeight,
+  origin,
 }: ApprovalsOverlayProps): React.ReactElement {
   const current = pending[selectedIndex];
+  const detail = current ? (
+    current.kind === "unit-install-review" ? (
+      <InstallReviewDetail
+        approval={current}
+        partIndex={partIndex ?? 0}
+        selection={installSelection}
+        focusedRowKey={focusedRowKey}
+      />
+    ) : (
+      <GenericDetail approval={current} />
+    )
+  ) : null;
+  const hint = current ? approvalHint(current, focusedRowKey !== undefined) : "";
+
+  if (height === undefined) {
+    return (
+      <Box flexDirection="column" borderStyle="round" paddingX={1}>
+        <Text bold color="yellow">
+          {`Approvals (${pending.length})`}
+        </Text>
+        {pending.length === 0 ? (
+          <Text dimColor>Nothing pending. Esc to dismiss.</Text>
+        ) : (
+          <>
+            {pending.map((a, i) => (
+              <Text key={a.approvalId} inverse={i === selectedIndex}>
+                {`${i + 1}. ${summarizeTitle(a)}`}
+              </Text>
+            ))}
+            {current ? (
+              <Box flexDirection="column" marginTop={1}>
+                {detail}
+                <Text>{hint}</Text>
+              </Box>
+            ) : null}
+          </>
+        )}
+      </Box>
+    );
+  }
+
+  // Bounded layout: border (2) + title (1) + queue window + gap (1) + detail + hint (1).
+  const inner = Math.max(4, height - 2);
+  const queueRows = Math.min(pending.length, Math.max(1, Math.floor((inner - 3) / 3)));
+  const first = Math.min(
+    Math.max(0, selectedIndex - Math.floor(queueRows / 2)),
+    Math.max(0, pending.length - queueRows)
+  );
+  const window = pending.slice(first, first + queueRows);
+  const above = first;
+  const below = pending.length - first - window.length;
+  const detailRows = Math.max(1, inner - 1 - queueRows - 1 - 1);
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={1}>
-      <Text bold color="yellow">
-        {`Approvals (${pending.length})`}
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="yellow"
+      paddingX={1}
+      height={height}
+    >
+      <Text bold color="yellow" wrap="truncate-end">
+        {`Approvals (${pending.length})${origin ? ` · ${origin}` : ""}${
+          above || below ? ` · ${above} above, ${below} below` : ""
+        }`}
       </Text>
       {pending.length === 0 ? (
-        <Text dimColor>Nothing pending. Esc to dismiss.</Text>
+        <Text dimColor>Nothing pending. Esc to close.</Text>
       ) : (
         <>
-          {pending.map((a, i) => {
-            const title = summarizeTitle(a);
-            return (
-              <Text key={a.approvalId} inverse={i === selectedIndex}>
-                {`${i + 1}. ${title}`}
-              </Text>
-            );
-          })}
-          {current ? (
-            <Box flexDirection="column" marginTop={1}>
-              {current.kind === "unit-install-review" ? (
-                <InstallReviewDetail
-                  approval={current}
-                  partIndex={partIndex ?? 0}
-                  selection={installSelection}
-                  focusedRowKey={focusedRowKey}
-                />
-              ) : (
-                <ApprovalMarkdown source={genericDetail(current)} />
-              )}
-              <Text>{approvalHint(current, focusedRowKey !== undefined)}</Text>
-            </Box>
-          ) : null}
+          {window.map((a, i) => (
+            <Text key={a.approvalId} inverse={first + i === selectedIndex} wrap="truncate-end">
+              {`${first + i + 1}. ${summarizeTitle(a)}`}
+            </Text>
+          ))}
+          <Box height={1} />
+          <Scrollable height={detailRows} scroll={detailScroll} onContentHeight={onDetailHeight}>
+            {detail}
+          </Scrollable>
+          <Text wrap="truncate-end">{`${hint} · PgUp/PgDn scroll`}</Text>
         </>
       )}
+    </Box>
+  );
+}
+
+function GenericDetail({ approval }: { approval: PendingApproval }): React.ReactElement {
+  const caller = getApprovalCallerPresentation(approval);
+  return (
+    <Box flexDirection="column">
+      <Text bold wrap="wrap">
+        {approval.kind === "capability" ? approval.title : summarizeTitle(approval)}
+      </Text>
+      <Text dimColor wrap="wrap">{`Requested by ${caller.label}`}</Text>
+      <ApprovalMarkdown source={genericDetail(approval)} />
     </Box>
   );
 }
