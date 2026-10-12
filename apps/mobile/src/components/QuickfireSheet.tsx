@@ -334,7 +334,8 @@ export function QuickfireSheet({
       streaming: view.streaming,
       promoted: view.promoted,
       hasConversation: view.hasConversation,
-      error: view.error,
+      // Shown inline; only a failed binding (`view.error`) disables composing.
+      error: view.error ?? view.sendError ?? view.historyError,
       ...(isConversation
         ? {}
         : {
