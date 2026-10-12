@@ -1523,7 +1523,11 @@ export function QuickfireOwner() {
               streaming: conversation.view.streaming,
               promoted: conversation.view.promoted,
               hasConversation: conversation.view.hasConversation,
-              error: conversation.view.error,
+              // Shown inline; only a failed binding (`view.error`) disables composing.
+              error:
+                conversation.view.error ??
+                conversation.view.sendError ??
+                conversation.view.historyError,
               // Only for a slot conversation: a notification thread already has
               // a subject, and offering "what is this panel doing?" there is
               // answering a question nobody asked.
