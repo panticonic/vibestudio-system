@@ -1,0 +1,52 @@
+{
+  "name": "@workspace-workers/terminal-server-logs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "title": "Server Logs",
+    "icon": "📜",
+    "kind": "worker",
+    "entry": "index.tsx",
+    "durable": {
+      "classes": [
+        {
+          "className": "ServerLogsSession"
+        }
+      ]
+    },
+    "terminal": {
+      "renderer": "ink",
+      "title": "Server Logs",
+      "description": "Follow the workspace server's log live, filter by level and search.",
+      "icon": "📜"
+    },
+    "authority": {
+      "provides": [],
+      "requests": [
+        {
+          "capability": "server-logs.read",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "@workspace/terminal-host-protocol": "workspace:*",
+    "@workspace/terminal-shim": "workspace:*",
+    "ink": "^6.8.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vibestudio/rpc": "workspace:*",
+    "vitest": "^3.2.7"
+  }
+}
