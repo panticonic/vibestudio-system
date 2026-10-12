@@ -312,7 +312,7 @@ describe("terminal browser", () => {
     await until(() => tty.text().includes("› ech"), "launcher query");
     tty.type("\r");
     await until(() => tty.text().includes("typed: opened:none"), "session render");
-    expect(tty.text().split("\n")[0]).toContain("1:Echo");
+    await until(() => tty.text().split("\n")[0]!.includes("1:Echo"), "tab strip");
     tty.type("abc");
     await until(() => tty.text().includes("typed:abc"), "echo");
   });

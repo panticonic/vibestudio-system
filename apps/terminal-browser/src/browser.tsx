@@ -850,12 +850,15 @@ export class TerminalBrowser {
   }
 
   private launcherItems(query: string): PaletteEntry[] {
-    return fuzzyFilter(this.launcherEntries(), query, (entry) => entry.label).map(
-      ({ item, match }) => ({
-        ...item,
-        match,
-        ...(query ? { section: undefined } : {}),
-      })
+    // Rank within each section so "Resume" and "Start" stay grouped and labelled.
+    const entries = this.launcherEntries();
+    const sections = [...new Set(entries.map((entry) => entry.section))];
+    return sections.flatMap((section) =>
+      fuzzyFilter(
+        entries.filter((entry) => entry.section === section),
+        query,
+        (entry) => entry.label
+      ).map(({ item, match }) => ({ ...item, match }))
     );
   }
 
@@ -1112,8 +1115,13 @@ export class TerminalBrowser {
             item.run();
           }
         }
-        if (overlay.kind === "launcher")
-          this.launcher = { query: overlay.query, selected: overlay.selected };
+        if (overlay.kind === "launcher") {
+          // Remember an unfinished search; a choice starts the next visit fresh.
+          this.launcher =
+            result === "accept"
+              ? { query: "", selected: 0 }
+              : { query: overlay.query, selected: overlay.selected };
+        }
         break;
       }
       case "approvals":
