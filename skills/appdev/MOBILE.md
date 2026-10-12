@@ -114,6 +114,13 @@ The bootstrap can contain one or several platform artifacts. The JS
 bundle-delivery helper picks the current platform's artifact and streams only
 that one to native.
 
+The React Native provider hashes each artifact's source bytes before exposing
+its stream and includes the value as `sha256-<64 lowercase hex characters>`
+in stream metadata. The host checks the received bytes against that digest.
+Before exposing a primary Android or iOS bundle, the provider also parses it
+with the Hermes compiler shipped in the projected React Native toolchain. A
+syntax error fails the build before the bundle can become active.
+
 ## React Native Build Provider
 
 React Native app builds go through the active provider. The provider's
