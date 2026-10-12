@@ -308,6 +308,8 @@ describe("terminal browser", () => {
     expect(tty.text()).toContain("Echo");
     expect(tty.text()).toContain("Echoes what you type.");
     expect(tty.text()).not.toContain("plain");
+    tty.type("ech");
+    await until(() => tty.text().includes("› ech"), "launcher query");
     tty.type("\r");
     await until(() => tty.text().includes("typed: opened:none"), "session render");
     expect(tty.text().split("\n")[0]).toContain("1:Echo");

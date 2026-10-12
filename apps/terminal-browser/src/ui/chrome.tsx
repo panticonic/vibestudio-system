@@ -107,16 +107,17 @@ export function StatusBar({
     <Box width={width} height={1} justifyContent="space-between">
       <Box flexShrink={1} flexGrow={1}>
         <Text wrap="truncate-end">
-          <Text bold>{` ${view.workspace}`}</Text>
-          <Text dimColor>{` · ${view.server} · `}</Text>
-          <Text color={connection.color}>{connection.text}</Text>
+          {/* Most important first: truncation cuts the server address, never approvals. */}
           {view.approvals > 0 ? (
-            <Text
-              color="yellow"
-              bold
-            >{` · ${view.approvals} approval${view.approvals === 1 ? "" : "s"} (${view.prefixLabel} a)`}</Text>
+            <Text color="black" backgroundColor="yellow" bold>
+              {` ${view.approvals} approval${view.approvals === 1 ? "" : "s"} · ${view.prefixLabel} a `}
+            </Text>
           ) : null}
-          {view.notice ? <Text color="cyan">{` · ${view.notice}`}</Text> : null}
+          {view.notice ? <Text color="cyan">{` ${view.notice} ·`}</Text> : null}
+          <Text bold>{` ${view.workspace}`}</Text>
+          <Text dimColor>{" · "}</Text>
+          <Text color={connection.color}>{connection.text}</Text>
+          <Text dimColor>{` · ${view.server}`}</Text>
         </Text>
       </Box>
       <Box flexShrink={0}>
@@ -270,6 +271,8 @@ export function HelpOverlay(props: {
   onContentHeight: (rows: number) => void;
 }): React.ReactElement {
   const p = props.prefixLabel;
+  // One column for "prefix key", wide enough for the longest entry ("prefix prefix").
+  const keyColumn = `  ${p} ${p}`.length + 2;
   return (
     <Box
       flexDirection="column"
@@ -293,12 +296,12 @@ export function HelpOverlay(props: {
         <Box height={1} />
         {PREFIX_BINDINGS.map((binding) => (
           <Text key={binding.key} wrap="truncate-end">
-            <Text color="cyan">{`  ${p} ${binding.key}`.padEnd(p.length + 9)}</Text>
+            <Text color="cyan">{`  ${p} ${binding.key}`.padEnd(keyColumn)}</Text>
             {binding.description}
           </Text>
         ))}
         <Text wrap="truncate-end">
-          <Text color="cyan">{`  ${p} ${p}`.padEnd(p.length + 9)}</Text>
+          <Text color="cyan">{`  ${p} ${p}`.padEnd(keyColumn)}</Text>
           {`Send ${p} itself to the session`}
         </Text>
         <Box height={1} />
