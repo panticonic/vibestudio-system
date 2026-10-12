@@ -1,16 +1,17 @@
 /**
- * @workspace/terminal-shim — the workerd runtime environment for Ink terminal
- * apps. Provides duck-typed TTY streams, a resizable terminal-size source, and
- * the yoga loader (`@workspace/terminal-shim/yoga`, aliased over `yoga-layout`
- * by the terminal-worker build). Keep this minimal: `nodejs_compat` already
- * supplies process/stream/events/Buffer/setImmediate.
+ * @workspace/terminal-shim — everything a terminal app needs to render Ink
+ * inside a workerd Durable Object and speak the terminal session protocol.
+ *
+ * - `InkTerminalSessionHost`: the protocol implementation a session DO
+ *   forwards its `@rpc` methods to (see docs/terminal-apps.md).
+ * - `./yoga`, `./node/signal-exit`, `./node/terminal-size`: workerd
+ *   replacements the terminal-worker build aliases over `yoga-layout`,
+ *   `signal-exit` and `terminal-size`. They hold no per-session state.
  */
 export {
-  createInkTerminalSession,
-  type CreateInkTerminalSessionOptions,
-  type InkTerminalSession,
-  type TerminalHostSink,
-  type TerminalSize,
-} from "./runtime/createInkTerminalSession.js";
-export { VibestudioWritableTTY } from "./streams/VibestudioWritableTTY.js";
-export { VibestudioReadableTTY } from "./streams/VibestudioReadableTTY.js";
+  InkTerminalSessionHost,
+  type InkTerminalSessionHostOptions,
+  type TerminalFile,
+  type TerminalSessionHandle,
+} from "./InkTerminalSessionHost.js";
+export { useTerminalSize } from "./hooks.js";

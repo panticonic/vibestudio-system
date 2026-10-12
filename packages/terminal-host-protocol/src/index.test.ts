@@ -1,36 +1,67 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  encodeFrame,
-  decodeFrameData,
-  encodeInput,
-  decodeInputData,
-  HOST_METHODS,
-  SESSION_METHODS,
+  TerminalEventDecoder,
+  base64ToBytes,
+  bytesToBase64,
+  encodeSessionEvent,
+  terminalSessionRpcMethods,
+  type TerminalSessionEvent,
 } from "./index.js";
 
-describe("terminal-host-protocol codecs", () => {
-  it("round-trips frame bytes through base64", () => {
-    const bytes = new Uint8Array([0x1b, 0x5b, 0x32, 0x4b, 0x00, 0xff, 0x41]);
-    const frame = encodeFrame("s1", "stdout", bytes, 7);
-    expect(frame).toMatchObject({ sessionId: "s1", stream: "stdout", seq: 7 });
-    expect(decodeFrameData(frame)).toEqual(bytes);
+describe("terminal session event stream", () => {
+  it("round-trips events, including control characters, through NDJSON", () => {
+    const events: TerminalSessionEvent[] = [
+      { type: "output", data: "\x1b[2J\x1b[Hhello\nworld\x07" },
+      { type: "title", title: "Logs" },
+      { type: "attention", attention: { reason: "done", bell: true } },
+      { type: "attention", attention: null },
+      { type: "open-url", requestId: "r1", url: "https://example.com" },
+      { type: "request-file", requestId: "r2" },
+      { type: "ended", reason: "bye" },
+      { type: "superseded" },
+    ];
+    const bytes = events.map(encodeSessionEvent);
+    const joined = new Uint8Array(bytes.reduce((n, b) => n + b.length, 0));
+    let offset = 0;
+    for (const b of bytes) {
+      joined.set(b, offset);
+      offset += b.length;
+    }
+    // Split at arbitrary boundaries, including inside multi-byte sequences.
+    const decoder = new TerminalEventDecoder();
+    const decoded: TerminalSessionEvent[] = [];
+    for (let i = 0; i < joined.length; i += 7)
+      decoded.push(...decoder.push(joined.subarray(i, i + 7)));
+    decoder.end();
+    expect(decoded).toEqual(events);
   });
 
-  it("round-trips input bytes", () => {
-    const bytes = new TextEncoder().encode("\x1b[Ahello");
-    const ev = encodeInput("s1", bytes);
-    expect(decodeInputData(ev)).toEqual(bytes);
+  it("rejects malformed and unknown events instead of skipping them", () => {
+    expect(() => new TerminalEventDecoder().push(new TextEncoder().encode("{oops\n"))).toThrow(
+      /malformed/
+    );
+    expect(() =>
+      new TerminalEventDecoder().push(new TextEncoder().encode('{"type":"bogus"}\n'))
+    ).toThrow(/unknown/);
+    const truncated = new TerminalEventDecoder();
+    truncated.push(new TextEncoder().encode('{"type":"title"'));
+    expect(() => truncated.end()).toThrow(/middle of an event/);
   });
 
-  it("handles empty and large payloads", () => {
-    expect(decodeFrameData(encodeFrame("s", "stderr", new Uint8Array(0), 0))).toHaveLength(0);
-    const big = new Uint8Array(8192).map((_, i) => i % 256);
-    expect(decodeFrameData(encodeFrame("s", "stdout", big, 1))).toEqual(big);
+  it("has one method table with unprefixed, collision-free names", () => {
+    const names = Object.values(terminalSessionRpcMethods).map((m) => m.name);
+    expect(names).toEqual([
+      "terminalAttach",
+      "terminalInput",
+      "terminalResize",
+      "terminalFocus",
+      "terminalReply",
+      "terminalClose",
+    ]);
   });
 
-  it("exposes disjoint host/session method names", () => {
-    const host = Object.values(HOST_METHODS);
-    const session = Object.values(SESSION_METHODS);
-    expect(new Set([...host, ...session]).size).toBe(host.length + session.length);
+  it("base64-encodes large binary payloads", () => {
+    const big = new Uint8Array(200_000).map((_, i) => i % 251);
+    expect(base64ToBytes(bytesToBase64(big))).toEqual(big);
   });
 });

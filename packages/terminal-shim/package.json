@@ -1,7 +1,7 @@
 {
   "name": "@workspace/terminal-shim",
   "version": "0.1.0",
-  "description": "workerd runtime shim for Ink terminal apps (yoga loader + node shims + Ink session)",
+  "description": "Run Ink terminal apps inside workerd Durable Objects and serve the terminal session protocol",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -13,6 +13,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@workspace/terminal-host-protocol": "workspace:*",
+    "ink": "^6.8.0",
+    "react": "^19.0.0",
     "yoga-layout": "^3.2.1"
   },
   "devDependencies": {
