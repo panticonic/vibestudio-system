@@ -117,6 +117,9 @@ function fakeChannelClient(events: unknown[] = []) {
       },
     })),
     ready: () => Promise.resolve(),
+    // A joined channel client: the shared transcript feed reads readiness here.
+    connected: true,
+    onReady: () => () => {},
     close: vi.fn(() => Promise.resolve()),
     send: vi.fn(() => Promise.resolve()),
     recordReadReceipt: vi.fn(() => Promise.resolve()),
@@ -149,6 +152,7 @@ function channelClientEmittingOnSend(eventsOnSend: unknown[]) {
     }
   };
   return {
+    channelId: "channel-1",
     clientId: "user:me",
     events: () => ({
       [Symbol.asyncIterator]: () => ({
@@ -163,6 +167,9 @@ function channelClientEmittingOnSend(eventsOnSend: unknown[]) {
       }),
     }),
     ready: () => Promise.resolve(),
+    // A joined channel client: the shared transcript feed reads readiness here.
+    connected: true,
+    onReady: () => () => {},
     close: vi.fn(() => Promise.resolve()),
     send: vi.fn(async () => {
       eventsOnSend.forEach(emit);
