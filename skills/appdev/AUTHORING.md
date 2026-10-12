@@ -2,12 +2,12 @@
 
 Trusted workspace apps live under `apps/` and use flat source paths:
 
-| Package name                 | Source path       |
-| ---------------------------- | ----------------- |
-| `@workspace-apps/shell`      | `apps/shell`      |
-| `@workspace-apps/mobile`     | `apps/mobile`     |
-| `@workspace-apps/remote-cli` | `apps/remote-cli` |
-| `@workspace-apps/foo`        | `apps/foo`        |
+| Package name                       | Source path             |
+| ---------------------------------- | ----------------------- |
+| `@workspace-apps/shell`            | `apps/shell`            |
+| `@workspace-apps/mobile`           | `apps/mobile`           |
+| `@workspace-apps/terminal-browser` | `apps/terminal-browser` |
+| `@workspace-apps/foo`              | `apps/foo`              |
 
 Do not add a package scope segment to the filesystem path. The path
 `apps/@workspace-apps/foo` is wrong.
@@ -102,10 +102,12 @@ The event types are:
   error and rollback availability.
 - `rolled-back`: the server switched the app back to a previous trusted build.
 
-The adoption policy depends on the target. `prompt` means the client keeps its
-loaded build and asks the user when to adopt the new one. `immediate` is used
-for first load, user-requested rollback, and terminal process replacement.
-Once started, terminal apps are supervised by the server runner.
+The adoption policy is the same for every target. `prompt` (for
+`update-available`) means the client keeps its loaded build and asks the user
+when to adopt the new one. `immediate` is used for first load and
+user-requested rollback. Every target runs on a client: a terminal app adopts
+a new build when `vibestudio terminal` loads it again (on relaunch, or when the
+CLI reconnects after an update).
 
 To list current and previous app builds, call
 `runtime.supervision.versions({ kind: "app", releaseId: appName })`. To restore
@@ -229,7 +231,7 @@ Use an app when the code is a trusted client runtime:
 
 - the desktop shell UI
 - the mobile workspace shell loaded by a native host
-- a future terminal client
+- the terminal browser run by `vibestudio terminal`
 - a client that owns pairing or principal-grant flows
 
 Use a panel for a workspace surface shown inside the shell. Use an extension

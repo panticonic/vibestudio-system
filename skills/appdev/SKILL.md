@@ -15,7 +15,7 @@ changes the resource session, not the client source. System is regular
 workspace source: being in System grants no host authority and no access to
 other workspaces.
 
-Native app units, including supervised terminal apps, are hosted only in a
+Native app units, including terminal apps, are hosted only in a
 designated System workspace. Other workspaces may contain and build their
 source for authoring, but do not stage native app launch reviews or runtime
 principals.
@@ -64,7 +64,8 @@ Read only references relevant to the target and change.
   explicitly.
 - Electron layout hosts declare `panel-hosting`. React Native pairing must work
   in the shipped bootstrap before a workspace bundle exists. Terminal apps run
-  only as explicitly activated supervised processes.
+  only in the `vibestudio terminal` CLI as client modules, never as server
+  processes.
 - If an app creates or changes user data, store it persistently unless the user
   says the data is disposable. Keep live interactive data in a Durable Object
   service that owns SQLite. Use version-controlled project files when content

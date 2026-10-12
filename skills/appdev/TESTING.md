@@ -41,8 +41,8 @@ Host target selection changes should also test that:
   other apps
 - React Native bootstrap and grants use the selected `apps/<name>` source
 - pinned builds/commits stay active when newer approved builds arrive
-- selecting a terminal app starts/restarts that process and leaves no other
-  terminal app running
+- `vibestudio terminal` opens the terminal app selected for the System
+  workspace's `hostTargets.terminal.app`
 
 Build artifact/provider changes:
 
@@ -98,18 +98,22 @@ does not show parity.
 
 Verify:
 
-- terminal target builds a Node ESM primary artifact
-- `apps:available` includes `launchMode: "terminal-process"`
-- status is `available` before launch and `running` after the runner starts it
-- `runtime.supervision.activate({ kind: "app", releaseId: appName })` starts an
-  available process; `restart(identity)` replaces the identified live process
-- stdout/stderr are visible through
-  `runtime.supervision.logs({ kind: "app", releaseId: appName })`
-- rollback switches to a retained terminal build, and the app returns to
-  `available` or `running` depending on whether the process is launched
+- terminal target builds exactly one primary Node ESM (`.mjs`) artifact
+- `apps:available` includes `launchMode: "client-module"`
+- `auth.grantAppPrincipal([{ principal: "terminal-app" }])` from a paired
+  device returns the `app:<source>:<deviceId>` caller and the active build,
+  locally and over Iroh; redeeming the grant from another transport endpoint
+  fails
+- `vibestudio terminal` asks startup approvals before the TUI starts, loads the
+  granted build's `index.mjs`, runs `run(host)`, and restores the terminal on
+  every exit
+- without a credential, `vibestudio terminal` starts the local server with its
+  output in `<stateDir>/logs/server.log`, pairs, and stops and joins that
+  server on quit (unless `--keep-server`)
+- after an update or rollback, the next load runs the selected trusted build
 
-Run the packaged smoke when you change terminal runtime, app host, pairing, or
-process supervision:
+Run the packaged smoke when you change the terminal target, the terminal launch
+path, app principal grants, or pairing:
 
 ```bash
 pnpm test:terminal-app-smoke

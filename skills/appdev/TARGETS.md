@@ -111,39 +111,37 @@ Manifest:
 }
 ```
 
-A terminal app builds to a Node ESM entry artifact that the System workspace
-server can launch as a supervised app process. All three targets are hosted
-only in the protected System workspace; an app declared in another workspace
-keeps its source for authoring but is never offered for native launch.
+A terminal app builds to exactly one primary Node ESM (`.mjs`) entry artifact.
+Like the other targets it is a client: the System workspace server builds it
+and the `vibestudio terminal` CLI runs it on the user's device; it never runs
+as a server process. All three targets are hosted only in the protected
+System workspace; an app declared in another workspace keeps its source for
+authoring but is never offered for native launch. `hostTargets.terminal.app`
+in `meta/vibestudio.yml` names the app the CLI opens.
 
-The server emits `apps:available` with `launchMode: "terminal-process"`.
-Disabled or stopped terminal apps report `available`; launched ones report
-`running`.
+The server emits `apps:available` with `launchMode: "client-module"`.
 
 Behavior:
 
-- The runner starts the approved primary `.mjs` artifact with Node.
-- The app authenticates over `/rpc` with a one-time app principal grant.
-- Runtime identity is `callerKind: "app"` and `callerId` is the app package
-  name, for example `@workspace-apps/remote-cli`.
-- The runner passes bootstrap env vars:
-  `VIBESTUDIO_TERMINAL_APP_ID`, `VIBESTUDIO_TERMINAL_APP_SOURCE`,
-  `VIBESTUDIO_TERMINAL_APP_BUILD_KEY`,
-  `VIBESTUDIO_TERMINAL_APP_EFFECTIVE_VERSION`,
-  `VIBESTUDIO_TERMINAL_APP_GATEWAY_URL`,
-  `VIBESTUDIO_TERMINAL_APP_RPC_TOKEN`, and
-  `VIBESTUDIO_TERMINAL_APP_CONNECTION_ID`.
-- After activation, a terminal build stays `available` until the host target
-  is launched or
-  `runtime.supervision.activate({ kind: "app", releaseId: appName })` starts
-  the process.
-- Pushed updates and rollback replace the process if it is running.
-- Read stdout/stderr with
-  `runtime.supervision.logs({ kind: "app", releaseId: appName })`.
+- `vibestudio terminal` runs the launch gate for the `terminal` target, then
+  requests a device-scoped grant with
+  `auth.grantAppPrincipal([{ principal: "terminal-app", source }])` over its
+  own connection (local or Iroh).
+- Runtime identity is `callerKind: "app"` with the device-scoped `callerId`
+  `app:<source>:<deviceId>`, bound to the exact build the grant names.
+- The CLI downloads that build's primary `index.mjs` over the same connection,
+  imports it in-process, and calls its exported `run(host)`. The host contract
+  is `TerminalBrowserHost` in
+  `@vibestudio/shell-core/terminal/terminalBrowserHost`: an app-principal
+  `rpc` client, the workspace and server, `stdin`/`stdout`, connection state,
+  workspace listing, and `openExternal`/`readLocalFile`. `run` resolves with
+  `quit`, `switch-workspace`, or `connection-lost`.
+- A new build reaches a terminal when the CLI loads the app again: on the next
+  `vibestudio terminal`, or when the CLI reconnects after an update.
 
-Use terminal apps for trusted CLI clients, remote-server setup helpers, and
-pairing/client-management flows that should run with app capabilities instead
-of shell authority.
+Use terminal apps for trusted terminal clients that should run with app
+capabilities instead of shell authority. `apps/terminal-browser` is the
+reference app.
 
 ## Target Selection
 
@@ -151,7 +149,7 @@ Use:
 
 - `electron` for trusted desktop client UI.
 - `react-native` for mobile client UI delivered to the native host.
-- `terminal` for trusted CLI/client processes.
+- `terminal` for trusted terminal clients run by `vibestudio terminal`.
 
 Use panels, not apps, for user-facing workspace UI. Apps carry more trust and
 heavier approval than panels.
@@ -203,8 +201,9 @@ Target-specific notes:
   the old trusted build until the user selects `Load`.
 - React Native apps report the server's active trusted bundle. Whether a given
   device has fetched and installed it is up to that device's native host.
-- Terminal apps report `available` after build activation and `running` only
-  while the supervised Node process is alive.
+- Terminal apps, like React Native apps, report the server's active trusted
+  build. Whether a terminal is running it is up to that device's
+  `vibestudio terminal` CLI.
 
 `apps:lifecycle` carries events for all targets:
 

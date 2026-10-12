@@ -39,12 +39,11 @@ and keeps the same credential for later workspace listing and selection.
 ## Mobile Client
 
 The mobile native host stores a device credential and requests a principal
-grant for the React Native app:
+grant for the React Native app with the authenticated RPC
+`auth.grantAppPrincipal` over its existing connection:
 
 ```json
-{
-  "principal": "react-native-app"
-}
+[{ "principal": "react-native-app" }]
 ```
 
 The resulting caller id is device-scoped, for example:
@@ -54,13 +53,10 @@ app:apps/mobile:<device-id>
 ```
 
 To use a different mobile app, pass its source during bundle bootstrap and
-principal-grant refresh:
+principal grant:
 
 ```json
-{
-  "principal": "react-native-app",
-  "source": "apps/field-mobile"
-}
+[{ "principal": "react-native-app", "source": "apps/field-mobile" }]
 ```
 
 The caller id is then scoped to that source:
@@ -82,20 +78,39 @@ the refresh token in JS.
 
 ## Terminal Client
 
-The terminal target produces a Node ESM entry. The workspace server launches
-it as a supervised app process, but only in the System workspace; other
-workspaces may keep its source for authoring. A terminal app should:
+The terminal target is a client module, like the desktop shell: the System
+workspace builds it and the `vibestudio terminal` CLI runs it on the device.
+It never runs as a server process. Other workspaces may keep terminal app
+source for authoring. `hostTargets.terminal.app` in `meta/vibestudio.yml`
+names the app the CLI opens; the System template declares
+`apps/terminal-browser` (`@workspace-apps/terminal-browser`), the reference
+terminal app.
 
-- connect over `/rpc` with the runner-provided principal grant
+`vibestudio terminal` routes to the account's System workspace, runs the
+launch gate for the `terminal` target (startup approvals are asked in line
+mode before the TUI starts), then calls
+
+```json
+[{ "principal": "terminal-app", "source": "apps/terminal-browser" }]
+```
+
+through `auth.grantAppPrincipal` over its own device connection. The grant is
+bound to that connection's transport endpoint, so it works locally and over
+Iroh. It returns the connection grant, the device-scoped caller id
+(`app:apps/terminal-browser:<device-id>`), and the exact build the principal
+may run. The CLI downloads that build's primary `index.mjs` over the same
+connection, imports it, and calls its exported `run(host)`. A terminal app
+should:
+
+- export `run(host)` (contract: `TerminalBrowserHost` in
+  `@vibestudio/shell-core/terminal/terminalBrowserHost`) and use the
+  app-principal `host.rpc`, `host.stdin`/`host.stdout`, and the host's
+  connection state; it never handles the device credential
+- return an exit (`quit`, `switch-workspace`, or `connection-lost`) instead of
+  exiting the process; the CLI restores the terminal
 - use its app identity and manifest capabilities for privileged calls
 - do workspace work on its child session; account, device, and
   workspace-catalog control belong to a human shell's separate hub session
-
-The built-in `@workspace-apps/remote-cli` is the reference terminal app: it
-connects as an app principal and lists workspace status. The template declares
-it so it is available for debugging, but it does not run until the shell UI or
-`runtime.supervision.activate({ kind: "app", releaseId:
-"@workspace-apps/remote-cli" })` starts it.
 
 A new workspace's initial source comes from the selected template's file list;
 Personal and System have different sources. Importing or copying source does
@@ -134,8 +149,8 @@ Remote-client UX should handle:
 - expired pairing code or unreachable configured relays
 - Endpoint ID mismatch after an explicit server identity rotation
 - no active mobile app bootstrap
-- terminal app build available but process not started
-- terminal app process exited or failed session auth
+- no built terminal app (`hostTargets.terminal.app` missing or not ready)
+- terminal app principal grant refused, or the terminal connection lost
 
 The recovery surface must stay usable even when the workspace app cannot
 load.
