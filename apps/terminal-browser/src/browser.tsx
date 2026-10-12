@@ -216,6 +216,8 @@ export class TerminalBrowser {
     try {
       this.console = captureConsole((level, message) => this.log(level, message));
       this.terminal.acquire({ mouse: this.settings.mouse });
+      // Show the launcher (with its loading state) at once; resuming replaces it.
+      this.overlay = { kind: "launcher", ...this.launcher };
       this.listen();
       this.renderChrome();
       void this.load();
@@ -283,8 +285,6 @@ export class TerminalBrowser {
           `Resumed ${latest.title} · ${more} more in the launcher (${this.prefix()} c)`
         );
       }
-    } else if (this.sessions.length === 0) {
-      this.overlay = { kind: "launcher", ...this.launcher };
     }
     this.changed();
   }
