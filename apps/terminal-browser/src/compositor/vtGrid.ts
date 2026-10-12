@@ -1,4 +1,4 @@
-import xterm from "@xterm/headless";
+import { Terminal } from "@xterm/headless";
 import {
   ATTR_BLINK,
   ATTR_BOLD,
@@ -15,8 +15,6 @@ import {
   type Screen,
 } from "./screen.js";
 
-// @xterm/headless ships CommonJS; the Terminal class is on the default export.
-const { Terminal } = xterm as unknown as { Terminal: typeof import("@xterm/headless").Terminal };
 type HeadlessTerminal = InstanceType<typeof Terminal>;
 type BufferCell = import("@xterm/headless").IBufferCell;
 

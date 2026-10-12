@@ -1,10 +1,7 @@
 import { createReceiverRpcMethods } from "@vibestudio/shared/rpcMethods";
 
-/** Where the terminal browser finds its session registry. */
-export const TERMINAL_SESSIONS_SOURCE = "workers/terminal-sessions";
-export const TERMINAL_SESSIONS_CLASS = "TerminalSessionsDO";
-/** One registry per workspace; rows are partitioned by the calling person. */
-export const TERMINAL_SESSIONS_KEY = "registry";
+/** Service protocol the terminal browser resolves its session registry by (one per workspace). */
+export const TERMINAL_SESSIONS_PROTOCOL = "vibestudio.terminal-sessions.v1";
 
 /** A resumable terminal session, as the registry remembers it. */
 export interface TerminalSessionRecord {

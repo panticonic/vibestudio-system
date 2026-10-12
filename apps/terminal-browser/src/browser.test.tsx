@@ -85,6 +85,12 @@ class FakeServer {
               contextId: "ctx",
             };
           }
+          case "workers.resolveService":
+            expect(args[0]).toBe("vibestudio.terminal-sessions.v1");
+            return {
+              kind: "durable-object",
+              targetId: "do:workers/terminal-sessions:TerminalSessionsDO:workspace-terminal-sessions",
+            };
           case "runtime.createContext":
             return { contextId: `ctx-${++this.contexts}` };
           case "workers.listSources":

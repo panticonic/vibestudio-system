@@ -6,7 +6,7 @@
   "vibestudio": {
     "title": "Terminal Sessions",
     "description": "Remembers each person's terminal browser sessions and settings so they can be resumed from any device.",
-    "icon": "🖥️",
+    "icon": "\ud83d\udda5\ufe0f",
     "kind": "worker",
     "entry": "index.ts",
     "durable": {
@@ -19,7 +19,34 @@
     "authority": {
       "provides": [],
       "requests": []
-    }
+    },
+    "services": [
+      {
+        "action": "remember terminal sessions and settings",
+        "authority": {
+          "binding": "declared",
+          "principals": [
+            "host",
+            "user",
+            "code"
+          ]
+        },
+        "description": "Remembers each person's resumable terminal sessions and terminal settings.",
+        "durableObject": {
+          "className": "TerminalSessionsDO"
+        },
+        "name": "terminal-sessions",
+        "notability": "everyday",
+        "presentation": {
+          "domain": "automation",
+          "verb": "manage"
+        },
+        "protocols": [
+          "vibestudio.terminal-sessions.v1"
+        ],
+        "title": "Terminal sessions"
+      }
+    ]
   },
   "dependencies": {
     "@vibestudio/shared": "workspace:*",

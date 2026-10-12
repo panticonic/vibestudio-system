@@ -1,9 +1,9 @@
 import type { RpcClient } from "@vibestudio/rpc";
 import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
+import { createDurableObjectServiceClient } from "@vibestudio/service-schemas/clients/durableObjectServiceClient";
+import type { DurableObjectServiceClient } from "@vibestudio/shared/workspaceServiceRpc";
 import {
-  TERMINAL_SESSIONS_CLASS,
-  TERMINAL_SESSIONS_KEY,
-  TERMINAL_SESSIONS_SOURCE,
+  TERMINAL_SESSIONS_PROTOCOL,
   terminalSessionRegistryRpcMethods,
   type TerminalSessionRecord,
 } from "@workspace-workers/terminal-sessions/contract";
@@ -46,30 +46,18 @@ export async function createSessionContext(rpc: RpcClient): Promise<string> {
  * their terminal settings.
  */
 export class SessionRegistryClient {
-  private target: Promise<string> | null = null;
+  private readonly service: DurableObjectServiceClient<typeof terminalSessionRegistryRpcMethods>;
 
-  constructor(private readonly rpc: RpcClient) {}
-
-  private resolve(): Promise<string> {
-    this.target ??= this.rpc
-      .call("main", mainRpcMethods["runtime.createEntity"], [
-        {
-          kind: "do",
-          execution: { surface: "code", source: TERMINAL_SESSIONS_SOURCE },
-          className: TERMINAL_SESSIONS_CLASS,
-          key: TERMINAL_SESSIONS_KEY,
-        },
-      ])
-      .then((entity) => entity.targetId)
-      .catch((error: unknown) => {
-        this.target = null;
-        throw error;
-      });
-    return this.target;
+  constructor(rpc: RpcClient) {
+    this.service = createDurableObjectServiceClient(
+      rpc,
+      TERMINAL_SESSIONS_PROTOCOL,
+      terminalSessionRegistryRpcMethods
+    );
   }
 
   async list(): Promise<TerminalSessionRecord[]> {
-    return this.rpc.call(await this.resolve(), terminalSessionRegistryRpcMethods.listSessions, []);
+    return (await this.service.call("listSessions")) as TerminalSessionRecord[];
   }
 
   async record(
@@ -78,37 +66,26 @@ export class SessionRegistryClient {
       "sessionId" | "source" | "className" | "title" | "contextId"
     >
   ): Promise<TerminalSessionRecord> {
-    return this.rpc.call(await this.resolve(), terminalSessionRegistryRpcMethods.recordSession, [
-      session,
-    ]);
+    return (await this.service.call("recordSession", session)) as TerminalSessionRecord;
   }
 
   async markAttached(sessionId: string): Promise<void> {
-    await this.rpc.call(await this.resolve(), terminalSessionRegistryRpcMethods.markAttached, [
-      sessionId,
-    ]);
+    await this.service.call("markAttached", sessionId);
   }
 
   async setTitle(sessionId: string, title: string): Promise<void> {
-    await this.rpc.call(await this.resolve(), terminalSessionRegistryRpcMethods.setSessionTitle, [
-      sessionId,
-      title,
-    ]);
+    await this.service.call("setSessionTitle", sessionId, title);
   }
 
   async forget(sessionId: string): Promise<void> {
-    await this.rpc.call(await this.resolve(), terminalSessionRegistryRpcMethods.forgetSession, [
-      sessionId,
-    ]);
+    await this.service.call("forgetSession", sessionId);
   }
 
   async getSettings(): Promise<Record<string, unknown>> {
-    return this.rpc.call(await this.resolve(), terminalSessionRegistryRpcMethods.getSettings, []);
+    return (await this.service.call("getSettings")) as Record<string, unknown>;
   }
 
   async setSettings(settings: Record<string, unknown>): Promise<void> {
-    await this.rpc.call(await this.resolve(), terminalSessionRegistryRpcMethods.setSettings, [
-      settings,
-    ]);
+    await this.service.call("setSettings", settings);
   }
 }
