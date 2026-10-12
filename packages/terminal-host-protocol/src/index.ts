@@ -1,15 +1,28 @@
 import { createReceiverRpcMethods } from "@vibestudio/shared/rpcMethods";
+
 /**
  * @workspace/terminal-host-protocol
  *
- * Typed protocol between the trusted terminal-browser host app and sandboxed
- * terminal session workers (DOs). Transport is the existing bidirectional RPC
- * (`@vibestudio/rpc`): the host exposes the `HOST_METHODS` and the worker exposes
- * the `SESSION_METHODS`; each calls the other by target id. Workers cannot
- * expose *streaming* RPC, so terminal output is delivered as ordered discrete
- * `terminal.onFrame` calls (frames are small — Ink only redraws changed lines).
+ * The protocol between the trusted terminal browser and a sandboxed terminal
+ * session worker (a Durable Object that renders Ink inside workerd).
  *
- * This package defines payloads + codecs only; it prescribes no transport.
+ * Two directions, one channel each:
+ *
+ * - **browser → session**: ordinary RPC calls on the session DO
+ *   (`terminalSessionRpcMethods`). The DO accepts them only from the caller
+ *   that holds the current attachment.
+ * - **session → browser**: the body of the `terminalAttach` streaming
+ *   response, an ordered NDJSON sequence of `TerminalSessionEvent`s. The
+ *   stream is the attachment: while it is open the DO is resident and the
+ *   browser is the only party that receives the session's output; when the
+ *   browser cancels it (detach, quit, transport loss) the DO releases its
+ *   render tree and may be evicted. Every attachment begins with a complete
+ *   repaint, so there is no frame sequence that can develop gaps.
+ *
+ * Because the browser exposes no RPC methods at all, nothing else in the
+ * workspace can push bytes into, or ask questions through, the browser's
+ * chrome. Requests that need the user's answer (`open-url`, `request-file`)
+ * travel down the stream and are answered with `terminalReply`.
  */
 
 export interface TerminalSize {
@@ -17,121 +30,165 @@ export interface TerminalSize {
   rows: number;
 }
 
-export type TerminalStreamName = "stdout" | "stderr";
-
-/** A chunk of terminal output bytes, base64-encoded for the JSON RPC transport. */
-export interface TerminalFrame {
+/** Arguments of `terminalAttach`. Re-attaching to the same session id resumes it. */
+export interface TerminalAttachArgs {
+  /** Stable session id; also the session DO's object key. */
   sessionId: string;
-  stream: TerminalStreamName;
-  /** base64-encoded bytes (JSON transports can't carry raw binary). */
-  data: string;
-  /** Monotonic per-session sequence for ordering / gap detection. */
-  seq: number;
-}
-
-export interface TerminalInputEvent {
-  sessionId: string;
-  /** base64-encoded raw input bytes (keystrokes). */
-  data: string;
-}
-
-export interface TerminalResizeEvent {
-  sessionId: string;
-  size: TerminalSize;
-}
-
-export type TerminalLifecyclePhase =
-  | "started"
-  | "focused"
-  | "blurred"
-  | "closed"
-  | "errored";
-
-export interface TerminalLifecycleEvent {
-  sessionId: string;
-  phase: TerminalLifecyclePhase;
-  reason?: string;
-}
-
-/** Args the host passes when starting a session on a worker DO. */
-export interface StartTerminalSessionArgs {
-  sessionId: string;
-  /** RPC target id of the host app — the worker calls `terminal.onFrame` on it. */
-  hostPrincipalId: string;
-  /** Initial viewport (host is authoritative; updated via resize). */
+  /** Initial viewport; the browser is authoritative and follows up with `terminalResize`. */
   viewport: TerminalSize;
-  /** Context the session runs in (mirrors panel/agent contextId). */
-  contextId?: string;
+  /** Whether the session's tab is focused right now. */
+  focused: boolean;
 }
 
-/** Methods the SESSION WORKER exposes (host → worker). */
-export const SESSION_METHODS = {
-  start: "terminal.startSession",
-  onInput: "terminal.onInput",
-  onResize: "terminal.onResize",
-  onFocus: "terminal.onFocus",
-  onBlur: "terminal.onBlur",
-  onClose: "terminal.onClose",
-  /** Ask the worker to emit a full repaint (after an overlay/ focus change). */
-  repaint: "terminal.repaint",
-} as const;
+/** A user reply to a host request the session made through its attachment. */
+export type TerminalHostReply =
+  | { requestId: string; kind: "open-url"; opened: boolean }
+  | {
+      requestId: string;
+      kind: "request-file";
+      /** Absent when the user declined. */
+      file?: { name: string; mimeType?: string; data: string /* base64 */ };
+    };
 
-/** Methods the HOST exposes (worker → host). */
-export const HOST_METHODS = {
-  onFrame: "terminal.onFrame",
-  setTitle: "terminal.setTitle",
-  requestClose: "terminal.requestClose",
-  setRawMode: "terminal.setRawMode",
-} as const;
+/** Attention a session asks for while its tab is not focused. */
+export interface TerminalAttention {
+  /** Short reason shown in the tab strip, e.g. "agent finished". */
+  reason?: string;
+  /** Ring the terminal bell too (subject to the user's bell setting). */
+  bell?: boolean;
+}
 
-// ── codecs ──────────────────────────────────────────────────────────────────
+/** Events a session sends to the browser over its attachment stream. */
+export type TerminalSessionEvent =
+  /** Terminal output (text containing ANSI/VT sequences). */
+  | { type: "output"; data: string }
+  | { type: "title"; title: string }
+  /** `attention: null` clears a previous request. */
+  | { type: "attention"; attention: TerminalAttention | null }
+  /** Ask the browser to open a URL on the user's machine, after confirmation. */
+  | { type: "open-url"; requestId: string; url: string }
+  /** Ask the user to choose a local file to send to the session. */
+  | { type: "request-file"; requestId: string; prompt?: string }
+  /** The session ended itself (e.g. the user typed /quit); the browser closes the tab. */
+  | { type: "ended"; reason?: string }
+  /** Another browser attached to this session; this attachment is over. */
+  | { type: "superseded" };
 
-const toBase64 = (bytes: Uint8Array): string => {
-  // Avoid spreading large arrays onto the call stack.
+/** The surface a terminal session DO exposes to the browser. */
+export interface TerminalSession {
+  /** Attach (or re-attach) and stream `TerminalSessionEvent`s as NDJSON until detached. */
+  terminalAttach(args: TerminalAttachArgs): Promise<Response>;
+  /** Keyboard / paste / mouse bytes for the session, already routed by the browser. */
+  terminalInput(sessionId: string, data: string): Promise<void>;
+  terminalResize(sessionId: string, size: TerminalSize): Promise<void>;
+  terminalFocus(sessionId: string, focused: boolean): Promise<void>;
+  terminalReply(sessionId: string, reply: TerminalHostReply): Promise<void>;
+  /** End the session for good: the DO discards its state. Detaching is cancelling the stream. */
+  terminalClose(sessionId: string): Promise<void>;
+}
+
+/** The single method table for the session surface. */
+export const terminalSessionRpcMethods = createReceiverRpcMethods<TerminalSession>([
+  "terminalAttach",
+  "terminalInput",
+  "terminalResize",
+  "terminalFocus",
+  "terminalReply",
+  "terminalClose",
+]);
+
+export const TERMINAL_EVENT_CONTENT_TYPE = "application/x-ndjson";
+
+// ── NDJSON codec ────────────────────────────────────────────────────────────
+
+const encoder = new TextEncoder();
+
+export function encodeSessionEvent(event: TerminalSessionEvent): Uint8Array {
+  return encoder.encode(`${JSON.stringify(event)}\n`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSessionEvent(value: unknown): value is TerminalSessionEvent {
+  if (!isRecord(value)) return false;
+  switch (value["type"]) {
+    case "output":
+      return typeof value["data"] === "string";
+    case "title":
+      return typeof value["title"] === "string";
+    case "attention":
+      return value["attention"] === null || isRecord(value["attention"]);
+    case "open-url":
+      return typeof value["requestId"] === "string" && typeof value["url"] === "string";
+    case "request-file":
+      return typeof value["requestId"] === "string";
+    case "ended":
+    case "superseded":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Incremental NDJSON decoder for the attachment stream. A malformed line is a
+ * protocol violation by the session and throws; it is never silently skipped.
+ */
+export class TerminalEventDecoder {
+  private readonly decoder = new TextDecoder();
+  private pending = "";
+
+  push(chunk: Uint8Array): TerminalSessionEvent[] {
+    this.pending += this.decoder.decode(chunk, { stream: true });
+    const events: TerminalSessionEvent[] = [];
+    let newline = this.pending.indexOf("\n");
+    while (newline !== -1) {
+      const line = this.pending.slice(0, newline);
+      this.pending = this.pending.slice(newline + 1);
+      if (line.trim().length > 0) events.push(parseLine(line));
+      newline = this.pending.indexOf("\n");
+    }
+    return events;
+  }
+
+  /** Call when the stream ends; a trailing partial line is a protocol error. */
+  end(): void {
+    this.pending += this.decoder.decode();
+    if (this.pending.trim().length > 0) {
+      throw new Error("terminal session stream ended in the middle of an event");
+    }
+  }
+}
+
+function parseLine(line: string): TerminalSessionEvent {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new Error("terminal session sent a malformed event (not JSON)");
+  }
+  if (!isSessionEvent(value)) {
+    throw new Error("terminal session sent an unknown or malformed event");
+  }
+  return value;
+}
+
+// ── base64 for binary payloads (file replies) ──────────────────────────────
+
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
-  // btoa exists in workerd + Node 18+.
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + step));
+  }
   return btoa(binary);
-};
+}
 
-const fromBase64 = (b64: string): Uint8Array => {
+export function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
-};
-
-export function encodeFrame(
-  sessionId: string,
-  stream: TerminalStreamName,
-  bytes: Uint8Array,
-  seq: number,
-): TerminalFrame {
-  return { sessionId, stream, data: toBase64(bytes), seq };
 }
-
-export function decodeFrameData(frame: Pick<TerminalFrame, "data">): Uint8Array {
-  return fromBase64(frame.data);
-}
-
-export function encodeInput(sessionId: string, bytes: Uint8Array): TerminalInputEvent {
-  return { sessionId, data: toBase64(bytes) };
-}
-
-export function decodeInputData(event: Pick<TerminalInputEvent, "data">): Uint8Array {
-  return fromBase64(event.data);
-}
-
-/** The terminal session protocol owns the host-to-session callable surface. */
-export interface TerminalSession {
-  startSession(args: StartTerminalSessionArgs): Promise<void>;
-  onInput(event: TerminalInputEvent): Promise<void>;
-  onResize(event: TerminalResizeEvent): Promise<void>;
-  onFocus(event: { sessionId: string }): Promise<void>;
-  onBlur(event: { sessionId: string }): Promise<void>;
-  onClose(event: { sessionId: string; reason?: string }): Promise<void>;
-  repaint(event: { sessionId: string }): Promise<void>;
-}
-export const terminalSessionRpcMethods = createReceiverRpcMethods<TerminalSession>(
-  ["startSession", "onInput", "onResize", "onFocus", "onBlur", "onClose", "repaint"], "terminal",
-);

@@ -22,6 +22,8 @@ services:
     source: workers/phone-provisioning
   - name: development
     source: workers/development
+  - name: terminal-sessions
+    source: workers/terminal-sessions
 singletonObjects:
   - className: PhoneProvisioningDO
     key: workspace-phone-provisioning
@@ -29,6 +31,9 @@ singletonObjects:
   - className: DevelopmentDO
     key: workspace-development
     source: workers/development
+  - className: TerminalSessionsDO
+    key: workspace-terminal-sessions
+    source: workers/terminal-sessions
 systemEpoch: 0
 template:
   dependencies:
