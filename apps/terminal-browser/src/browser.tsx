@@ -216,8 +216,6 @@ export class TerminalBrowser {
     try {
       this.console = captureConsole((level, message) => this.log(level, message));
       this.terminal.acquire({ mouse: this.settings.mouse });
-      // Show the launcher (with its loading state) at once; resuming replaces it.
-      this.overlay = { kind: "launcher", ...this.launcher };
       this.listen();
       this.renderChrome();
       void this.load();
@@ -397,12 +395,14 @@ export class TerminalBrowser {
     if (this.finished) return;
     const fresh = pending.filter((approval) => !this.seenApprovals.has(approval.approvalId));
     this.seenApprovals = new Set(pending.map((approval) => approval.approvalId));
+    const emptied = this.approvals.length > 0 && pending.length === 0;
     this.approvals = pending;
     const focused = this.focusedSession();
     if (this.overlay?.kind === "approvals") {
       const overlay = this.overlay;
-      if (pending.length === 0) this.overlay = null;
-      else overlay.selected = Math.min(overlay.selected, pending.length - 1);
+      // The queue was worked through: get out of the way. (Opened empty: stay, it says so.)
+      if (emptied) this.overlay = null;
+      else overlay.selected = Math.max(0, Math.min(overlay.selected, pending.length - 1));
     } else if (focused && this.settings.autoOpenApprovals && !this.isModalOpen()) {
       const index = pending.findIndex(
         (approval) => fresh.includes(approval) && approval.callerId === focused.targetId
@@ -473,6 +473,10 @@ export class TerminalBrowser {
   }
 
   private renderChrome(): void {
+    // With nothing open, the launcher is the screen.
+    if (!this.overlay && this.sessions.length === 0) {
+      this.overlay = { kind: "launcher", ...this.launcher };
+    }
     const layout = this.layout();
     this.tabsLayer.update(
       <TabStrip
@@ -846,12 +850,15 @@ export class TerminalBrowser {
   }
 
   private launcherItems(query: string): PaletteEntry[] {
-    return fuzzyFilter(this.launcherEntries(), query, (entry) => entry.label).map(
-      ({ item, match }) => ({
-        ...item,
-        match,
-        ...(query ? { section: undefined } : {}),
-      })
+    // Rank within each section so "Resume" and "Start" stay grouped and labelled.
+    const entries = this.launcherEntries();
+    const sections = [...new Set(entries.map((entry) => entry.section))];
+    return sections.flatMap((section) =>
+      fuzzyFilter(
+        entries.filter((entry) => entry.section === section),
+        query,
+        (entry) => entry.label
+      ).map(({ item, match }) => ({ ...item, match }))
     );
   }
 
@@ -1108,8 +1115,13 @@ export class TerminalBrowser {
             item.run();
           }
         }
-        if (overlay.kind === "launcher")
-          this.launcher = { query: overlay.query, selected: overlay.selected };
+        if (overlay.kind === "launcher") {
+          // Remember an unfinished search; a choice starts the next visit fresh.
+          this.launcher =
+            result === "accept"
+              ? { query: "", selected: 0 }
+              : { query: overlay.query, selected: overlay.selected };
+        }
         break;
       }
       case "approvals":
@@ -1516,7 +1528,6 @@ export class TerminalBrowser {
     this.previousFocusedIndex = -1;
     if (this.sessions.length === 0) {
       this.focusedIndex = -1;
-      if (!this.overlay) this.overlay = { kind: "launcher", query: "", selected: 0 };
     } else if (wasFocused) {
       const next = this.focusedIndex;
       this.focusedIndex = -1;

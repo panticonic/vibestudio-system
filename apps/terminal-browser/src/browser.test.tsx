@@ -308,9 +308,11 @@ describe("terminal browser", () => {
     expect(tty.text()).toContain("Echo");
     expect(tty.text()).toContain("Echoes what you type.");
     expect(tty.text()).not.toContain("plain");
+    tty.type("ech");
+    await until(() => tty.text().includes("› ech"), "launcher query");
     tty.type("\r");
     await until(() => tty.text().includes("typed: opened:none"), "session render");
-    expect(tty.text().split("\n")[0]).toContain("1:Echo");
+    await until(() => tty.text().split("\n")[0]!.includes("1:Echo"), "tab strip");
     tty.type("abc");
     await until(() => tty.text().includes("typed:abc"), "echo");
   });
@@ -386,6 +388,15 @@ describe("terminal browser", () => {
     tty.type("1");
     await until(() => server.resolved.includes("a1"), "decision");
     await until(() => !tty.text().includes("Approvals (1)"), "overlay closes when queue empties");
+  });
+
+  it("returns to the launcher when an overlay closes with nothing open", async () => {
+    const { tty } = launch();
+    await until(() => tty.text().includes("what would you like to open?"), "launcher");
+    tty.type(`${PREFIX}a`);
+    await until(() => tty.text().includes("Approvals (0)"), "approvals");
+    tty.type("\x1b");
+    await until(() => tty.text().includes("what would you like to open?"), "launcher again");
   });
 
   it("asks before opening a URL for a session and reports the answer back", async () => {
