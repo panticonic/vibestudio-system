@@ -20,6 +20,10 @@ stay inside their workspace.
 - Long-lived device credentials and the native Endpoint identity live in
   `@vibestudio/mobile-iroh`. This app uses the active Iroh transport and
   short-lived app principal grants.
+- A cold app process derives the same connection owner from its installed
+  Endpoint identity and each authenticated server reach. Keep that identity
+  stable so admission replaces the dead process before server-to-shell work is
+  routed; do not generate a new connection owner on every launch.
 - Bundle installation and self-update use the shared streamed delivery helper
   in `@vibestudio/mobile-iroh`. Don't add direct HTTP artifact fetches or
   native workspace-selection APIs.
