@@ -13,6 +13,8 @@ import {
   type AppLifecyclePayload,
 } from "../services/appUpdatePrompt";
 import type { ToastInput } from "../state/toastAtoms";
+import { observeDurableProjection } from "../services/observeDurableProjection";
+import { nativeActiveAppBuildKey } from "../services/nativeAppBuildIdentity";
 
 /** Connected workspace events remain visible even before its panels are opened. */
 export function WorkspaceSessionEffects({
@@ -43,8 +45,39 @@ export function WorkspaceSessionEffects({
     void candidate.catch(() => undefined);
     const current = () =>
       active && directory.sessions.get(session.workspaceId) === session;
+    const appUpdateObservation = isAppSource
+      ? observeDurableProjection({
+          listen: (changed) =>
+            client.events.on("apps:status", () => void changed()),
+          admit: () => client.events.subscribe("apps:status"),
+          leave: () => client.events.unsubscribe("apps:status"),
+          read: () =>
+            client.hostLaunch.mobileUpdateStatus(nativeActiveAppBuildKey()),
+          apply: (update) => {
+            if (!current() || !update) return;
+            handleMobileAppLifecycleEvent(update, {
+              shellClient: client,
+              pushToast: (toast) => {
+                if (current()) notify(toast);
+              },
+              prompted: promptedAppUpdates.current,
+              selectedSource: update.source,
+              selectedAppId: update.appId,
+            });
+          },
+          error: (error) => {
+            if (current())
+              console.warn(
+                "[WorkspaceSession] Mobile update status unavailable",
+                error,
+              );
+          },
+        })
+      : null;
     const stopAppLifecycle = isAppSource
       ? client.events.on("apps:lifecycle", (payload) => {
+          if ((payload as AppLifecyclePayload).type === "update-available")
+            return;
           void candidate
             .then((selected) => {
               if (!current() || !selected) return;
@@ -96,7 +129,9 @@ export function WorkspaceSessionEffects({
     const topics = [
       "notification:show",
       "external-open:open",
-      ...(isAppSource ? ["apps:lifecycle" as const] : []),
+      ...(isAppSource
+        ? (["apps:lifecycle"] as const)
+        : []),
     ] as const;
     const subscribe = async () => {
       try {
@@ -130,6 +165,7 @@ export function WorkspaceSessionEffects({
     void subscribe();
     return () => {
       active = false;
+      appUpdateObservation?.stop();
       stopAppLifecycle?.();
       stopExternal();
       stopExternalDirect();

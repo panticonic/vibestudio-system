@@ -25,8 +25,11 @@ function setup(workspaceId = "personal") {
         source: "apps/mobile",
         name: "mobile",
       })),
+      mobileUpdateStatus: jest.fn(async (): Promise<any> => null),
     },
     events: {
+      subscribe: jest.fn(async (_topic: string) => undefined),
+      unsubscribe: jest.fn(async (_topic: string) => undefined),
       subscribeAll: jest.fn(async (_topics: Iterable<string>) => undefined),
       unsubscribeMany: jest.fn(async (_topics: Iterable<string>) => undefined),
       on: jest.fn((event: string, listener: (payload: unknown) => void) => {
@@ -162,37 +165,48 @@ it("attributes external handoff failure to its owner without changing the active
   expect(f.directory.activate).not.toHaveBeenCalled();
 });
 
-it("subscribes to existing native app lifecycle only in System, even while its panels are unvisited", async () => {
+it("reconciles the selected native app update from durable status in System", async () => {
   const system = setup("system");
   const personal = setup();
-  render(
+  const update = {
+    type: "update-available" as const,
+    appId: "mobile",
+    target: "react-native" as const,
+    source: "apps/mobile",
+    buildKey: "mobile-build-2",
+    effectiveVersion: "2",
+    previousBuildKey: "mobile-build-1",
+    previousEffectiveVersion: "1",
+    canRollback: true,
+    requiresReload: true as const,
+    adoptionPolicy: "prompt" as const,
+    selectedForHost: true as const,
+  };
+  system.client.hostLaunch.mobileUpdateStatus.mockResolvedValue(update);
+  const view = render(
     <>
       <WorkspaceSessionEffects {...system.props} />
       <WorkspaceSessionEffects {...personal.props} />
     </>,
   );
-  const event = {
-    type: "update-available",
-    target: "react-native",
-    source: "apps/mobile",
-  };
-  system.emit("apps:lifecycle", event);
-  personal.emit("apps:lifecycle", event);
   await waitFor(() =>
     expect(handleMobileAppLifecycleEvent).toHaveBeenCalledTimes(1),
   );
   expect(handleMobileAppLifecycleEvent).toHaveBeenCalledWith(
-    event,
+    update,
     expect.objectContaining({
       shellClient: system.client,
       selectedSource: "apps/mobile",
     }),
   );
   expect(personal.client.hostLaunch.configuredCandidate).not.toHaveBeenCalled();
+  expect(system.client.events.subscribe).toHaveBeenCalledWith("apps:status");
   expect(personal.client.events.subscribeAll).toHaveBeenCalledWith([
     "notification:show",
     "external-open:open",
   ]);
+  view.unmount();
+  expect(system.client.events.unsubscribe).toHaveBeenCalledWith("apps:status");
 });
 
 it("does not present old app lifecycle work after its System session is replaced", async () => {
@@ -221,6 +235,7 @@ it("does not present old app lifecycle work after its System session is replaced
     "external-open:open",
     "apps:lifecycle",
   ]);
+  expect(f.client.events.unsubscribe).toHaveBeenCalledWith("apps:status");
 });
 
 it("handles targeted OAuth delivery once, independently of the broadcast watch", () => {

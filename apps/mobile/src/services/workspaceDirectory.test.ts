@@ -13,6 +13,10 @@ import type {
 
 const mockClients: Array<{ config: Record<string, any>; client: any }> = [];
 const mockOpening = new Map<string, Promise<void>>();
+const mockHubEventListeners = new Map<
+  string,
+  (payload: { workspaces: Array<Record<string, any>> }) => void
+>();
 jest.mock("./shellClient", () => ({
   ShellClient: jest.fn().mockImplementation((config) => {
     const client = {
@@ -61,7 +65,18 @@ jest.mock("@vibestudio/service-schemas/clients/eventsClient", () => ({
   EventsClient: jest.fn().mockImplementation(() => ({
     subscribe: jest.fn(async () => undefined),
     unsubscribe: jest.fn(async () => undefined),
-    on: jest.fn(() => () => {}),
+    unsubscribeAll: jest.fn(async () => undefined),
+    on: jest.fn(
+      (
+        event: string,
+        listener: (payload: {
+          workspaces: Array<Record<string, any>>;
+        }) => void,
+      ) => {
+        mockHubEventListeners.set(event, listener);
+        return () => mockHubEventListeners.delete(event);
+      },
+    ),
   })),
 }));
 
@@ -131,9 +146,57 @@ function fixture() {
 beforeEach(() => {
   mockClients.length = 0;
   mockOpening.clear();
+  mockHubEventListeners.clear();
 });
 
 describe("mobile workspace directory", () => {
+  it("never applies a catalog read superseded by the admitted snapshot", async () => {
+    const { directory, account } = fixture();
+    await directory.init();
+    let resolveStaleCatalog!: (value: typeof entries) => void;
+    let catalogReads = 0;
+    const currentEntries = entries.map((entry) =>
+      entry.workspaceId === "project"
+        ? { ...entry, name: "Renamed project", running: true }
+        : entry,
+    );
+    jest.mocked(account.control.rpc.call).mockImplementation(
+      async (_target, method: { name: string }) => {
+        if (method.name === "shellApproval.listPending") return [];
+        catalogReads += 1;
+        if (catalogReads === 1) {
+          return new Promise<typeof entries>((resolve) => {
+            resolveStaleCatalog = resolve;
+          });
+        }
+        return structuredClone(currentEntries);
+      },
+    );
+    const publishedProjectNames: string[] = [];
+    directory.subscribe(() => {
+      const project = directory.entries.find(
+        ({ workspaceId }) => workspaceId === "project",
+      );
+      if (project) publishedProjectNames.push(project.name);
+    });
+
+    const refreshing = directory.refresh();
+    while (catalogReads === 0) await Promise.resolve();
+    mockHubEventListeners.get("hub:workspace-catalog-changed")!({
+      workspaces: structuredClone(currentEntries),
+    });
+    resolveStaleCatalog(structuredClone(entries));
+    await refreshing;
+
+    expect(catalogReads).toBe(2);
+    expect(publishedProjectNames).toContain("Renamed project");
+    expect(publishedProjectNames).not.toContain("Project");
+    expect(
+      directory.entries.find(({ workspaceId }) => workspaceId === "project"),
+    ).toMatchObject({ name: "Renamed project", running: true });
+    await directory.dispose();
+  });
+
   it("does not report phone setup complete until the visible workspace reconciles", async () => {
     const { directory } = fixture();
     try {

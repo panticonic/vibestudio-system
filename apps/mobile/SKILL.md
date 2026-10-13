@@ -108,6 +108,14 @@ stay inside their workspace.
   app-source `MobileRpcClient` transport, then activates the prepared bundle.
 - Roll back first changes the trusted server build, then activates the
   selected bundle.
+- The native host's persisted active bundle build key is authoritative for
+  what this installation has adopted. Query update status by comparing that
+  device-relative key with the System workspace's selected React Native build.
+  `apps:status` only invalidates that query; its workspace-global active build
+  and rollback history never prove that a particular phone installed it.
+- Bundle activation persists the native active build key before React Native
+  reloads. Preserve that order so the reloaded app immediately queries as
+  current and cannot prompt again for the bundle it is already running.
 - `rnHostAbi` in `package.json` declares the native host contract the app was
   written for. The build fails, naming the expected value, when it differs from
   the host's `RN_HOST_ABI`.
@@ -137,6 +145,26 @@ stay inside their workspace.
   `@workspace/omnibox-core`. The sheet drops search-engine rows (they are an
   address-bar feature, not a destination) and does not fetch favicons.
   `nav.history` re-scopes the sheet to `@history:` instead of navigating.
+
+## Durable observations
+
+- Treat events that announce durable state as invalidations of an
+  authoritative projection, not as a complete state store. Install local event
+  handlers before admitting a watch or direct-event source, so no transition
+  can land between the initial read and listener registration.
+- Prefer a server admission snapshot when the event service provides one. If
+  it does not, pair the admitted listener with an authoritative read and a
+  synchronous generation counter: discard or repeat any read crossed by an
+  event, so a stale in-flight response can never overwrite newer state.
+- Panel startup follows this contract explicitly. Admit the complete panel
+  projection watch before post-paint reconciliation, then repeat the
+  authoritative panel read if a lease, tree, presentation, activation, or
+  activation-failure event arrives while that read is in flight. First paint
+  may use a restored or freshly loaded tree; it is not the final reconciliation
+  boundary.
+- Events that represent transient commands rather than durable state may remain
+  edge-triggered. Do not manufacture a snapshot for an action that has no
+  authoritative current value.
 
 ## Verification
 

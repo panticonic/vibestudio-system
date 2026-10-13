@@ -134,6 +134,7 @@ import {
   createWorkspacePresentationClient,
   type WorkspacePresentationClient,
 } from "@workspace/runtime/workspace-presentation";
+import { reconcileWatchedPanelProjection } from "./watchedPanelProjection";
 
 export type {
   MobileAccountProfile,
@@ -289,6 +290,7 @@ class MobilePanels implements PanelHost {
   private readonly presentation: WorkspacePresentationClient;
   private readonly runtimeLeases: RetainedRuntimeLeases;
   private registered = false;
+  private projectionRevision = 0;
   readonly registration: PanelHostRegistration;
   constructor(
     private readonly deps: {
@@ -352,6 +354,9 @@ class MobilePanels implements PanelHost {
   get registry(): PanelRegistry {
     if (!this.registryInstance) throw new Error("Panels not initialized");
     return this.registryInstance;
+  }
+  getProjectionRevision(): number {
+    return this.projectionRevision;
   }
   prepare(
     workspaceId: string,
@@ -467,11 +472,6 @@ class MobilePanels implements PanelHost {
     await this.syncRuntimeLeases();
   }
 
-  async completeColdStart(): Promise<void> {
-    await this.ensureRegistered();
-    await this.syncRuntimeLeases();
-  }
-
   showRestoredPanel(preferredPanelId: string | null): void {
     const panelId =
       (preferredPanelId && this.registry.getPanel(preferredPanelId)
@@ -522,6 +522,7 @@ class MobilePanels implements PanelHost {
     await this.syncRuntimeLeases();
   }
   invalidateTree(event: PanelTreeInvalidation): void {
+    this.projectionRevision += 1;
     this.treeCache.invalidate(event);
     this.deps.onTreeInvalidated?.(event);
     const panelManager = this.panelManager;
@@ -552,6 +553,7 @@ class MobilePanels implements PanelHost {
   }
 
   refreshPresentations(panelIds: readonly string[]): void {
+    this.projectionRevision += 1;
     const panelManager = this.panelManager;
     if (!panelManager) return;
     const resident = panelIds.filter((panelId) =>
@@ -577,12 +579,30 @@ class MobilePanels implements PanelHost {
   handleExecutionActivated(
     activation: EventPayloads["panel:executionActivated"],
   ): void {
+    this.projectionRevision += 1;
     const panel = this.registry.getPanel(activation.panelId);
     if (!panel || panel.runtimeEntityId !== activation.runtimeEntityId) return;
     panel.effectiveVersion = activation.effectiveVersion;
     panel.buildKey = activation.buildKey;
     panel.executionDigest = activation.executionDigest;
     panel.authorityRequests = activation.authorityRequests;
+    this.deps.onPanelsChanged?.();
+  }
+  handleExecutionFailed(
+    failure: EventPayloads["panel:executionFailed"],
+  ): void {
+    this.projectionRevision += 1;
+    const panel = this.registry.getPanel(failure.panelId);
+    if (!panel || panel.runtimeEntityId !== failure.runtimeEntityId) return;
+    this.registry.updateArtifacts(failure.panelId, {
+      ...panel.artifacts,
+      buildState: "error",
+      buildProgress: failure.message,
+      error: failure.message,
+      htmlPath: undefined,
+      hostedRuntimeEntityId: undefined,
+    });
+    this.registry.notifyPanelTreeUpdate(failure.panelId);
     this.deps.onPanelsChanged?.();
   }
   async observe(
@@ -997,6 +1017,7 @@ class MobilePanels implements PanelHost {
     return this.runtimeLeases.acquire(panelId, runtimeEntityId, "takeOver");
   }
   handleRuntimeLeaseChanged(event: PanelRuntimeLeaseChangedEvent): void {
+    this.projectionRevision += 1;
     const currentVersion = this.registry.getRuntimeLeaseVersion();
     if (
       currentVersion?.epoch === event.version.epoch &&
@@ -1248,8 +1269,14 @@ export class ShellClient {
     origin: string,
   ): "default" | "denied" | "granted" =>
     this.browserNotificationGrants.get(origin) ?? "default";
+  readonly snapshotBrowserNotificationPermissions = async () =>
+    createTypedRpcServiceClient(
+      this.transport,
+      { targetId: "main", namespace: "browserPermissions" },
+      browserPermissionsMethods,
+    ).snapshot({ sessionEpoch: this.browserSessionEpoch });
   readonly refreshBrowserNotificationPermissions = async (): Promise<void> => {
-    const snapshot = await createTypedRpcServiceClient(this.transport, { targetId: "main", namespace: "browserPermissions" }, browserPermissionsMethods).snapshot({ sessionEpoch: this.browserSessionEpoch });
+    const snapshot = await this.snapshotBrowserNotificationPermissions();
     this.replaceBrowserNotificationGrants(snapshot.grants);
   };
   readonly requestBrowserNotificationPermission = async (
@@ -1546,6 +1573,11 @@ export class ShellClient {
         event as EventPayloads["panel:executionActivated"],
       );
     });
+    this.events.on("panel:executionFailed", (event) => {
+      this.panels.handleExecutionFailed(
+        event as EventPayloads["panel:executionFailed"],
+      );
+    });
   }
   async init(): Promise<void> {
     const deadline = Date.now() + 120_000;
@@ -1812,19 +1844,18 @@ export class ShellClient {
             ? Promise.resolve()
             : this.persistStartupSnapshot(info.config.id),
         ]);
-        await (refreshTree
-          ? this.panels.reconcile()
-          : this.panels.completeColdStart());
-        if (this.disposed || signal.aborted) {
-          await deferredResults;
-          return;
-        }
-        await this.events.subscribeAll([
-          "panel:runtimeLeaseChanged",
-          "panel-tree-invalidated",
-          "panel-presentation-changed",
-          "panel:executionActivated",
-        ]);
+        // Admit the watch before the authoritative read. An execution can
+        // activate after first paint while this reconciliation is in flight;
+        // reading first and watching second loses that transition forever.
+        await reconcileWatchedPanelProjection({
+          subscribe: (events) => this.events.subscribeAll(events),
+          revision: () => this.panels.getProjectionRevision(),
+          // First paint is deliberately allowed before watch admission. Read
+          // the projection again after admission even for a live-tree start,
+          // so a transition in that short interval is represented either by
+          // the watch or by this level-triggered read.
+          reconcile: () => this.panels.reconcile(),
+        });
         if (this.disposed || signal.aborted) {
           await deferredResults;
           return;

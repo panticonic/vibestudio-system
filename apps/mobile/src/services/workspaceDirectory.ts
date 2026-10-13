@@ -59,6 +59,7 @@ import {
 } from "../state/connectionAtoms";
 import { serverUrlAtom } from "../state/authAtoms";
 import { getNativeAppStorage } from "./nativeAppStorage";
+import type { EventPayloads } from "@vibestudio/shared/events";
 
 export interface MobileWorkspaceSession {
   readonly workspaceId: string;
@@ -246,6 +247,8 @@ export class MobileWorkspaceDirectory {
   private readonly listeners = new Set<() => void>();
   private readonly opening = new Map<string, Promise<MobileWorkspaceSession>>();
   private readonly startupOperations = new Set<Promise<void>>();
+  private stopWorkspaceCatalog: (() => void) | null = null;
+  private workspaceCatalogGeneration = 0;
   private disposed = false;
   private closing: Promise<void> | null = null;
 
@@ -285,6 +288,14 @@ export class MobileWorkspaceDirectory {
     ]);
     this.personalWorkspaceId = pair.personal.workspaceId;
     this.systemWorkspaceId = pair.system.workspaceId;
+    this.stopWorkspaceCatalog = this.hubApproval.events.on(
+      "hub:workspace-catalog-changed",
+      (payload) => {
+        this.workspaceCatalogGeneration += 1;
+        this.applyWorkspaceEntries(payload.workspaces);
+      },
+    );
+    await this.hubApproval.events.subscribe("hub:workspace-catalog-changed");
     await this.refresh();
     // open() publishes the System owner synchronously. Personal captures that
     // same app-source client while both workspace connections become ready.
@@ -355,56 +366,68 @@ export class MobileWorkspaceDirectory {
   }
 
   async refresh(): Promise<void> {
-    try {
-      const entries = await this.hubControl.listWorkspaces();
-      if (this.disposed) return;
-      this.entries = entries.sort((a, b) => {
-        const rank = (entry: MobileHubWorkspace) =>
-          entry.workspaceId === this.personalWorkspaceId
-            ? 0
-            : entry.workspaceId === this.systemWorkspaceId
-              ? 2
-              : 1;
-        return rank(a) - rank(b) || a.name.localeCompare(b.name);
-      });
-      const accessible = new Set(entries.map((entry) => entry.workspaceId));
-      for (const id of this.pendingApprovalCounts.keys()) {
-        if (!accessible.has(id)) {
-          this.pendingApprovalCounts.delete(id);
-          if (this.requestedApproval?.workspaceId === id)
-            this.requestedApproval = null;
-        }
+    for (;;) {
+      const observed = this.workspaceCatalogGeneration;
+      try {
+        const entries = await this.hubControl.listWorkspaces();
+        if (this.disposed) return;
+        if (observed !== this.workspaceCatalogGeneration) continue;
+        this.applyWorkspaceEntries(entries);
+        return;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : String(error);
+        this.changed();
+        throw error;
       }
-      for (const entry of entries) {
-        const session = this.sessions.get(entry.workspaceId);
-        if (session?.approvals == null || session.state !== "ready") {
-          this.pendingApprovalCounts.set(
-            entry.workspaceId,
-            entry.pendingApprovalCount,
-          );
-        }
-      }
-      for (const [id, session] of this.sessions) {
-        if (!entries.some((entry) => entry.workspaceId === id)) {
-          session.approvalState?.stop();
-          session.stopApprovalRecovery?.();
-          session.client.dispose();
-          this.sessions.delete(id);
-          this.workspaceApprovalOwners.delete(id);
-          this.expanded.delete(id);
-          this.presented.delete(id);
-          this.pendingApprovalCounts.delete(id);
-          if (this.requestedApproval?.workspaceId === id)
-            this.requestedApproval = null;
-        }
-      }
-      this.error = null;
-      this.changed();
-    } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error);
-      this.changed();
-      throw error;
     }
+  }
+
+  private applyWorkspaceEntries(
+    incoming: EventPayloads["hub:workspace-catalog-changed"]["workspaces"],
+  ): void {
+    const entries = [...incoming];
+    this.entries = entries.sort((a, b) => {
+      const rank = (entry: MobileHubWorkspace) =>
+        entry.workspaceId === this.personalWorkspaceId
+          ? 0
+          : entry.workspaceId === this.systemWorkspaceId
+            ? 2
+            : 1;
+      return rank(a) - rank(b) || a.name.localeCompare(b.name);
+    });
+    const accessible = new Set(entries.map((entry) => entry.workspaceId));
+    for (const id of this.pendingApprovalCounts.keys()) {
+      if (!accessible.has(id)) {
+        this.pendingApprovalCounts.delete(id);
+        if (this.requestedApproval?.workspaceId === id)
+          this.requestedApproval = null;
+      }
+    }
+    for (const entry of entries) {
+      const session = this.sessions.get(entry.workspaceId);
+      if (session?.approvals == null || session.state !== "ready") {
+        this.pendingApprovalCounts.set(
+          entry.workspaceId,
+          entry.pendingApprovalCount,
+        );
+      }
+    }
+    for (const [id, session] of this.sessions) {
+      if (!entries.some((entry) => entry.workspaceId === id)) {
+        session.approvalState?.stop();
+        session.stopApprovalRecovery?.();
+        session.client.dispose();
+        this.sessions.delete(id);
+        this.workspaceApprovalOwners.delete(id);
+        this.expanded.delete(id);
+        this.presented.delete(id);
+        this.pendingApprovalCounts.delete(id);
+        if (this.requestedApproval?.workspaceId === id)
+          this.requestedApproval = null;
+      }
+    }
+    this.error = null;
+    this.changed();
   }
 
   /** Report the visible workspace, not merely a paired credential or System connection. */
@@ -880,6 +903,8 @@ export class MobileWorkspaceDirectory {
 
   private async close(): Promise<void> {
     this.disposed = true;
+    this.stopWorkspaceCatalog?.();
+    this.stopWorkspaceCatalog = null;
     this.hubApproval.approvalState?.stop();
     const sessions = [...this.sessions.values()];
     for (const session of sessions) {
@@ -893,6 +918,9 @@ export class MobileWorkspaceDirectory {
       sessions.map((session) => session.client.close()),
     );
     results.push(...(await Promise.allSettled(startupOperations)));
+    results.push(
+      ...(await Promise.allSettled([this.hubApproval.events.unsubscribeAll()])),
+    );
     results.push(...(await Promise.allSettled([this.account.close()])));
     this.changed();
     const failures = results.flatMap((result) =>
