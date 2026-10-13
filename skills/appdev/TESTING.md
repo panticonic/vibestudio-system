@@ -99,7 +99,8 @@ does not show parity.
 Verify:
 
 - terminal target builds exactly one primary Node ESM (`.mjs`) artifact
-- `apps:available` includes `launchMode: "client-module"`
+- the adoption announced on `supervision:changed` has `adoption: "artifact-only"` and
+  `app.target: "terminal"`
 - `auth.grantAppPrincipal([{ principal: "terminal-app" }])` from a paired
   device returns the `app:<source>:<deviceId>` caller and the active build,
   locally and over Iroh; redeeming the grant from another transport endpoint

@@ -124,7 +124,9 @@ The programs people start in the terminal browser are terminal apps (panels
 hosted by terminals, at `terminal-apps/<name>`): untrusted Node programs in
 workspace PTYs. See the Base `terminal-apps` skill (`skills/terminal-apps/SKILL.md`).
 
-The server emits `apps:available` with `launchMode: "client-module"`.
+The server announces the build on `supervision:changed` with
+`adoption: "artifact-only"`: nothing is pushed to the terminal; the CLI fetches
+the build when it launches.
 
 Behavior:
 
@@ -212,15 +214,19 @@ Target-specific notes:
   build. Whether a terminal is running it is up to that device's
   `vibestudio terminal` CLI.
 
-`apps:lifecycle` carries events for all targets:
+`supervision:changed` carries one event for every supervised unit (apps and
+extensions). Its `change` field says what happened:
 
-- `available`: first trusted build became active
-- `update-available`: a newer trusted build replaced the active build, or is
-  ready for prompt adoption
-- `update-error`: the attempted update failed and the previous build remains
-  the effective version
+- `status`: lifecycle or error changed (`status`, `lastError`)
+- `adopted`: a build became the active one. For an app the event also carries
+  `adoption`, the target's policy: `immediate` for first activation, `prompt`
+  for an update that a loaded Electron view or an installed React Native bundle
+  should ask about, `artifact-only` for terminal apps (the client fetches the
+  build when it launches)
+- `update-rejected`: a newer build was refused (build, validation or
+  activation failed) and the adopted build keeps running; `lastError` says why
 - `rolled-back`: the active build was switched to a retained previous build
 
-Clients use `target`, `source`, `appId`, `buildKey`, `canRollback`, and
-`selectedForHost` from the payload to decide whether a prompt applies to the
-current host.
+Clients use `identity`, `source`, `app.target`, `artifact.buildKey`,
+`canRollback` and `adoption` to decide whether a prompt applies to the current
+host.

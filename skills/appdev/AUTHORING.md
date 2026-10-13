@@ -90,24 +90,26 @@ the app becomes active.
 
 ## Runtime Update Protocol
 
-To show update state in its own UI, an app subscribes to `apps:lifecycle`.
-The event types are:
+To show update state in its own UI, an app subscribes to `supervision:changed`
+(events for apps and extensions share it; filter on `identity.kind`). The
+`change` values are:
 
-- `update-available`: a new trusted build is active on the server and can be
-  loaded by clients. Payload includes app id, source, target, build key,
-  effective version, previous build metadata, `canRollback`, and an
-  `adoptionPolicy`.
-- `update-error`: source was published, but its derived build or activation
-  failed. The previous active build remains selected. Payload includes the
-  error and rollback availability.
+- `adopted`: a new trusted build is active on the server and can be loaded by
+  clients. Payload includes the identity, source, `app.target`, build key and
+  effective version, previous build metadata, `canRollback`, and the target's
+  `adoption` policy.
+- `update-rejected`: source was published, but its derived build or activation
+  failed. The previous active build remains selected and the unit keeps
+  running; `lastError` carries the reason.
 - `rolled-back`: the server switched the app back to a previous trusted build.
+- `status`: any other lifecycle or error change.
 
-The adoption policy is the same for every target. `prompt` (for
-`update-available`) means the client keeps its loaded build and asks the user
-when to adopt the new one. `immediate` is used for first load and
-user-requested rollback. Every target runs on a client: a terminal client app adopts
-a new build when `vibestudio terminal` loads it again (on relaunch, or when the
-CLI reconnects after an update).
+The adoption policy is a property of the target. Electron and React Native use
+`prompt` for an update: the client keeps its loaded build and asks the user when
+to adopt the new one; `immediate` is used for first load and user-requested
+rollback. A terminal client app is `artifact-only`: it adopts a new build when
+`vibestudio terminal` loads it again (on relaunch, or when the CLI reconnects
+after an update).
 
 To list current and previous app builds, call
 `runtime.supervision.versions({ kind: "app", releaseId: appName })`. To restore

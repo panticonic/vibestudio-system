@@ -61,22 +61,13 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
   }, [load]);
 
   useShellEvent(
-    "apps:available",
-    useCallback(() => {
-      void load();
-    }, [load])
-  );
-  useShellEvent(
-    "apps:status",
-    useCallback(() => {
-      void load();
-    }, [load])
-  );
-  useShellEvent(
-    "apps:lifecycle",
-    useCallback(() => {
-      void load();
-    }, [load])
+    "supervision:changed",
+    useCallback(
+      (change) => {
+        if (change.identity.kind === "app") void load();
+      },
+      [load]
+    )
   );
 
   const pendingByApp = useMemo(

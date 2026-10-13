@@ -1,19 +1,7 @@
 import { Alert } from "react-native";
 import type { ShellClient } from "./shellClient";
 import type { ToastInput } from "../state/toastAtoms";
-
-export interface AppLifecyclePayload {
-  type?: string;
-  appId?: string;
-  source?: string;
-  target?: string;
-  buildKey?: string | null;
-  effectiveVersion?: string | null;
-  previousBuildKey?: string | null;
-  previousEffectiveVersion?: string | null;
-  error?: string;
-  canRollback?: boolean;
-}
+import type { SupervisionChange } from "@vibestudio/shared/events";
 
 export interface AppUpdatePromptDeps {
   shellClient: ShellClient;
@@ -30,40 +18,43 @@ type EnsureBundleFn = (
   source?: string | null
 ) => Promise<unknown>;
 
-export function handleMobileAppLifecycleEvent(
-  event: AppLifecyclePayload,
+/**
+ * React to a supervision change of the mobile app: ask before installing an
+ * update, and say plainly when an update was refused or the app rolled back.
+ */
+export function handleMobileSupervisionChange(
+  change: SupervisionChange,
   deps: AppUpdatePromptDeps
 ): void {
-  if (!isSelectedMobileAppEvent(event, deps)) return;
-  if (event.type === "update-available") {
-    promptMobileUpdate(event, deps);
+  if (!isSelectedMobileApp(change, deps)) return;
+  const appId = change.identity.entityId;
+  if (change.change === "adopted" && change.adoption === "prompt") {
+    promptMobileUpdate(change, deps);
     return;
   }
-  if (event.type === "update-error") {
+  if (change.change === "update-rejected") {
     deps.pushToast({
-      title: "App update failed",
-      message: event.error ?? "The previous app version is still active.",
+      title: "Update not adopted",
+      message: `${change.lastError ?? "The new version could not be installed."} The previous version keeps running.`,
       tone: "danger",
       durationMs: 10000,
     });
     return;
   }
-  if (event.type === "rolled-back") {
+  if (change.change === "rolled-back") {
     deps.pushToast({
       title: "App rolled back",
-      message: `${event.appId ?? "The app"} is using the previous trusted build.`,
+      message: `${appId} is using the previous trusted build.`,
       tone: "success",
     });
   }
 }
 
-function isSelectedMobileAppEvent(event: AppLifecyclePayload, deps: AppUpdatePromptDeps): boolean {
-  if (event.target && event.target !== "react-native") return false;
+function isSelectedMobileApp(change: SupervisionChange, deps: AppUpdatePromptDeps): boolean {
+  if (change.identity.kind !== "app" || change.app?.target !== "react-native") return false;
   const selectedSource = deps.selectedSource ? normalizeSource(deps.selectedSource) : null;
-  if (selectedSource && event.source && normalizeSource(event.source) !== selectedSource) {
-    return false;
-  }
-  if (deps.selectedAppId && event.appId && event.appId !== deps.selectedAppId) return false;
+  if (selectedSource && normalizeSource(change.source) !== selectedSource) return false;
+  if (deps.selectedAppId && change.identity.entityId !== deps.selectedAppId) return false;
   return true;
 }
 
@@ -85,9 +76,9 @@ async function defaultEnsureBundle(
  * what it's installing; falls back to generic copy when the server didn't
  * report versions.
  */
-function formatUpdateMessage(event: AppLifecyclePayload, appId: string): string {
-  const next = event.effectiveVersion?.trim();
-  const prev = event.previousEffectiveVersion?.trim();
+function formatUpdateMessage(change: SupervisionChange, appId: string): string {
+  const next = change.artifact.effectiveVersion?.trim();
+  const prev = change.previousEffectiveVersion?.trim();
   if (next && prev && next !== prev) {
     return `${appId} v${prev} → v${next} is ready to install.`;
   }
@@ -97,23 +88,22 @@ function formatUpdateMessage(event: AppLifecyclePayload, appId: string): string 
   return `${appId} has a new trusted bundle ready to install.`;
 }
 
-function promptMobileUpdate(event: AppLifecyclePayload, deps: AppUpdatePromptDeps): void {
-  const appId = event.appId ?? "apps/mobile";
+function promptMobileUpdate(change: SupervisionChange, deps: AppUpdatePromptDeps): void {
+  const appId = change.identity.entityId;
   // Version awareness: ignore no-op events where the "new" build is the one
   // already running -- e.g. a lifecycle event re-emitted (on reconnect) for a
   // build the user already installed. The server reports the build being
   // replaced as previousBuildKey.
-  if (event.buildKey && event.previousBuildKey && event.buildKey === event.previousBuildKey) {
-    return;
-  }
-  const promptKey = `${appId}:${event.buildKey ?? "unknown"}`;
+  const buildKey = change.artifact.buildKey;
+  if (buildKey && change.previousBuildKey && buildKey === change.previousBuildKey) return;
+  const promptKey = `${appId}:${buildKey ?? "unknown"}`;
   if (deps.prompted.has(promptKey)) return;
   deps.prompted.add(promptKey);
   const ensureBundle = deps.ensureBundle ?? defaultEnsureBundle;
   const alert = deps.alert ?? Alert.alert;
-  alert("Mobile app update available", formatUpdateMessage(event, appId), [
+  alert("Mobile app update available", formatUpdateMessage(change, appId), [
     { text: "Later", style: "cancel" },
-    ...(event.canRollback
+    ...(change.canRollback
       ? [
           {
             text: "Roll back",
@@ -124,7 +114,7 @@ function promptMobileUpdate(event: AppLifecyclePayload, deps: AppUpdatePromptDep
                 .then(() =>
                   ensureBundle(
                     deps.shellClient.transport,
-                    event.source ?? deps.selectedSource ?? null
+                    change.source
                   )
                 )
                 .catch((error: unknown) => {
@@ -144,7 +134,7 @@ function promptMobileUpdate(event: AppLifecyclePayload, deps: AppUpdatePromptDep
       onPress: () => {
         void ensureBundle(
           deps.shellClient.transport,
-          event.source ?? deps.selectedSource ?? null
+          change.source
         ).catch((error: unknown) => {
           deps.pushToast({
             title: "Update failed",

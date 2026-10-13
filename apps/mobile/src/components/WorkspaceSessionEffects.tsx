@@ -8,10 +8,7 @@ import {
   handleExternalOpen,
   type ExternalOpenPayload,
 } from "../services/oauthLoopback";
-import {
-  handleMobileAppLifecycleEvent,
-  type AppLifecyclePayload,
-} from "../services/appUpdatePrompt";
+import { handleMobileSupervisionChange } from "../services/appUpdatePrompt";
 import type { ToastInput } from "../state/toastAtoms";
 
 /** Connected workspace events remain visible even before its panels are opened. */
@@ -44,11 +41,11 @@ export function WorkspaceSessionEffects({
     const current = () =>
       active && directory.sessions.get(session.workspaceId) === session;
     const stopAppLifecycle = isAppSource
-      ? client.events.on("apps:lifecycle", (payload) => {
+      ? client.events.on("supervision:changed", (change) => {
           void candidate
             .then((selected) => {
               if (!current() || !selected) return;
-              handleMobileAppLifecycleEvent(payload as AppLifecyclePayload, {
+              handleMobileSupervisionChange(change, {
                 shellClient: client,
                 pushToast: (toast) => {
                   if (current()) notify(toast);
@@ -96,7 +93,7 @@ export function WorkspaceSessionEffects({
     const topics = [
       "notification:show",
       "external-open:open",
-      ...(isAppSource ? ["apps:lifecycle" as const] : []),
+      ...(isAppSource ? ["supervision:changed" as const] : []),
     ] as const;
     const subscribe = async () => {
       try {

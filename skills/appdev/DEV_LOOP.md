@@ -68,16 +68,24 @@ activation fails:
 
 - semantic `main` stays at the published event and the previous build stays in
   use
-- app status becomes `error`, and `apps:status` reports the build key and
-  effective version still in use
-- `apps:lifecycle` emits `type: "update-error"` with the failure message, which
-  the shell and mobile clients show as notifications/toasts
+- the app keeps status `running` with the error recorded as `lastError`
+  ("update not adopted"); a working build is never demoted to `error`
+- `supervision:changed` reports `change: "update-rejected"` with the failure
+  message, which the shell and mobile clients show as notifications/toasts
+
+A push that fails the protected-main build gate never reaches this state: the
+gate builds each affected app target and enforces its artifact contract (a
+terminal app's single `.mjs` entry, a React Native app's signed per-platform
+bundles and provider), so a bad artifact rejects the push with the app, target
+and defect named. Only activation-time failures that need a running host
+(for example a review the user has not accepted) land here.
 
 Fix the failure with a new semantic event. Do not roll back source history to
 hide the failed publication.
 
-A successful update records the replaced build in app version history and emits
-`apps:lifecycle` with `type: "update-available"`. Clients that already have the
+A successful update records the replaced build in the unit's version history and
+emits `supervision:changed` with `change: "adopted"` and the target's `adoption`
+policy. Clients that already have the
 app loaded adopt it explicitly:
 
 - desktop Electron apps keep the current view and show a notification with
@@ -178,8 +186,9 @@ pnpm test:iroh-mobile-e2e
 
 For terminal client apps:
 
-- Expect `apps:available` with `launchMode: "client-module"`. The server only
-  builds terminal client apps; it never runs them.
+- Expect `supervision:changed` with `change: "adopted"` and
+  `adoption: "artifact-only"`. The server only builds terminal client apps; it
+  never runs them.
 - Run the app with `vibestudio terminal` (from the host checkout,
   `pnpm terminal [--instance ID]`). The CLI runs the launch gate for the
   `terminal` target, obtains the device's app principal through
