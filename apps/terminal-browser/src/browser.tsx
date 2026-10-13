@@ -37,7 +37,6 @@ import {
   type MouseEvent,
 } from "./input/tokenizer.js";
 import {
-  TerminalServiceUnavailableError,
   createTerminalSessions,
   type TerminalSessionEntry,
   type TerminalSessions,
@@ -1553,10 +1552,10 @@ export class TerminalBrowser {
       this.openTab(entry);
       return;
     }
-    await this.relaunch(entry.sessionId, entry.title, entry.kind);
+    await this.relaunch(entry.sessionId, entry.title);
   }
 
-  private async relaunch(sessionId: string, title: string, kind: TerminalSessionEntry["kind"]): Promise<void> {
+  private async relaunch(sessionId: string, title: string): Promise<void> {
     this.setNotice(`Starting ${title} again…`);
     const size = this.sessionSize();
     try {
@@ -1564,12 +1563,13 @@ export class TerminalBrowser {
         sessionId,
         cols: size.columns,
         rows: size.rows,
+        approvalsKey: approvalsKeyLabel(this.settings.prefixKey),
       });
       if (this.finished) return;
       this.openTab(entry);
       this.setNotice(null);
     } catch (error) {
-      this.reportLaunchFailure(title, kind, error);
+      this.reportLaunchFailure(title, error);
     }
   }
 
@@ -1589,17 +1589,12 @@ export class TerminalBrowser {
       this.openTab(entry);
       this.setNotice(null);
     } catch (error) {
-      this.reportLaunchFailure(title, app ? "app" : "shell", error);
+      this.reportLaunchFailure(title, error);
     }
   }
 
-  private reportLaunchFailure(title: string, kind: TerminalSessionEntry["kind"], error: unknown): void {
-    const reason = describeError(error);
-    const what = kind === "app" ? "Terminal apps" : "Shells";
-    const message =
-      error instanceof TerminalServiceUnavailableError
-        ? `${what} can't be started in ${this.host.workspace.name}: ${reason}`
-        : `Could not start ${title}: ${reason}`;
+  private reportLaunchFailure(title: string, error: unknown): void {
+    const message = `Could not start ${title}: ${describeError(error)}`;
     this.log("error", message);
     this.setNotice(`${message} (details: ${this.prefix()} l)`);
   }
@@ -1607,7 +1602,7 @@ export class TerminalBrowser {
   /** `prefix r`: reattach; a session whose program ended is started again. */
   private async reattach(session: ShellSessionTab): Promise<void> {
     if (session.status.kind === "exited" || !session.entry.shellSessionId) {
-      await this.relaunch(session.sessionId, session.title, session.entry.kind);
+      await this.relaunch(session.sessionId, session.title);
       return;
     }
     await session.attach(session === this.focusedSession(), true);

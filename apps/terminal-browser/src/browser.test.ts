@@ -11,7 +11,7 @@ import type {
 } from "@vibestudio/shell-core/terminal/terminalBrowserHost";
 import { TerminalBrowser } from "./browser.js";
 import { run } from "./index.js";
-import { TerminalServiceUnavailableError, type TerminalSessionEntry } from "./sessions/launcher.js";
+import type { TerminalSessionEntry } from "./sessions/launcher.js";
 import { FakeShell, FakeTerminalSessions } from "./testing/fakeShell.js";
 
 const { Terminal } = xterm as unknown as { Terminal: typeof import("@xterm/headless").Terminal };
@@ -328,19 +328,6 @@ describe("terminal browser", () => {
     app.tty.type("shell\r");
     await until(() => app.tty.tabs().includes("1:Shell"), "Shell tab");
     expect(app.sessions.launches).toEqual([{ cols: 100, rows: 18, approvalsKey: "Ctrl-Space a" }]);
-  });
-
-  it("says plainly when this server cannot start terminal apps", async () => {
-    const app = start();
-    app.sessions.failure = new TerminalServiceUnavailableError(
-      "this Vibestudio server has no terminal launch service. Update Vibestudio, then try again."
-    );
-    await until(() => app.tty.text().includes("Echoes what you type."), "launcher");
-    app.tty.type("ech\r");
-    await until(
-      () => app.tty.text().includes("Terminal apps can't be started in Personal: this Vibestudio"),
-      "actionable error"
-    );
   });
 
   it("resumes the most recently active running session on start and lists the rest", async () => {

@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text, useInput } from "ink";
-import { useTerminalSize, type TerminalSessionHandle } from "@workspace/terminal-shim";
+
 import {
   LOG_LEVELS,
   appendRecords,
@@ -26,10 +26,30 @@ export interface FilterStore {
   save(filter: LogFilter): void;
 }
 
+/** What the viewer needs from the terminal it is shown in. */
+export interface LogTerminal {
+  /** Current size, and changes (SIGWINCH). */
+  size(): { columns: number; rows: number };
+  onResize(listener: () => void): () => void;
+  /** Whether the person is looking at this session (focus reports). */
+  isFocused(): boolean;
+  onFocusChange(listener: (focused: boolean) => void): () => void;
+  /** Ask for the person's attention (OSC 9 + BEL: a tab badge in the terminal browser). */
+  requestAttention(reason: string): void;
+}
+
 export interface LogViewerProps {
   source: LogSource;
   filters: FilterStore;
-  session: Pick<TerminalSessionHandle, "isFocused" | "onFocusChange" | "setAttention">;
+  terminal: LogTerminal;
+  /** The person pressed q. */
+  onQuit(): void;
+}
+
+function useTerminalSize(terminal: LogTerminal): { columns: number; rows: number } {
+  const [size, setSize] = React.useState(() => terminal.size());
+  React.useEffect(() => terminal.onResize(() => setSize(terminal.size())), [terminal]);
+  return size;
 }
 
 type Phase = { kind: "loading" } | { kind: "live" } | { kind: "error"; message: string };
@@ -41,8 +61,8 @@ const LEVEL_COLOR: Record<LogLevel, string | undefined> = {
   error: "red",
 };
 
-export function LogViewer({ source, filters, session }: LogViewerProps): React.ReactElement {
-  const { columns, rows } = useTerminalSize();
+export function LogViewer({ source, filters, terminal, onQuit }: LogViewerProps): React.ReactElement {
+  const { columns, rows } = useTerminalSize(terminal);
   const [records, setRecords] = React.useState<LogRecord[]>([]);
   const [phase, setPhase] = React.useState<Phase>({ kind: "loading" });
   const [filter, setFilter] = React.useState<LogFilter>(() => filters.load());
@@ -68,8 +88,8 @@ export function LogViewer({ source, filters, session }: LogViewerProps): React.R
         setPhase({ kind: "live" });
         await source.watch((batch) => {
           setRecords((current) => appendRecords(current, batch));
-          if (!session.isFocused() && batch.some((record) => record.level === "error")) {
-            session.setAttention({ reason: "new server error" });
+          if (!terminal.isFocused() && batch.some((record) => record.level === "error")) {
+            terminal.requestAttention("new server error");
           }
         }, controller.signal);
         if (!controller.signal.aborted) {
@@ -85,14 +105,6 @@ export function LogViewer({ source, filters, session }: LogViewerProps): React.R
     })();
     return () => controller.abort();
   }, [source, attempt]);
-
-  React.useEffect(
-    () =>
-      session.onFocusChange((focused) => {
-        if (focused) session.setAttention(null);
-      }),
-    [session]
-  );
 
   const listHeight = Math.max(1, rows - 2);
   const visible = React.useMemo(() => records.filter((r) => matches(r, filter)), [records, filter]);
@@ -119,6 +131,7 @@ export function LogViewer({ source, filters, session }: LogViewerProps): React.R
     } else if (input === "/") setDraft(filter.search);
     else if (input === "c") updateFilter({ ...filter, search: "" });
     else if (input === "r" && phase.kind === "error") setAttempt((n) => n + 1);
+    else if (input === "q") onQuit();
   });
 
   const following = window.offset === 0;
@@ -142,8 +155,8 @@ export function LogViewer({ source, filters, session }: LogViewerProps): React.R
           <Box flexDirection="column">
             <Text>Loading the server log…</Text>
             <Text dimColor wrap="wrap">
-              Reading server logs needs your approval the first time. If an approval is waiting, the
-              terminal browser shows it now — choose how long to allow it there.
+              Reading server logs needs your approval the first time. If an approval is waiting, your
+              terminal shows it now — choose how long to allow it there.
             </Text>
           </Box>
         ) : phase.kind === "error" && records.length === 0 ? (
@@ -180,7 +193,7 @@ export function LogViewer({ source, filters, session }: LogViewerProps): React.R
       ) : (
         <Text dimColor wrap="truncate-end">
           ↑↓/PgUp/PgDn scroll · g/G top/bottom · 1-4 level (verbose/info/warn/error) · / search · c
-          clear
+          clear · q quit
         </Text>
       )}
     </Box>

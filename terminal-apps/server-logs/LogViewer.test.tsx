@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { TerminalEventDecoder } from "@workspace/terminal-host-protocol";
-import { InkTerminalSessionHost } from "@workspace/terminal-shim";
-import { LogViewer, type LogSource } from "./LogViewer.js";
+import { PassThrough } from "node:stream";
+import { EventEmitter } from "node:events";
+import { afterEach, describe, expect, it } from "vitest";
+import { render, type Instance } from "ink";
+import { LogViewer, type LogSource, type LogTerminal } from "./LogViewer.js";
 import {
   appendRecords,
   visibleWindow,
@@ -30,53 +31,62 @@ function fakeSource(initial: LogRecord[]) {
   return { source, push: (records: LogRecord[]) => push(records) };
 }
 
+class FakeStdout extends EventEmitter {
+  columns = 60;
+  rows = 8;
+  output = "";
+  write(data: string): boolean {
+    this.output += data;
+    return true;
+  }
+}
+
+let instance: Instance | null = null;
+afterEach(() => {
+  instance?.unmount();
+  instance = null;
+});
+
 async function mount(source: LogSource, focused = true) {
   let saved: LogFilter = DEFAULT_FILTER;
-  const attention: unknown[] = [];
-  const host = new InkTerminalSessionHost({
-    render: (session) => (
-      <LogViewer
-        source={source}
-        filters={{ load: () => saved, save: (f) => (saved = f) }}
-        session={{
-          isFocused: session.isFocused,
-          onFocusChange: session.onFocusChange,
-          setAttention: (a) => {
-            attention.push(a);
-            session.setAttention(a);
-          },
-        }}
-      />
-    ),
+  const attention: string[] = [];
+  const stdout = new FakeStdout();
+  const stdin = Object.assign(new PassThrough(), {
+    isTTY: true,
+    setRawMode: () => undefined,
+    ref: () => undefined,
+    unref: () => undefined,
   });
-  const response = host.attach("app:1", {
-    sessionId: "s",
-    viewport: { columns: 60, rows: 8 },
-    focused,
-  });
-  const reader = response.body!.getReader();
-  const decoder = new TerminalEventDecoder();
-  let output = "";
-  void (async () => {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return;
-      for (const event of decoder.push(value)) if (event.type === "output") output += event.data;
-    }
-  })();
+  const terminal: LogTerminal = {
+    size: () => ({ columns: 60, rows: 8 }),
+    onResize: () => () => undefined,
+    isFocused: () => focused,
+    onFocusChange: () => () => undefined,
+    requestAttention: (reason) => attention.push(reason),
+  };
+  let quit = false;
+  instance = render(
+    <LogViewer
+      source={source}
+      filters={{ load: () => saved, save: (f) => (saved = f) }}
+      terminal={terminal}
+      onQuit={() => (quit = true)}
+    />,
+    { stdout: stdout as never, stdin: stdin as never, debug: true, patchConsole: false }
+  );
   const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
   await settle();
   return {
-    output: () => output,
-    clear: () => (output = ""),
+    output: () => stdout.output,
+    clear: () => (stdout.output = ""),
     type: async (data: string) => {
-      host.input("app:1", "s", data);
+      stdin.write(data);
       await settle();
     },
     settle,
     saved: () => saved,
     attention,
-    detach: () => reader.cancel(),
+    quit: () => quit,
   };
 }
 
@@ -113,7 +123,6 @@ describe("LogViewer", () => {
     await view.type("4");
     expect(view.output()).toContain("level ≥ error");
     expect(view.saved().minLevel).toBe("error");
-    await view.detach();
   });
 
   it("searches and remembers the search", async () => {
@@ -124,7 +133,6 @@ describe("LogViewer", () => {
     await view.type("\r");
     expect(view.output()).toContain('matching "bet"');
     expect(view.saved().search).toBe("bet");
-    await view.detach();
   });
 
   it("asks for attention on a new error only while unfocused", async () => {
@@ -132,11 +140,10 @@ describe("LogViewer", () => {
     const view = await mount(source, false);
     push([record(1, "error", "boom")]);
     await view.settle();
-    expect(view.attention).toEqual([{ reason: "new server error" }]);
-    await view.detach();
+    expect(view.attention).toEqual(["new server error"]);
   });
 
-  it("explains a failed load and how to retry", async () => {
+  it("explains a failed load and how to retry, and quits on q", async () => {
     const source: LogSource = {
       tail: async () => {
         throw new Error("approval declined");
@@ -146,6 +153,7 @@ describe("LogViewer", () => {
     const view = await mount(source);
     expect(view.output()).toContain("Could not read the server log: approval declined");
     expect(view.output()).toContain("Press r to try again");
-    await view.detach();
+    await view.type("q");
+    expect(view.quit()).toBe(true);
   });
 });
