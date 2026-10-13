@@ -205,11 +205,12 @@ export class MobileWorkspaceDirectory {
           await this.retireApprovalState(owner);
           if (!this.disposed) await this.startApprovalState(owner);
         });
-        this.approvalReplacementOperations.add(operation);
+        this.approvalReplacementReceipts.set(key, operation);
         try {
           await operation;
         } finally {
-          this.approvalReplacementOperations.delete(operation);
+          if (this.approvalReplacementReceipts.get(key) === operation)
+            this.approvalReplacementReceipts.delete(key);
         }
       }),
     );
@@ -271,7 +272,10 @@ export class MobileWorkspaceDirectory {
   private readonly startupOperations = new Set<Promise<void>>();
   private readonly approvalRetirements = new Set<Promise<void>>();
   private readonly approvalReplacements = new Map<string, Promise<unknown>>();
-  private readonly approvalReplacementOperations = new Set<Promise<void>>();
+  private readonly approvalReplacementReceipts = new Map<
+    string,
+    Promise<void>
+  >();
   private stopWorkspaceCatalog: (() => void) | null = null;
   private workspaceCatalogGeneration = 0;
   private disposed = false;
@@ -693,8 +697,18 @@ export class MobileWorkspaceDirectory {
         }
         session.state = "ready";
         const recoverApprovals = async () => {
-          await session.approvalState?.refresh("manual");
-          await drainBackgroundActionQueue(client);
+          const key = `workspace:${workspaceId}`;
+          const replacement = this.approvalReplacementReceipts.get(key);
+          await serializeByKey(this.approvalReplacements, key, async () => {
+            if (replacement) await replacement;
+            const controller = session.approvalState;
+            if (!controller)
+              throw new Error(
+                `Approval observation is unavailable for ${workspaceId}`,
+              );
+            await controller.refresh("manual");
+            await drainBackgroundActionQueue(client);
+          });
         };
         const stopResubscribe = client.recovery.registerResubscribeHandler(
           `mobile-approval-state:${workspaceId}`,
@@ -1044,8 +1058,9 @@ export class MobileWorkspaceDirectory {
     this.workspaceApprovalOwners.clear();
     const startupOperations = [...this.startupOperations];
     const approvalRetirements = [...this.approvalRetirements];
-    const approvalReplacements = [...this.approvalReplacementOperations];
-    const results = await Promise.allSettled([
+    const approvalOwnership = [...this.approvalReplacements.values()];
+    const approvalReplacements = [...this.approvalReplacementReceipts.values()];
+    const results: PromiseSettledResult<unknown>[] = await Promise.allSettled([
       ...(this.hubApproval.approvalState
         ? [this.retireApprovalState(this.hubApproval)]
         : []),
@@ -1057,6 +1072,7 @@ export class MobileWorkspaceDirectory {
     ]);
     results.push(...(await Promise.allSettled(startupOperations)));
     results.push(...(await Promise.allSettled(approvalRetirements)));
+    results.push(...(await Promise.allSettled(approvalOwnership)));
     results.push(...(await Promise.allSettled(approvalReplacements)));
     results.push(
       ...(await Promise.allSettled([this.hubApproval.events.unsubscribeAll()])),

@@ -546,13 +546,112 @@ describe("mobile workspace directory", () => {
     void recovering.then(() => {
       recovered = true;
     });
-    await Promise.resolve();
+    for (let attempt = 0; attempt < 20 && !finishRead; attempt += 1)
+      await Promise.resolve();
     expect(finishRead).toBeDefined();
     expect(recovered).toBe(false);
 
     finishRead([]);
     await recovering;
     expect(recovered).toBe(true);
+    await directory.dispose();
+  });
+
+  it("joins approval replacement before recovery refreshes the new controller", async () => {
+    const { directory } = fixture();
+    await directory.init();
+    const personal = directory.sessions.get("personal")!;
+    const staleRead = new Error("approval read failed");
+    jest
+      .mocked(personal.client.shellApproval.listPending)
+      .mockRejectedValueOnce(staleRead);
+    await expect(personal.approvalState!.refresh("manual")).rejects.toBe(
+      staleRead,
+    );
+
+    let finishRetirement!: () => void;
+    jest.mocked(personal.client.events.unsubscribe).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRetirement = resolve;
+        }),
+    );
+    type ApprovalRead = Awaited<
+      ReturnType<typeof personal.client.shellApproval.listPending>
+    >;
+    let finishRecoveryRead!: (pending: ApprovalRead) => void;
+    jest
+      .mocked(personal.client.shellApproval.listPending)
+      .mockClear()
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(
+        () =>
+          new Promise<ApprovalRead>((resolve) => {
+            finishRecoveryRead = resolve;
+          }),
+      );
+
+    const replacing = directory.retryFailedApprovalOwners();
+    for (let attempt = 0; attempt < 20 && !finishRetirement; attempt += 1)
+      await Promise.resolve();
+    expect(personal.client.events.unsubscribe).toHaveBeenCalledTimes(1);
+    const recovering = mockRecoveryHandlers.get("personal")!.resubscribe!();
+    let recovered = false;
+    void recovering.then(() => {
+      recovered = true;
+    });
+    await Promise.resolve();
+    expect(personal.client.shellApproval.listPending).not.toHaveBeenCalled();
+    expect(recovered).toBe(false);
+
+    finishRetirement();
+    await replacing;
+    for (let attempt = 0; attempt < 20 && !finishRecoveryRead; attempt += 1)
+      await Promise.resolve();
+    expect(finishRecoveryRead).toBeDefined();
+    expect(personal.client.shellApproval.listPending).toHaveBeenCalledTimes(2);
+    expect(recovered).toBe(false);
+
+    finishRecoveryRead([]);
+    await recovering;
+    expect(recovered).toBe(true);
+    await directory.dispose();
+  });
+
+  it("propagates approval replacement failure through concurrent recovery", async () => {
+    const { directory } = fixture();
+    await directory.init();
+    const personal = directory.sessions.get("personal")!;
+    const staleRead = new Error("approval read failed");
+    jest
+      .mocked(personal.client.shellApproval.listPending)
+      .mockRejectedValueOnce(staleRead);
+    await expect(personal.approvalState!.refresh("manual")).rejects.toBe(
+      staleRead,
+    );
+
+    let finishRetirement!: () => void;
+    jest.mocked(personal.client.events.unsubscribe).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRetirement = resolve;
+        }),
+    );
+    const replacementFailure = new Error("replacement admission failed");
+    jest
+      .mocked(personal.client.events.subscribe)
+      .mockRejectedValueOnce(replacementFailure);
+
+    const replacing = directory.retryFailedApprovalOwners();
+    for (let attempt = 0; attempt < 20 && !finishRetirement; attempt += 1)
+      await Promise.resolve();
+    expect(personal.client.events.unsubscribe).toHaveBeenCalledTimes(1);
+    const recovering = mockRecoveryHandlers.get("personal")!.resubscribe!();
+    const replacementCheck = expect(replacing).rejects.toBe(replacementFailure);
+    const recoveryCheck = expect(recovering).rejects.toBe(replacementFailure);
+    finishRetirement();
+
+    await Promise.all([replacementCheck, recoveryCheck]);
     await directory.dispose();
   });
 
