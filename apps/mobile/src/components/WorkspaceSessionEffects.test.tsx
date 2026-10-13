@@ -17,6 +17,8 @@ jest.mock("../services/appUpdatePrompt", () => ({
 function setup(workspaceId = "personal") {
   const listeners = new Map<string, (payload: unknown) => void>();
   const directListeners = new Map<string, (payload: unknown) => void>();
+  const resubscribeHandlers = new Map<string, () => Promise<void>>();
+  const coldRecoverHandlers = new Map<string, () => Promise<void>>();
   const stop = jest.fn();
   const client = {
     panels: { updateTheme: jest.fn(async (_theme: string) => undefined) },
@@ -44,6 +46,20 @@ function setup(workspaceId = "personal") {
       },
     ),
     transport: { onReconnect: jest.fn(() => stop) },
+    recovery: {
+      registerResubscribeHandler: jest.fn(
+        (key: string, handler: () => Promise<void>) => {
+          resubscribeHandlers.set(key, handler);
+          return () => resubscribeHandlers.delete(key);
+        },
+      ),
+      registerColdRecoverHandler: jest.fn(
+        (key: string, handler: () => Promise<void>) => {
+          coldRecoverHandlers.set(key, handler);
+          return () => coldRecoverHandlers.delete(key);
+        },
+      ),
+    },
   };
   const session = { workspaceId, client };
   const directory = {
@@ -65,6 +81,8 @@ function setup(workspaceId = "personal") {
     session,
     notify,
     props,
+    resubscribeHandlers,
+    coldRecoverHandlers,
     stop,
     direct: (event: string, payload: unknown) =>
       directListeners.get(event)?.(payload),
@@ -201,6 +219,11 @@ it("reconciles the selected native app update from durable status in System", as
   );
   expect(personal.client.hostLaunch.configuredCandidate).not.toHaveBeenCalled();
   expect(system.client.events.subscribe).toHaveBeenCalledWith("apps:status");
+  const recover = system.resubscribeHandlers.get("mobile-app-update-status");
+  expect(recover).toBeDefined();
+  system.client.hostLaunch.mobileUpdateStatus.mockResolvedValueOnce(null);
+  await expect(recover!()).resolves.toBeUndefined();
+  expect(system.client.hostLaunch.mobileUpdateStatus).toHaveBeenCalledTimes(2);
   expect(personal.client.events.subscribeAll).toHaveBeenCalledWith([
     "notification:show",
     "external-open:open",

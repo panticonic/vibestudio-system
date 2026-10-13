@@ -469,11 +469,11 @@ export function MainScreen({
         );
         const stopResubscribe = shellClient.recovery.registerResubscribeHandler(
           "mobile-user-notifications",
-          changed,
+          () => changed(),
         );
         const stopColdRecover = shellClient.recovery.registerColdRecoverHandler(
           "mobile-user-notifications",
-          changed,
+          () => changed(),
         );
         return () => {
           stopEvent();

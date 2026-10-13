@@ -161,6 +161,10 @@ stay inside their workspace.
   and the first authoritative read. Its asynchronous `stop()` owns late
   admission, the in-flight read, and remote leave; cleanup must observe that
   promise rather than treating removal of a local listener as retirement.
+- Register recovery handlers with the durable observation's Promise-returning
+  invalidation receipt. Recovery completion must await the authoritative
+  refresh instead of merely scheduling it, and the handler must be removed as
+  part of the observation's local listener lifetime.
 - Approval observation is part of workspace readiness. Keep its state explicit
   as `starting`, `ready`, or `failed`; await event admission and the initial
   authoritative queue read before publishing a ready workspace. Register its

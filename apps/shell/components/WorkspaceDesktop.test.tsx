@@ -70,6 +70,11 @@ const api = vi.hoisted(() => {
     incomingSurface: vi.fn(async (): Promise<unknown> => null),
     incomingLocations: new Set<(location: PanelLocation) => void>(),
     directListeners: new Map<string, Set<(payload: unknown) => void>>(),
+    disconnectDuringAdmission: new Set<string>(),
+    connectionListeners: new Map<
+      string,
+      (payload: { status: "connected" | "disconnected" }) => void
+    >(),
     open: vi.fn(async (id: string) => {
       const create = vi.fn(async () => ({ id: "panel" }));
       const close = vi.fn();
@@ -83,10 +88,14 @@ const api = vi.hoisted(() => {
               revision: 1,
               hits:
                 id === "garden"
-                  ? [{
-                      node: { slotId: "garden-panel", title: "Garden notes" },
-                      ancestors: [{ slotId: "garden-root", title: "Research" }],
-                    }]
+                  ? [
+                      {
+                        node: { slotId: "garden-panel", title: "Garden notes" },
+                        ancestors: [
+                          { slotId: "garden-root", title: "Research" },
+                        ],
+                      },
+                    ]
                   : [],
               nextCursor: null,
             }),
@@ -99,8 +108,23 @@ const api = vi.hoisted(() => {
           app: { openShellSurface: surface },
           shellApproval: { listPending: async () => [] },
           events: {
-            on: () => () => {},
-            subscribe: async () => {},
+            on: (
+              event: string,
+              listener: (payload: {
+                status: "connected" | "disconnected";
+              }) => void,
+            ) => {
+              if (event === "server-connection-changed")
+                api.connectionListeners.set(id, listener);
+              return () => api.connectionListeners.delete(id);
+            },
+            subscribe: async (event: string) => {
+              if (
+                event === "server-connection-changed" &&
+                api.disconnectDuringAdmission.delete(id)
+              )
+                api.connectionListeners.get(id)?.({ status: "disconnected" });
+            },
             unsubscribe: async () => {},
           },
         },
@@ -150,7 +174,10 @@ vi.mock("./PanelApp", () => ({
   PanelApp: function RetainedDraft() {
     const owner = useWorkspaceNavigationHost();
     useEffect(
-      () => owner?.registerNavigateToPanel?.((panelId) => api.navigate(owner.workspaceId, panelId)),
+      () =>
+        owner?.registerNavigateToPanel?.((panelId) =>
+          api.navigate(owner.workspaceId, panelId),
+        ),
       [owner?.registerNavigateToPanel, owner?.workspaceId],
     );
     const visible = useWorkspaceVisible();
@@ -196,11 +223,26 @@ function OpenWorkspace({ workspaceId }: { workspaceId: string }) {
   );
 }
 describe("desktop workspace ownership", () => {
+  it("preserves a connection edge delivered during event admission", async () => {
+    api.disconnectDuringAdmission.add("personal");
+    const result = render(<Desktop />);
+    try {
+      expect(
+        await screen.findByText("Waiting for the connection."),
+      ).toBeTruthy();
+    } finally {
+      result.unmount();
+      api.disconnectDuringAdmission.clear();
+    }
+  });
+
   it("updates the workspace list on an authenticated catalog event without changing focus", async () => {
     const result = render(<Desktop />);
     try {
       await screen.findByLabelText("personal draft");
-      await waitFor(() => expect(api.route).toHaveBeenCalledWith({ workspaceId: "personal" }));
+      await waitFor(() =>
+        expect(api.route).toHaveBeenCalledWith({ workspaceId: "personal" }),
+      );
       api.list.mockResolvedValueOnce([
         ...api.catalog,
         {
@@ -212,12 +254,20 @@ describe("desktop workspace ownership", () => {
         },
       ]);
       act(() => {
-        for (const listener of api.directListeners.get("hub:workspace-catalog-changed") ?? []) {
+        for (const listener of api.directListeners.get(
+          "hub:workspace-catalog-changed",
+        ) ?? []) {
           listener({ workspaces: [] });
         }
       });
-      expect(await screen.findByRole("button", { name: "Open New shared workspace" })).toBeTruthy();
-      expect(screen.getByLabelText("personal draft").getAttribute("data-visible")).toBe("true");
+      expect(
+        await screen.findByRole("button", {
+          name: "Open New shared workspace",
+        }),
+      ).toBeTruthy();
+      expect(
+        screen.getByLabelText("personal draft").getAttribute("data-visible"),
+      ).toBe("true");
     } finally {
       result.unmount();
       api.list.mockImplementation(async () => api.catalog);
@@ -237,7 +287,9 @@ describe("desktop workspace ownership", () => {
       await waitFor(() =>
         expect(api.navigate).toHaveBeenCalledWith("garden", "garden-panel"),
       );
-      expect(screen.getByRole("searchbox", { name: "Find panels" })).toHaveProperty("value", "");
+      expect(
+        screen.getByRole("searchbox", { name: "Find panels" }),
+      ).toHaveProperty("value", "");
     } finally {
       result.unmount();
       api.calls.delete("garden");
@@ -252,7 +304,9 @@ describe("desktop workspace ownership", () => {
     const result = render(<Desktop />);
     try {
       await screen.findByLabelText("personal draft");
-      const sidebar = document.querySelector(".workspace-desktop-navigation") as HTMLElement;
+      const sidebar = document.querySelector(
+        ".workspace-desktop-navigation",
+      ) as HTMLElement;
       const divider = screen.getByRole("separator", {
         name: "Resize panel tree sidebar",
       });
@@ -271,7 +325,8 @@ describe("desktop workspace ownership", () => {
     } finally {
       result.unmount();
       HTMLElement.prototype.setPointerCapture = originalSetPointerCapture;
-      if (previousWidth === null) localStorage.removeItem("workspace-sidebar-width");
+      if (previousWidth === null)
+        localStorage.removeItem("workspace-sidebar-width");
       else localStorage.setItem("workspace-sidebar-width", previousWidth);
     }
   });
@@ -625,7 +680,9 @@ describe("desktop workspace ownership", () => {
     const garden = api.catalog.pop()!;
     try {
       act(() => {
-        for (const listener of api.directListeners.get("hub:workspace-catalog-changed") ?? []) {
+        for (const listener of api.directListeners.get(
+          "hub:workspace-catalog-changed",
+        ) ?? []) {
           listener({ workspaces: api.catalog });
         }
       });

@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text, useApp, useStdin } from "ink";
 import type { ApprovalDecisionId } from "@vibestudio/shared/approvalContract";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
+import type { DurableObservation } from "@vibestudio/shell-core/durableObservation";
 import { SessionManager, type SessionSourceSpec } from "./SessionManager.js";
 import { classifyChord, parseNavKey } from "./inputRouter.js";
 import {
@@ -90,14 +91,10 @@ export function TerminalBrowser(
   }, [overlay, props.hostState]);
 
   // Track the global approval queue.
-  const refreshPending = React.useCallback(() => {
-    void approvals
-      .list()
-      .then(setPending)
-      .catch((error) =>
-        console.warn("[terminal-browser] Approval list refresh failed:", error),
-      );
-  }, [approvals]);
+  const approvalObservation = React.useRef<DurableObservation | null>(null);
+  const refreshPending = React.useCallback(async () => {
+    await approvalObservation.current?.refresh();
+  }, []);
   React.useEffect(() => {
     const observation = approvals.observe(setPending, (error) =>
       console.warn(
@@ -105,7 +102,10 @@ export function TerminalBrowser(
         error,
       ),
     );
+    approvalObservation.current = observation;
     return () => {
+      if (approvalObservation.current === observation)
+        approvalObservation.current = null;
       void observation
         .stop()
         .catch((error: unknown) =>
@@ -120,7 +120,9 @@ export function TerminalBrowser(
   const openApprovals = React.useCallback(() => {
     setSelected(0);
     setOverlay("approvals");
-    refreshPending();
+    void refreshPending().catch((error) =>
+      console.warn("[terminal-browser] Approval list refresh failed:", error),
+    );
   }, [refreshPending]);
 
   // Single raw-stdin controller: host chords first, then session pass-through.

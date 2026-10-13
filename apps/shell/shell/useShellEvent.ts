@@ -12,60 +12,11 @@ import { isRpcConnectionLost } from "@vibestudio/rpc";
 
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
-import type {
-  EventName,
-  EventPayloads,
-  ShellWorkspaceClient,
-} from "./workspaceClient";
+import type { EventName, EventPayloads } from "./workspaceClient";
 import { useShellWorkspaceClient } from "./workspaceContext";
 
 // Re-export for consumers
 export type { EventPayloads } from "./client.js";
-
-/** Refcount per event name. Shared across all hook instances. */
-type Subscription = { count: number; ready: Promise<void> };
-const references = new WeakMap<
-  ShellWorkspaceClient["events"],
-  Map<EventName, Subscription>
->();
-function subscriptionsFor(events: ShellWorkspaceClient["events"]) {
-  let refs = references.get(events);
-  if (!refs) {
-    refs = new Map();
-    references.set(events, refs);
-  }
-  return refs;
-}
-
-function addSubscription(
-  events: ShellWorkspaceClient["events"],
-  event: EventName,
-): Promise<void> {
-  const refs = subscriptionsFor(events);
-  const existing = refs.get(event);
-  if (existing) {
-    existing.count += 1;
-    return existing.ready;
-  }
-  const ready = events.subscribe(event);
-  refs.set(event, { count: 1, ready });
-  return ready;
-}
-
-async function removeSubscription(
-  events: ShellWorkspaceClient["events"],
-  event: EventName,
-): Promise<void> {
-  const subscriptionRefcounts = subscriptionsFor(events);
-  const subscription = subscriptionRefcounts.get(event);
-  if (!subscription) return;
-  if (subscription.count === 1) {
-    subscriptionRefcounts.delete(event);
-    await events.unsubscribe(event);
-  } else {
-    subscription.count -= 1;
-  }
-}
 
 /**
  * Subscribe to a shell event from the main process.
@@ -103,8 +54,8 @@ export function useShellEvent<E extends EventName>(
           callbackRef.current(payload);
           invalidate();
         }),
-      admit: () => addSubscription(events, event),
-      leave: () => removeSubscription(events, event),
+      admit: () => events.subscribe(event),
+      leave: () => events.unsubscribe(event),
       read: async () => {
         if (!lifetime.signal.aborted) await readSnapshot?.(lifetime.signal);
       },

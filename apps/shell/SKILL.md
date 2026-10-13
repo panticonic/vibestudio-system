@@ -141,6 +141,10 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   initiate asynchronous retirement, but it must observe and report that
   promise; longer-lived owners must await it before replacing a watch with the
   same remote identity.
+- `EventsClient.subscribe*` acquires consumer ownership for every requested
+  topic and the matching `unsubscribe*` releases that ownership. Overlapping
+  consumers may share one response-owned watch; one consumer's retirement must
+  never remove a replacement or sibling consumer's topic demand.
 
 - `view.createPanel` and `panel.createPanel` resolve once the panel's slot is
   committed. Preparing the runtime image, native attachment, navigation, and

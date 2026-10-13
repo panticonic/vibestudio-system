@@ -828,8 +828,10 @@ function WorkspacePanelOwner({
         }),
       admit: () => owner.client.events.subscribe("server-connection-changed"),
       leave: () => owner.client.events.unsubscribe("server-connection-changed"),
-      read: async () => true,
-      apply: (connected) => connection.current(connected),
+      // Connection changes are transient edges. Admission has no authoritative
+      // status snapshot, so preserve the last observed state until an event.
+      read: async () => undefined,
+      apply: () => undefined,
       error: () => connection.current(false),
     });
     return () => {

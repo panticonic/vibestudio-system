@@ -47,8 +47,25 @@ export function WorkspaceSessionEffects({
       active && directory.sessions.get(session.workspaceId) === session;
     const appUpdateObservation = isAppSource
       ? observeDurableProjection({
-          listen: (changed) =>
-            client.events.on("apps:status", () => void changed()),
+          listen: (changed) => {
+            const stopEvent = client.events.on(
+              "apps:status",
+              () => void changed(),
+            );
+            const stopResubscribe = client.recovery.registerResubscribeHandler(
+              "mobile-app-update-status",
+              () => changed(),
+            );
+            const stopColdRecover = client.recovery.registerColdRecoverHandler(
+              "mobile-app-update-status",
+              () => changed(),
+            );
+            return () => {
+              stopEvent();
+              stopResubscribe();
+              stopColdRecover();
+            };
+          },
           admit: () => client.events.subscribe("apps:status"),
           leave: () => client.events.unsubscribe("apps:status"),
           read: () =>
