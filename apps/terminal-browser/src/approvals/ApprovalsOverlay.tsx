@@ -5,6 +5,12 @@ import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
 import { Scrollable } from "../ui/Scrollable.js";
 import { approvalDecisionOptions } from "./approvalDecisions.js";
 import {
+  isTaskRulesApproval,
+  taskRuleRows,
+  taskRulesDecisionLabels,
+  type PendingTaskRulesApproval,
+} from "./taskRulesNav.js";
+import {
   getApprovalCallerPresentation,
   getInstallReviewActionCopy,
 } from "@vibestudio/shared/approvalCopy";
@@ -61,6 +67,10 @@ export interface ApprovalsOverlayProps {
    * terminal user can see which permission ⎵ will toggle.
    */
   focusedRowKey?: string;
+  /** The offered rows of the current `task.rules` card that are selected (default: the card's own). */
+  taskRuleSelection?: ReadonlySet<string>;
+  /** Index of the focused `task.rules` row. */
+  taskRuleFocus?: number;
   /**
    * Rows available to the overlay. When set, the queue shows a window around
    * the selected approval and the detail scrolls (`detailScroll`) so neither
@@ -123,6 +133,8 @@ export function ApprovalsOverlay({
   partIndex,
   installSelection,
   focusedRowKey,
+  taskRuleSelection,
+  taskRuleFocus = 0,
   height,
   detailScroll = 0,
   onDetailHeight,
@@ -136,6 +148,12 @@ export function ApprovalsOverlay({
         partIndex={partIndex ?? 0}
         selection={installSelection}
         focusedRowKey={focusedRowKey}
+      />
+    ) : isTaskRulesApproval(current) ? (
+      <TaskRulesDetail
+        approval={current}
+        selection={taskRuleSelection}
+        focus={taskRuleFocus}
       />
     ) : (
       <GenericDetail approval={current} />
@@ -218,6 +236,47 @@ export function ApprovalsOverlay({
   );
 }
 
+/**
+ * The `task.rules` detail: the planned actions the chat asks to be allowed up
+ * front, as the desktop card lists them, each a checkbox the person can clear.
+ * Cleared rows are asked about when they are needed instead.
+ */
+function TaskRulesDetail({
+  approval,
+  selection,
+  focus,
+}: {
+  approval: PendingTaskRulesApproval;
+  selection: ReadonlySet<string> | undefined;
+  focus: number;
+}): React.ReactElement {
+  const rows = taskRuleRows(approval);
+  const chosen =
+    selection ??
+    new Set(rows.filter((row) => row.defaultSelected !== false).map((row) => row.selectionKey));
+  return (
+    <Box flexDirection="column">
+      <Text bold wrap="wrap">
+        {approval.title}
+      </Text>
+      <Text dimColor wrap="wrap">
+        {approval.description}
+      </Text>
+      {rows.length > 1 ? <Text>Choose what this chat may do:</Text> : null}
+      {rows.map((row, i) => (
+        <Box flexDirection="column" key={row.selectionKey}>
+          <Text inverse={rows.length > 1 && i === focus} wrap="wrap">
+            {`${chosen.has(row.selectionKey) ? "☑" : "☐"} ${row.title}`}
+          </Text>
+          {row.resource ? (
+            <Text dimColor wrap="wrap">{`    ${row.resource.label}: ${row.resource.value}`}</Text>
+          ) : null}
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
 function GenericDetail({ approval }: { approval: PendingApproval }): React.ReactElement {
   const caller = getApprovalCallerPresentation(approval);
   return (
@@ -247,6 +306,16 @@ function approvalHint(
   approval: PendingApproval,
   rowExpanded: boolean
 ): { decisions: string; keys: string } {
+  if (isTaskRulesApproval(approval)) {
+    const labels = taskRulesDecisionLabels(approval);
+    return {
+      decisions: `[1] ${labels.allow}  [2] ${labels.decline}`,
+      keys:
+        taskRuleRows(approval).length > 1
+          ? "←/→ row  ⎵ toggle row  · ↑/↓ select · Esc dismiss"
+          : "↑/↓ select · Esc dismiss",
+    };
+  }
   if (approval.kind !== "unit-install-review") {
     return {
       decisions: approvalDecisionOptions(approval)

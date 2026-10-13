@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -65,6 +65,12 @@ export async function activate() {
             assetsDir,
             metroConfig,
           );
+          await validateBundleSyntax(
+            path.join(input.dependencyProjection.nodeModulesPath!, "react-native"),
+            bundlePath,
+            input.sourcePath,
+          );
+          const bundleIntegrity = integrityForFile(bundlePath);
           const bundleArtifactId = randomUUID();
           artifactFiles.set(bundleArtifactId, {
             filePath: bundlePath,
@@ -76,9 +82,14 @@ export async function activate() {
             contentType: "application/javascript; charset=utf-8",
             encoding: "utf8",
             platform,
-            stream: { method: "buildArtifact", args: [bundleArtifactId] },
+            stream: {
+              method: "buildArtifact",
+              args: [bundleArtifactId],
+              integrity: bundleIntegrity,
+            },
           });
           for (const assetPath of walkFiles(assetsDir)) {
+            const assetIntegrity = integrityForFile(assetPath);
             const assetArtifactId = randomUUID();
             artifactFiles.set(assetArtifactId, {
               filePath: assetPath,
@@ -90,7 +101,11 @@ export async function activate() {
               contentType: contentTypeForPath(assetPath),
               encoding: "base64",
               platform,
-              stream: { method: "buildArtifact", args: [assetArtifactId] },
+              stream: {
+                method: "buildArtifact",
+                args: [assetArtifactId],
+                integrity: assetIntegrity,
+              },
             });
           }
         }
@@ -201,6 +216,47 @@ async function runReactNativeBundle(
   });
 }
 
+export function integrityForFile(filePath: string): string {
+  const digest = createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+  return `sha256-${digest}`;
+}
+
+async function validateBundleSyntax(
+  reactNativePath: string,
+  bundlePath: string,
+  cwd: string,
+): Promise<void> {
+  const hermesDirectory =
+    process.platform === "linux"
+      ? "linux64-bin"
+      : process.platform === "darwin"
+        ? "osx-bin"
+        : process.platform === "win32"
+          ? "win64-bin"
+          : null;
+  if (!hermesDirectory) {
+    throw new Error(
+      `React Native bundle syntax validation is unsupported on ${process.platform}`,
+    );
+  }
+  const hermesc = path.join(
+    reactNativePath,
+    "sdks",
+    "hermesc",
+    hermesDirectory,
+    process.platform === "win32" ? "hermesc.exe" : "hermesc",
+  );
+  if (!fs.existsSync(hermesc)) {
+    throw new Error(
+      `React Native dependency projection does not contain Hermes compiler at ${hermesc}`,
+    );
+  }
+  await run(hermesc, ["-dump-ast", bundlePath], {
+    cwd,
+    env: process.env,
+  });
+}
+
 function run(
   command: string,
   args: string[],
@@ -216,6 +272,7 @@ function run(
     child.stderr?.on("data", (chunk) => {
       stderr += chunk.toString();
     });
+    child.stdout?.resume();
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve();

@@ -6,6 +6,7 @@ import type { TemplateInstallResolution } from "@vibestudio/shared/authority/uni
 import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
+import type { TaskRulesResolution } from "./taskRulesNav.js";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
 
 
@@ -32,6 +33,8 @@ export interface ApprovalsClient {
     approvalId: string,
     resolution: TemplateInstallResolution
   ): Promise<InstallReviewResolution>;
+  /** The only valid resolution for a `task.rules` card: the exact offered rows the person selected. */
+  resolveTaskRules(approvalId: string, resolution: TaskRulesResolution): Promise<void>;
   /** Subscribe to queue changes; returns an unsubscribe. */
   onChange(listener: () => void): () => void;
 }
@@ -50,6 +53,9 @@ export function createApprovalsClient(rpc: RpcClient): ApprovalsClient {
     },
     async resolveInstallReview(approvalId, resolution) {
       return await shellApproval.resolveInstallReview(approvalId, resolution);
+    },
+    async resolveTaskRules(approvalId, resolution) {
+      await shellApproval.resolveTaskRules(approvalId, resolution);
     },
     onChange(listener) {
       const stopListening = events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, () => listener());

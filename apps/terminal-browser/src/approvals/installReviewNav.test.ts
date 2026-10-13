@@ -15,6 +15,7 @@ import {
   shouldHandleInstallReviewNav,
   type PendingUnitInstallReviewApproval,
 } from "./installReviewNav.js";
+import { INITIAL_TASK_RULES_NAV } from "./taskRulesNav.js";
 
 function capabilityApproval(): PendingApproval {
   return {
@@ -261,7 +262,7 @@ describe("routeApprovalDigit — where a keypress-decision goes", () => {
     const approval = installReviewApproval([part(0), part(1)]);
     const state = applyInstallReviewNav(INITIAL_INSTALL_REVIEW_NAV, { char: " " }, approval.parts); // deselect part-0
 
-    const route = routeApprovalDigit(approval, 1, state.selection);
+    const route = routeApprovalDigit(approval, 1, state.selection, INITIAL_TASK_RULES_NAV);
 
     expect(route).toEqual({
       via: "resolveInstallReview",
@@ -278,7 +279,7 @@ describe("routeApprovalDigit — where a keypress-decision goes", () => {
 
   it("routes decline to a genuine cancel", () => {
     const approval = installReviewApproval([part(0)]);
-    const route = routeApprovalDigit(approval, 4, undefined);
+    const route = routeApprovalDigit(approval, 4, undefined, INITIAL_TASK_RULES_NAV);
     expect(route).toEqual({
       via: "resolveInstallReview",
       approvalId: "install-1",
@@ -288,19 +289,19 @@ describe("routeApprovalDigit — where a keypress-decision goes", () => {
 
   it("is inert for a unit-install-review digit this review has no meaning for", () => {
     const approval = installReviewApproval([part(0)]);
-    expect(routeApprovalDigit(approval, 2, undefined)).toEqual({
+    expect(routeApprovalDigit(approval, 2, undefined, INITIAL_TASK_RULES_NAV)).toEqual({
       via: "none",
     });
   });
 
   it("resolves the decision the overlay numbered with that digit for every other approval kind", () => {
     const capability = capabilityApproval();
-    expect(routeApprovalDigit(capability, 1, undefined)).toEqual({
+    expect(routeApprovalDigit(capability, 1, undefined, INITIAL_TASK_RULES_NAV)).toEqual({
       via: "resolve",
       approvalId: "runtime-capability",
       decision: "once",
     });
-    expect(routeApprovalDigit(capability, 4, undefined)).toEqual({
+    expect(routeApprovalDigit(capability, 4, undefined, INITIAL_TASK_RULES_NAV)).toEqual({
       via: "resolve",
       approvalId: "runtime-capability",
       decision: "deny",
@@ -313,17 +314,17 @@ describe("routeApprovalDigit — where a keypress-decision goes", () => {
       cardType: "confirm.critical",
       allowedDecisions: ["once", "deny"],
     } as PendingApproval;
-    expect(routeApprovalDigit(critical, 2, undefined)).toEqual({
+    expect(routeApprovalDigit(critical, 2, undefined, INITIAL_TASK_RULES_NAV)).toEqual({
       via: "resolve",
       approvalId: "runtime-capability",
       decision: "deny",
     });
-    expect(routeApprovalDigit(critical, 3, undefined)).toEqual({ via: "none" });
-    expect(routeApprovalDigit(critical, 0, undefined)).toEqual({ via: "none" });
+    expect(routeApprovalDigit(critical, 3, undefined, INITIAL_TASK_RULES_NAV)).toEqual({ via: "none" });
+    expect(routeApprovalDigit(critical, 0, undefined, INITIAL_TASK_RULES_NAV)).toEqual({ via: "none" });
   });
 
   it("resolves nothing when there is no focused approval", () => {
-    expect(routeApprovalDigit(undefined, 1, undefined)).toEqual({
+    expect(routeApprovalDigit(undefined, 1, undefined, INITIAL_TASK_RULES_NAV)).toEqual({
       via: "none",
     });
   });

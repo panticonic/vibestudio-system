@@ -225,6 +225,20 @@ describe("createApprovalsClient", () => {
     expect(call.mock.calls[0]?.[2]).toEqual(["install-1", resolution]);
   });
 
+  it("resolves a chat-rules card through resolveTaskRules, never the decision-id path", async () => {
+    const { rpc, call } = fakeRpc([]);
+    const client = createApprovalsClient(rpc);
+    const resolution = { decision: "accept" as const, selected: ["row-a"] };
+
+    await client.resolveTaskRules("rules-1", resolution);
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0]?.[1]).toMatchObject({
+      name: mainRpcMethods["shellApproval.resolveTaskRules"].name,
+    });
+    expect(call.mock.calls[0]?.[2]).toEqual(["rules-1", resolution]);
+  });
+
   it("watches the shared shell approval queue", async () => {
     const { rpc, emit } = fakeRpc([]);
     const client = createApprovalsClient(rpc);

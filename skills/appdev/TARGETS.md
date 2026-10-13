@@ -143,7 +143,7 @@ Behavior:
   `rpc` client for System, the shown `workspace` (Personal by default) with
   `workspaceRpc` (the device's own session there, as the desktop shell uses
   for the workspace it shows), the server, `stdin`/`stdout`, connection
-  state, workspace listing, and `openExternal`/`readLocalFile`. `run`
+  state, workspace listing, and `openExternal`. `run`
   resolves with `quit`, `switch-workspace`, or `connection-lost`.
 - A new build reaches a terminal when the CLI loads the app again: on the next
   `vibestudio terminal`, or when the CLI reconnects after an update.

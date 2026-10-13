@@ -492,4 +492,40 @@ describe("ApprovalsOverlay — bounded height", () => {
     );
     expect(heights.at(-1)).toBeGreaterThan(16);
   });
+
+  it("shows a chat-rules card as a checklist with its own decision words", () => {
+    const facet = (key: string, title: string) => ({
+      selectionKey: key,
+      capability: "workspace.read",
+      title,
+      resource: { type: "chat", label: "Where", value: "chat-1" },
+      row: {} as never,
+    });
+    const approval = {
+      kind: "capability",
+      approvalId: "rules-1",
+      callerId: "system",
+      callerKind: "system",
+      repoPath: "vibestudio/authority",
+      effectiveVersion: "ev",
+      requestedAt: 1,
+      capability: "workspace.read",
+      title: "Allow these planned actions for Chat?",
+      description: "Choose the ones it may use.",
+      cardType: "task.rules",
+      allowedDecisions: ["task", "deny"],
+      authorityFacets: [facet("a", "Read files"), facet("b", "Run a command")],
+    } as unknown as PendingApproval;
+    const frame = renderToText(
+      <ApprovalsOverlay
+        pending={[approval]}
+        selectedIndex={0}
+        taskRuleSelection={new Set(["a"])}
+        taskRuleFocus={1}
+      />
+    );
+    expect(frame).toContain("☑ Read files");
+    expect(frame).toContain("☐ Run a command");
+    expect(frame).toContain("[1] Allow selected  [2] Don't allow");
+  });
 });

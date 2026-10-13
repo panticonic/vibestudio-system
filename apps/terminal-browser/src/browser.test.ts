@@ -238,9 +238,6 @@ function setup(prepare?: (sessions: FakeTerminalSessions) => void) {
     openExternal: async (url) => {
       opened.push(url);
     },
-    readLocalFile: async () => {
-      throw new Error("the browser never reads local files");
-    },
   };
   let exit: TerminalBrowserExit | null = null;
   const done = new TerminalBrowser(host, { sessions, settings: sessions }).run().then((result) => {
