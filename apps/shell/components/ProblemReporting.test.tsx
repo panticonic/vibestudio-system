@@ -26,7 +26,20 @@ vi.mock("../shell/workspaceContext", () => ({
   useShellWorkspaceClient: () => ({ problemReports: mocks, app: mocks }),
 }));
 vi.mock("../shell/useShellOverlay", () => ({ useShellOverlay: vi.fn() }));
-vi.mock("../shell/useShellEvent", () => ({ useShellEvent: mocks.shellEvent }));
+vi.mock("../shell/useShellEvent", async () => {
+  const { useShellEventFixture } = await import("../test/shellEventFixture");
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  return {
+    useShellEvent: (
+      event: string,
+      callback: (payload: unknown) => void,
+      readSnapshot?: (signal: AbortSignal) => void | Promise<void>
+    ) => {
+      mocks.shellEvent(event, callback, readSnapshot);
+      return useShellEventFixture(listeners, event, callback, readSnapshot);
+    },
+  };
+});
 import {
   ProblemReportingSection,
   useReportingSetup,

@@ -5,13 +5,13 @@ import { RpcBoundaryError } from "@vibestudio/rpc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NextPanelBuildWarmup } from "./NextPanelBuildWarmup";
+import { emitShellEventFixture } from "../test/shellEventFixture";
 
 const mocks = vi.hoisted(() => ({
   warmPanel: vi.fn(),
   getFocusedPanelId: vi.fn(),
   getLocalPresentation: vi.fn(),
-  presentationListener: null as ((value: unknown) => void) | null,
-  connectionListener: null as ((value: { status: string }) => void) | null,
+  eventListeners: new Map<string, Set<(payload: unknown) => void>>(),
 }));
 
 vi.mock("../shell/client", () => ({
@@ -24,14 +24,22 @@ vi.mock("../shell/client", () => ({
 vi.mock("../shell/hooks/PanelTreeContext", () => ({
   usePanelTree: () => ({ initialized: true }),
 }));
-vi.mock("../shell/useShellEvent", () => ({
-  useShellEvent: (event: string, listener: (value: unknown) => void) => {
-    if (event === "panel-local-presentation-changed")
-      mocks.presentationListener = listener;
-    if (event === "server-connection-changed")
-      mocks.connectionListener = listener;
-  },
-}));
+vi.mock("../shell/useShellEvent", async () => {
+  const { useShellEventFixture } = await import("../test/shellEventFixture");
+  return {
+    useShellEvent: (
+      event: string,
+      listener: (value: unknown) => void,
+      readSnapshot?: (signal: AbortSignal) => void | Promise<void>,
+    ) =>
+      useShellEventFixture(
+        mocks.eventListeners,
+        event,
+        listener,
+        readSnapshot,
+      ),
+  };
+});
 
 describe("NextPanelBuildWarmup", () => {
   let idleCallback: (() => void) | null;
@@ -46,8 +54,7 @@ describe("NextPanelBuildWarmup", () => {
       revision: 1,
       presentation: { state: "loading", slotId: "panel:initial" },
     });
-    mocks.presentationListener = null;
-    mocks.connectionListener = null;
+    mocks.eventListeners.clear();
     Object.assign(window, {
       requestIdleCallback: vi.fn((callback: () => void) => {
         idleCallback = callback;
@@ -64,7 +71,7 @@ describe("NextPanelBuildWarmup", () => {
     expect(window.requestIdleCallback).not.toHaveBeenCalled();
 
     act(() => {
-      mocks.presentationListener?.({
+      emitShellEventFixture(mocks.eventListeners, "panel-local-presentation-changed", {
         revision: 2,
         presentation: { state: "ready", slotId: "panel:initial" },
       });
@@ -87,7 +94,7 @@ describe("NextPanelBuildWarmup", () => {
       expect(window.requestIdleCallback).toHaveBeenCalledOnce(),
     );
 
-    act(() => mocks.connectionListener?.({ status: "connecting" }));
+    act(() => emitShellEventFixture(mocks.eventListeners, "server-connection-changed", { status: "connecting" }));
     expect(cancelIdleCallback).toHaveBeenCalledWith(41);
     expect(mocks.warmPanel).not.toHaveBeenCalled();
   });

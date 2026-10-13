@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickfireOwner } from "./QuickfireOwner";
 import { createStore, Provider } from "jotai";
 import { openCommandAgentAtom } from "../state/commandAgentAtoms";
+import { emitShellEventFixture } from "../test/shellEventFixture";
 
 const api = vi.hoisted(() => ({
-  events: new Map<string, (payload?: unknown) => void>(),
+  events: new Map<string, Set<(payload: unknown) => void>>(),
   bindings: [] as Array<string | null>,
   intent: null as null | ((payload: unknown) => void),
   focused: "panel-a" as string | null,
@@ -37,16 +38,19 @@ vi.mock("../shell/workspaceContext", () => {
   };
 });
 vi.mock("../shell/useShellEvent", async () => {
-  const { useEffect } = await import("react");
+  const { useShellEventFixture } = await import("../test/shellEventFixture");
   return {
-    useShellEvent: (name: string, callback: (payload?: unknown) => void) => {
-      useEffect(() => {
-        api.events.set(name, callback);
-        return () => {
-          api.events.delete(name);
-        };
-      }, [name, callback]);
-    },
+    useShellEvent: (
+      name: string,
+      callback: (payload?: unknown) => void,
+      readSnapshot?: (signal: AbortSignal) => void | Promise<void>,
+    ) =>
+      useShellEventFixture(
+        api.events,
+        name,
+        callback as (payload: unknown) => void,
+        readSnapshot,
+      ),
   };
 });
 vi.mock("../shell/useShellContentOverlay", () => ({
@@ -119,7 +123,7 @@ function renderOwnerWithHost() {
 
 async function open() {
   await act(async () => {
-    api.events.get("open-command-agent")?.({ mode: "quickfire" });
+    emitShellEventFixture(api.events, "open-command-agent", { mode: "quickfire" });
   });
 }
 function dismiss() {
@@ -148,7 +152,7 @@ describe("Quickfire opening ownership", () => {
     dismiss();
     expect(api.bindings.at(-1)).toBe("panel-a");
     await act(async () => {
-      api.events.get("open-command-palette")?.();
+      emitShellEventFixture(api.events, "open-command-palette", );
     });
     await waitFor(() => expect(api.surface?.props.mode).toBe("quickfire"));
     expect(api.bindings.at(-1)).toBe("panel-a");
@@ -173,7 +177,7 @@ describe("Quickfire opening ownership", () => {
     await waitFor(() => expect(api.bindings.at(-1)).toBe("panel-a"));
     dismiss();
     act(() =>
-      api.events.get("panel-tree-invalidated")?.({
+      emitShellEventFixture(api.events, "panel-tree-invalidated", {
         removedSlotIds: ["panel-a"],
       }),
     );
@@ -257,7 +261,7 @@ describe("Quickfire opening ownership", () => {
     const failure = new Error("Connection disconnected");
     api.chrome.mockRejectedValueOnce(failure);
     await act(async () => {
-      api.events.get("panel-tree-invalidated")?.({ removedSlotIds: [] });
+      emitShellEventFixture(api.events, "panel-tree-invalidated", { removedSlotIds: [] });
     });
     expect(api.reportFailure).toHaveBeenCalled();
     expect(api.bindings.at(-1)).toBe("panel-a");
@@ -267,7 +271,7 @@ describe("Quickfire opening ownership", () => {
     render(<QuickfireOwner />);
     await open();
     act(() => {
-      api.events.get("panel-tree-invalidated")?.({
+      emitShellEventFixture(api.events, "panel-tree-invalidated", {
         removedSlotIds: ["panel-a"],
       });
     });
@@ -277,7 +281,7 @@ describe("Quickfire opening ownership", () => {
   it("does not revive an opening dismissed while acquiring panel focus", async () => {
     render(<QuickfireOwner />);
     act(() => {
-      api.events.get("open-command-agent")?.({ mode: "quickfire" });
+      emitShellEventFixture(api.events, "open-command-agent", { mode: "quickfire" });
       api.intent?.({ type: "dismiss" });
     });
     await act(async () => {});
