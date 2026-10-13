@@ -3,10 +3,12 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 import { actionableRuntimeApprovals } from "@vibestudio/shared/approvalVisibility";
+import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { ShellWorkspaceClient } from "../shell/workspaceClient";
 import {
@@ -31,6 +33,11 @@ export type PresentedApproval = {
   actionable: boolean;
 };
 
+export type WindowInstallResult = {
+  owner: RpcDestination;
+  resolution: InstallReviewResolution;
+};
+
 /** A window presentation index. Requests and decision authority stay with their workspace controllers. */
 export function useApprovalPresentationController(
   client: ShellWorkspaceClient,
@@ -43,6 +50,46 @@ export function useApprovalPresentationController(
     workspaceId: string;
     approvalId?: string;
   } | null>(null);
+  // One window history of outcomes: replace transient confirmations, retain
+  // failed receipts until the person explicitly dismisses them.
+  const [installResults, setInstallResults] = useState<WindowInstallResult[]>(
+    [],
+  );
+  const dismissInstallResult = useCallback((result: WindowInstallResult) => {
+    setInstallResults((current) => current.filter((item) => item !== result));
+  }, []);
+  const recordInstallResult = useCallback(
+    (owner: RpcDestination, resolution: InstallReviewResolution) => {
+      setInstallResults((current) => [
+        ...current.filter(
+          (item) =>
+            (item.resolution.landing?.failed.length ?? 0) > 0 &&
+            !(
+              rpcDestinationKey(item.owner) === rpcDestinationKey(owner) &&
+              item.resolution.approvalId === resolution.approvalId
+            ),
+        ),
+        { owner, resolution },
+      ]);
+    },
+    [],
+  );
+  const confirmation = installResults.find(
+    (item) => (item.resolution.landing?.failed.length ?? 0) === 0,
+  );
+  useEffect(() => {
+    if (!confirmation) return;
+    const { resolution } = confirmation;
+    const workspaceReady =
+      resolution.mode === "adopt-root" &&
+      resolution.decision === "accepted" &&
+      resolution.landing !== undefined;
+    const timer = window.setTimeout(
+      () => dismissInstallResult(confirmation),
+      workspaceReady ? 5_000 : 8_000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [confirmation, dismissInstallResult]);
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [anchorId, setAnchorId] = useState<string | null>(null);
   const entries = useMemo<PresentedApproval[]>(
@@ -145,6 +192,9 @@ export function useApprovalPresentationController(
     setHost,
     anchorId,
     setAnchorId,
+    installResults,
+    recordInstallResult,
+    dismissInstallResult,
     publish,
     remove,
     request,
