@@ -131,6 +131,17 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
 
 ## Panel Lifecycle and UI Projections
 
+- A durable UI projection owns one complete observation lifetime. Install its
+  local listener, await remote admission, then perform an authoritative read.
+  Use `@vibestudio/shell-core/durableObservation` so an event invalidates an
+  older read, readiness retains the original error, and asynchronous `stop()`
+  joins late admission, the current read, and remote leave. Do not start the
+  read and event subscription in independent React effects.
+- Removing a React listener does not retire a remote watch. Effect cleanup may
+  initiate asynchronous retirement, but it must observe and report that
+  promise; longer-lived owners must await it before replacing a watch with the
+  same remote identity.
+
 - `view.createPanel` and `panel.createPanel` resolve once the panel's slot is
   committed. Preparing the runtime image, native attachment, navigation, and
   app boot continue after that. Don't make a create button wait for readiness.

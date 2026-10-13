@@ -7,7 +7,10 @@ import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellA
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
-
+import {
+  observeDurableProjection,
+  type DurableObservation,
+} from "@vibestudio/shell-core/durableObservation";
 
 /**
  * Thin wrapper over the existing global shell-approval queue. The terminal
@@ -30,16 +33,22 @@ export interface ApprovalsClient {
    */
   resolveInstallReview(
     approvalId: string,
-    resolution: TemplateInstallResolution
+    resolution: TemplateInstallResolution,
   ): Promise<InstallReviewResolution>;
-  /** Subscribe to queue changes; returns an unsubscribe. */
-  onChange(listener: () => void): () => void;
+  /** Own the watched, authoritative queue projection through retirement. */
+  observe(
+    changed: (pending: PendingApproval[]) => void,
+    error: (error: unknown) => void,
+  ): DurableObservation;
 }
 
 export function createApprovalsClient(rpc: RpcClient): ApprovalsClient {
-  const shellApproval = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "shellApproval" }, shellApprovalMethods);
+  const shellApproval = createTypedRpcServiceClient(
+    rpc,
+    { targetId: "main", namespace: "shellApproval" },
+    shellApprovalMethods,
+  );
   const events = new EventsClient(rpc);
-  let changeListeners = 0;
   return {
     async list() {
       const pending = await shellApproval.listPending();
@@ -51,26 +60,16 @@ export function createApprovalsClient(rpc: RpcClient): ApprovalsClient {
     async resolveInstallReview(approvalId, resolution) {
       return await shellApproval.resolveInstallReview(approvalId, resolution);
     },
-    onChange(listener) {
-      const stopListening = events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, () => listener());
-      changeListeners += 1;
-      if (changeListeners === 1) {
-        void events
-          .subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT)
-          .catch((error: unknown) =>
-            console.warn("[terminal-browser] approval event watch failed:", error)
-          );
-      }
-      let disposed = false;
-      return () => {
-        if (disposed) return;
-        disposed = true;
-        stopListening();
-        changeListeners = Math.max(0, changeListeners - 1);
-        if (changeListeners === 0) {
-          void events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT).catch(() => {});
-        }
-      };
+    observe(changed, error) {
+      return observeDurableProjection({
+        listen: (invalidate) =>
+          events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, invalidate),
+        admit: () => events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+        leave: () => events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+        read: () => shellApproval.listPending(),
+        apply: changed,
+        error,
+      });
     },
   };
 }

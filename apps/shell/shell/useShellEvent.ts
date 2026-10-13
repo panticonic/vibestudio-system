@@ -11,6 +11,7 @@ import { isRpcConnectionLost } from "@vibestudio/rpc";
  */
 
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import type {
   EventName,
   EventPayloads,
@@ -51,19 +52,16 @@ function addSubscription(
   return ready;
 }
 
-function removeSubscription(
+async function removeSubscription(
   events: ShellWorkspaceClient["events"],
   event: EventName,
-): void {
+): Promise<void> {
   const subscriptionRefcounts = subscriptionsFor(events);
   const subscription = subscriptionRefcounts.get(event);
   if (!subscription) return;
   if (subscription.count === 1) {
     subscriptionRefcounts.delete(event);
-    void events.unsubscribe(event).catch((err: unknown) => {
-      if (!isRpcConnectionLost(err))
-        console.warn(`[useShellEvent] unsubscribe ${event} failed:`, err);
-    });
+    await events.unsubscribe(event);
   } else {
     subscription.count -= 1;
   }
@@ -98,23 +96,31 @@ export function useShellEvent<E extends EventName>(
   });
 
   useEffect(() => {
-    const cleanup = events.on(event, (payload) => callbackRef.current(payload));
     const lifetime = new AbortController();
-    // Read only after the watch is installed. Revisions at the consumer then
-    // close the event/query race, including updates during watch opening.
-    void addSubscription(events, event)
-      .then(() => {
-        if (!lifetime.signal.aborted) return readSnapshot?.(lifetime.signal);
-      })
-      .catch((error: unknown) => {
+    const observation = observeDurableProjection({
+      listen: (invalidate) =>
+        events.on(event, (payload) => {
+          callbackRef.current(payload);
+          invalidate();
+        }),
+      admit: () => addSubscription(events, event),
+      leave: () => removeSubscription(events, event),
+      read: async () => {
+        if (!lifetime.signal.aborted) await readSnapshot?.(lifetime.signal);
+      },
+      apply: () => undefined,
+      error: (error) => {
         if (!lifetime.signal.aborted && !isRpcConnectionLost(error))
           console.warn(`[useShellEvent] watch ${event} failed:`, error);
-      });
+      },
+    });
 
     return () => {
       lifetime.abort();
-      cleanup();
-      removeSubscription(events, event);
+      void observation.stop().catch((error: unknown) => {
+        if (!isRpcConnectionLost(error))
+          console.warn(`[useShellEvent] retire ${event} failed:`, error);
+      });
     };
   }, [events, event, readSnapshot]);
 }

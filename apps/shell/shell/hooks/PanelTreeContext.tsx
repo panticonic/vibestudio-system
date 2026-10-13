@@ -457,10 +457,6 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
     [refreshTreeGroups],
   );
 
-  useEffect(() => {
-    void refreshTree();
-  }, [refreshTree]);
-
   useShellEvent(
     "server-connection-changed",
     useCallback(
@@ -497,6 +493,7 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
       },
       [cache, refreshTreeGroups],
     ),
+    refreshTree,
   );
   const refreshChangedPresentations = useCallback(
     (event: { panelIds: string[] }, revision?: number) => {
@@ -836,21 +833,23 @@ export function useFullPanel(panelId: string | null): {
     },
     [panelId],
   );
-  const refreshPresentation = useCallback(() => {
-    if (!panelId) return;
-    const request = ++nextRequestRef.current;
-    void panel
-      .getPresentation(panelId)
-      .then((presentation) => applyPresentation(presentation, request))
-      .catch(
-        (error: unknown) =>
-          !isRpcConnectionLost(error) &&
+  const refreshPresentation = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!panelId) return;
+      const request = ++nextRequestRef.current;
+      try {
+        const presentation = await panel.getPresentation(panelId);
+        if (!signal?.aborted) applyPresentation(presentation, request);
+      } catch (error) {
+        if (!isRpcConnectionLost(error))
           console.warn(
             `[PanelTree] Failed to refresh presentation ${panelId}:`,
             error,
-          ),
-      );
-  }, [applyPresentation, panelId]);
+          );
+      }
+    },
+    [applyPresentation, panelId],
+  );
   useShellEvent(
     "server-connection-changed",
     useCallback(
@@ -879,6 +878,7 @@ export function useFullPanel(panelId: string | null): {
       },
       [panelId, refreshPresentation],
     ),
+    refreshPresentation,
   );
   useShellEvent(
     "panel-tree-invalidated",
@@ -895,31 +895,12 @@ export function useFullPanel(panelId: string | null): {
     ),
   );
   useEffect(() => {
-    let cancelled = false;
-    if (!panelId) {
+    if (panelId) setLoading(true);
+    else {
       setValue(null);
       setLoading(false);
-      return;
     }
-    setLoading(true);
-    const request = ++nextRequestRef.current;
-    void panel
-      .getPresentation(panelId)
-      .then((presentation) => {
-        if (!cancelled) applyPresentation(presentation, request);
-      })
-      .catch((error: unknown) => {
-        !isRpcConnectionLost(error) &&
-          console.warn(
-            `[PanelTree] Failed to load presentation ${panelId}:`,
-            error,
-          );
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [applyPresentation, panelId]);
+  }, [panelId]);
   // A presentation belongs to exactly one durable slot. Keep an earlier
   // response cached while the next address loads, but never expose it under a
   // different panel id: consumers use readiness from this value to decide

@@ -14,8 +14,8 @@ vi.mock("./client.js", () => ({
   events: {
     subscribe: (...args: unknown[]) => subscribe(...args),
     unsubscribe: (...args: unknown[]) => unsubscribe(...args),
-    on: (...args: unknown[]) => onEvent(...args)
-  }
+    on: (...args: unknown[]) => onEvent(...args),
+  },
 }));
 
 import { useShellEvent } from "./useShellEvent";
@@ -25,9 +25,20 @@ function Probe({ onUpdate }: { onUpdate: (payload: unknown) => void }) {
   return null;
 }
 
+function SnapshotProbe({
+  onUpdate,
+  readSnapshot,
+}: {
+  onUpdate: (payload: unknown) => void;
+  readSnapshot: (signal: AbortSignal) => Promise<void>;
+}) {
+  useShellEvent("panel-tree-invalidated", onUpdate as never, readSnapshot);
+  return null;
+}
+
 function CommitProbe({
   onUpdate,
-  payload
+  payload,
 }: {
   onUpdate: (payload: unknown) => void;
   payload?: unknown;
@@ -52,11 +63,13 @@ describe("useShellEvent", () => {
     unsubscribe.mockReset();
     unsubscribe.mockResolvedValue(undefined);
     onEvent.mockReset();
-    onEvent.mockImplementation((event: string, listener: (payload: unknown) => void) => {
-      order.push("listen");
-      listeners.set(event, listener);
-      return () => listeners.delete(event);
-    });
+    onEvent.mockImplementation(
+      (event: string, listener: (payload: unknown) => void) => {
+        order.push("listen");
+        listeners.set(event, listener);
+        return () => listeners.delete(event);
+      },
+    );
     subscribe.mockImplementation(async (event: string) => {
       order.push("subscribe");
       listeners.get(event)?.(snapshot);
@@ -66,6 +79,36 @@ describe("useShellEvent", () => {
 
     await waitFor(() => expect(received).toHaveBeenCalledWith(snapshot));
     expect(order).toEqual(["listen", "subscribe"]);
+  });
+
+  it("reads the authoritative snapshot only after remote admission", async () => {
+    let admit!: () => void;
+    subscribe.mockReset().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          admit = resolve;
+        }),
+    );
+    unsubscribe.mockReset().mockResolvedValue(undefined);
+    onEvent
+      .mockReset()
+      .mockImplementation(
+        (event: string, listener: (payload: unknown) => void) => {
+          listeners.set(event, listener);
+          return () => listeners.delete(event);
+        },
+      );
+    const readSnapshot = vi.fn(async () => undefined);
+    const rendered = render(
+      <SnapshotProbe onUpdate={vi.fn()} readSnapshot={readSnapshot} />,
+    );
+
+    await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
+    expect(readSnapshot).not.toHaveBeenCalled();
+    admit();
+    await waitFor(() => expect(readSnapshot).toHaveBeenCalledOnce());
+    rendered.unmount();
+    await waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce());
   });
 
   it("uses the current callback for an event delivered during an update commit", () => {
@@ -78,13 +121,17 @@ describe("useShellEvent", () => {
     unsubscribe.mockReset();
     unsubscribe.mockResolvedValue(undefined);
     onEvent.mockReset();
-    onEvent.mockImplementation((event: string, listener: (payload: unknown) => void) => {
-      listeners.set(event, listener);
-      return () => listeners.delete(event);
-    });
+    onEvent.mockImplementation(
+      (event: string, listener: (payload: unknown) => void) => {
+        listeners.set(event, listener);
+        return () => listeners.delete(event);
+      },
+    );
 
     const rendered = render(<CommitProbe onUpdate={first} />);
-    rendered.rerender(<CommitProbe onUpdate={second} payload={{ revision: 2 }} />);
+    rendered.rerender(
+      <CommitProbe onUpdate={second} payload={{ revision: 2 }} />,
+    );
 
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledWith({ revision: 2 });
@@ -96,15 +143,21 @@ it.each(["transport", "access", "internal"] as const)(
   async (kind) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const failure = new RpcBoundaryError("unavailable", kind, "CONNECTION_LOST");
+      const failure = new RpcBoundaryError(
+        "unavailable",
+        kind,
+        "CONNECTION_LOST",
+      );
       subscribe.mockReset().mockRejectedValue(failure);
       unsubscribe.mockReset().mockRejectedValue(failure);
       onEvent
         .mockReset()
-        .mockImplementation((event: string, listener: (payload: unknown) => void) => {
-          listeners.set(event, listener);
-          return () => listeners.delete(event);
-        });
+        .mockImplementation(
+          (event: string, listener: (payload: unknown) => void) => {
+            listeners.set(event, listener);
+            return () => listeners.delete(event);
+          },
+        );
       const received = vi.fn();
       const mounted = render(<Probe onUpdate={received} />);
       await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
@@ -119,5 +172,5 @@ it.each(["transport", "access", "internal"] as const)(
     } finally {
       warn.mockRestore();
     }
-  }
+  },
 );

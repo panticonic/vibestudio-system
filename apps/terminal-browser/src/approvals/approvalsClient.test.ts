@@ -150,11 +150,19 @@ function fakeRpc(pending: PendingApproval[]) {
   const rpc = {
     call,
     stream: vi.fn(
-      async (_target: string, _method: unknown, args: unknown[]) =>
+      async (
+        _target: string,
+        _method: unknown,
+        args: unknown[],
+        options?: { signal?: AbortSignal },
+      ) =>
         new Response(
           new ReadableStream({
             start(next) {
               controller = next;
+              options?.signal?.addEventListener("abort", () => next.close(), {
+                once: true,
+              });
               next.enqueue(
                 encodeEventWatchRecord({
                   kind: "watching",
@@ -237,13 +245,17 @@ describe("createApprovalsClient", () => {
   it("watches the shared shell approval queue", async () => {
     const { rpc, emit } = fakeRpc([]);
     const client = createApprovalsClient(rpc);
-    const listener = vi.fn();
+    const changed = vi.fn();
+    const error = vi.fn();
 
-    const unsubscribe = client.onChange(listener);
+    const observation = client.observe(changed, error);
     await vi.waitFor(() => expect(rpc.stream).toHaveBeenCalledTimes(1));
+    await observation.ready;
+    expect(changed).toHaveBeenCalledWith([]);
     emit([]);
-    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
-    unsubscribe();
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(2));
+    await observation.stop();
+    expect(error).not.toHaveBeenCalled();
     expect(rpc.stream).toHaveBeenCalledWith(
       "main",
       mainRpcMethods["events.watch"],

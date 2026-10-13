@@ -1,5 +1,6 @@
 import type { NativeWebsiteRequest } from "../services/websiteDocumentHost";
 import { observeWebsiteConnections } from "@vibestudio/shell-core/websiteConnections";
+import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import { websiteConnectionSnapshotAtom } from "../state/shellClientAtom";
 import type { MobileShellSurface } from "../services/mobileShellSurfaces";
 import { asPanelEntityId } from "@vibestudio/shared/panel/ids";
@@ -65,7 +66,6 @@ import { inboxDeepLinkAtom } from "../state/inboxDeepLinkAtom";
 import { dismissToastAtom, pushToastAtom } from "../state/toastAtoms";
 import { presentWorkspaceNotification } from "../services/workspaceNotifications";
 import { WorkspaceWebsiteNotificationCoordinator } from "../services/workspaceWebsiteNotifications";
-import { observeDurableProjection } from "../services/observeDurableProjection";
 import {
   activePanelIdAtom,
   activePanelTitleAtom,
@@ -225,7 +225,7 @@ export function MainScreen({
   useEffect(() => {
     setWebsiteConnections({ owner: shellClient, entries: new Map() });
     if (!shellClient) return;
-    return observeWebsiteConnections({
+    const observation = observeWebsiteConnections({
       list: () => shellClient.websiteConnections.list(),
       listen: (changed) =>
         shellClient.events.on("website:connection-changed", (event) => {
@@ -245,6 +245,16 @@ export function MainScreen({
       error: (error) =>
         console.warn("[MainScreen] Website connection inventory failed", error),
     });
+    return () => {
+      void observation
+        .stop()
+        .catch((error: unknown) =>
+          console.warn(
+            "[MainScreen] Website connection retirement failed",
+            error,
+          ),
+        );
+    };
   }, [shellClient, setWebsiteConnections]);
   const panelTreeRevision = useAtomValue(panelTreeRevisionAtom);
   const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
@@ -415,7 +425,16 @@ export function MainScreen({
           error,
         ),
     });
-    return observation.stop;
+    return () => {
+      void observation
+        .stop()
+        .catch((error: unknown) =>
+          console.warn(
+            "[MainScreen] Browser permission observation retirement failed",
+            error,
+          ),
+        );
+    };
   }, [shellClient]);
   const webViewThemeSignaturesRef = useRef<Map<string, string>>(new Map());
   const [materializationEpoch, setMaterializationEpoch] = useState(0);
@@ -470,7 +489,16 @@ export function MainScreen({
           error,
         ),
     });
-    return observation.stop;
+    return () => {
+      void observation
+        .stop()
+        .catch((error: unknown) =>
+          console.warn(
+            "[MainScreen] Notification observation retirement failed",
+            error,
+          ),
+        );
+    };
   }, [shellClient]);
   // Route host→panel RPC envelopes (relay replies + events) into the target
   // panel's webview. The shell-client relay holds this sink; we supply it here

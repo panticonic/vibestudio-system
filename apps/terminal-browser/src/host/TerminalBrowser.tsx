@@ -45,7 +45,9 @@ export interface TerminalBrowserProps {
   hostState: { overlayOpen: boolean };
 }
 
-export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement {
+export function TerminalBrowser(
+  props: TerminalBrowserProps,
+): React.ReactElement {
   const { sessions, approvals } = props;
   const { exit } = useApp();
   const { stdin, setRawMode } = useStdin();
@@ -60,7 +62,7 @@ export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement
   // whenever the focused approval changes so a stale selection can never
   // leak onto a different review.
   const [installNav, setInstallNav] = React.useState<InstallReviewNavState>(
-    INITIAL_INSTALL_REVIEW_NAV
+    INITIAL_INSTALL_REVIEW_NAV,
   );
 
   // Refs so the raw stdin handler reads current state without re-subscribing.
@@ -92,12 +94,28 @@ export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement
     void approvals
       .list()
       .then(setPending)
-      .catch((error) => console.warn("[terminal-browser] Approval list refresh failed:", error));
+      .catch((error) =>
+        console.warn("[terminal-browser] Approval list refresh failed:", error),
+      );
   }, [approvals]);
   React.useEffect(() => {
-    refreshPending();
-    return approvals.onChange(refreshPending);
-  }, [approvals, refreshPending]);
+    const observation = approvals.observe(setPending, (error) =>
+      console.warn(
+        "[terminal-browser] Approval queue observation failed:",
+        error,
+      ),
+    );
+    return () => {
+      void observation
+        .stop()
+        .catch((error: unknown) =>
+          console.warn(
+            "[terminal-browser] Approval queue retirement failed:",
+            error,
+          ),
+        );
+    };
+  }, [approvals]);
 
   const openApprovals = React.useCallback(() => {
     setSelected(0);
@@ -142,7 +160,8 @@ export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement
       if (mode === "switcher") {
         const list = sessions.list();
         if (nav === "up") setSelected((i) => Math.max(0, i - 1));
-        else if (nav === "down") setSelected((i) => Math.min(list.length - 1, i + 1));
+        else if (nav === "down")
+          setSelected((i) => Math.min(list.length - 1, i + 1));
         else if (nav === "enter") {
           const target = list[selectedRef.current];
           if (target) sessions.focus(target.sessionId);
@@ -160,13 +179,16 @@ export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement
         const list = pendingRef.current;
         const target = list[selectedRef.current];
         if (nav === "up") setSelected((i) => Math.max(0, i - 1));
-        else if (nav === "down") setSelected((i) => Math.min(list.length - 1, i + 1));
+        else if (nav === "down")
+          setSelected((i) => Math.min(list.length - 1, i + 1));
         else if (shouldHandleInstallReviewNav(target, nav)) {
           // Part focus, permission-row expansion, and their toggles (§7.2, §8,
           // U5) — everything ↑/↓/1/4 don't already own. Inert for every other
           // approval kind, so it can never shadow the generic digit decisions.
           const parts = target.parts;
-          setInstallNav((prevState) => applyInstallReviewNav(prevState, nav, parts));
+          setInstallNav((prevState) =>
+            applyInstallReviewNav(prevState, nav, parts),
+          );
         } else if (typeof nav === "object" && nav && "digit" in nav) {
           // The only valid resolution for a `unit-install-review` (§8) is
           // `resolveInstallReview` with the selection built so far — never
@@ -175,20 +197,28 @@ export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement
             target,
             nav.digit,
             installNavRef.current.selection,
-            DECISION_BY_DIGIT
+            DECISION_BY_DIGIT,
           );
           if (route.via === "resolveInstallReview") {
             void approvals
               .resolveInstallReview(route.approvalId, route.resolution)
               .then(refreshPending)
               .catch((error) =>
-                console.warn("[terminal-browser] Install review decision failed:", error)
+                console.warn(
+                  "[terminal-browser] Install review decision failed:",
+                  error,
+                ),
               );
           } else if (route.via === "resolve") {
             void approvals
               .resolve(route.approvalId, route.decision)
               .then(refreshPending)
-              .catch((error) => console.warn("[terminal-browser] Approval decision failed:", error));
+              .catch((error) =>
+                console.warn(
+                  "[terminal-browser] Approval decision failed:",
+                  error,
+                ),
+              );
           }
         }
         return;
@@ -200,14 +230,24 @@ export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement
     return () => {
       stdin?.off("data", onData);
     };
-  }, [stdin, setRawMode, sessions, approvals, exit, openApprovals, refreshPending]);
+  }, [
+    stdin,
+    setRawMode,
+    sessions,
+    approvals,
+    exit,
+    openApprovals,
+    refreshPending,
+  ]);
 
   const focused = sessions.focused();
   const status = focused?.status ?? "none";
 
   let body: React.ReactElement;
   if (overlay === "switcher") {
-    body = <SessionSwitcher sessions={sessions.list()} selectedIndex={selected} />;
+    body = (
+      <SessionSwitcher sessions={sessions.list()} selectedIndex={selected} />
+    );
   } else if (overlay === "approvals") {
     const focusedApproval = pending[selected];
     const isInstallReview = focusedApproval?.kind === "unit-install-review";
@@ -218,7 +258,9 @@ export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement
         partIndex={isInstallReview ? installNav.partIndex : undefined}
         installSelection={isInstallReview ? installNav.selection : undefined}
         focusedRowKey={
-          isInstallReview ? focusedRowKeyOf(installNav, focusedApproval.parts) : undefined
+          isInstallReview
+            ? focusedRowKeyOf(installNav, focusedApproval.parts)
+            : undefined
         }
       />
     );
@@ -246,7 +288,9 @@ export function TerminalBrowser(props: TerminalBrowserProps): React.ReactElement
         pendingApprovals={pending.length}
       />
       {body}
-      <Text dimColor>{"^P sessions  ^A approvals  ^L logs  ^N new  ^Q quit"}</Text>
+      <Text dimColor>
+        {"^P sessions  ^A approvals  ^L logs  ^N new  ^Q quit"}
+      </Text>
     </Box>
   );
 }

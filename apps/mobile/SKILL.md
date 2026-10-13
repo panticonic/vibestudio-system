@@ -156,6 +156,16 @@ stay inside their workspace.
   it does not, pair the admitted listener with an authoritative read and a
   synchronous generation counter: discard or repeat any read crossed by an
   event, so a stale in-flight response can never overwrite newer state.
+- Use `@vibestudio/shell-core/durableObservation` for event-backed projections
+  shared with desktop or terminal clients. Its `ready` receipt owns admission
+  and the first authoritative read. Its asynchronous `stop()` owns late
+  admission, the in-flight read, and remote leave; cleanup must observe that
+  promise rather than treating removal of a local listener as retirement.
+- Approval observation is part of workspace readiness. Keep its state explicit
+  as `starting`, `ready`, or `failed`; await event admission and the initial
+  authoritative queue read before publishing a ready workspace. Register its
+  refresh with the recovery coordinator so recovery completion awaits the
+  read, and join remote unsubscription before closing the workspace transport.
 - Panel startup follows this contract explicitly. Admit the complete panel
   projection watch before post-paint reconciliation, then repeat the
   authoritative panel read if a lease, tree, presentation, activation, or
@@ -163,7 +173,9 @@ stay inside their workspace.
   may use a restored or freshly loaded tree; it is not the final reconciliation
   boundary.
 - Events that represent transient commands rather than durable state may remain
-  edge-triggered. Do not manufacture a snapshot for an action that has no
+  edge-triggered. They still own event admission and asynchronous retirement;
+  use a no-op projection read rather than a second fire-and-forget subscription
+  path. Do not manufacture product state for an action that has no
   authoritative current value.
 
 ## Verification

@@ -206,7 +206,11 @@ it("reconciles the selected native app update from durable status in System", as
     "external-open:open",
   ]);
   view.unmount();
-  expect(system.client.events.unsubscribe).toHaveBeenCalledWith("apps:status");
+  await waitFor(() =>
+    expect(system.client.events.unsubscribe).toHaveBeenCalledWith(
+      "apps:status",
+    ),
+  );
 });
 
 it("does not present old app lifecycle work after its System session is replaced", async () => {
@@ -230,12 +234,16 @@ it("does not present old app lifecycle work after its System session is replaced
   });
   expect(handleMobileAppLifecycleEvent).not.toHaveBeenCalled();
   view.unmount();
-  expect(f.client.events.unsubscribeMany).toHaveBeenCalledWith([
-    "notification:show",
-    "external-open:open",
-    "apps:lifecycle",
-  ]);
-  expect(f.client.events.unsubscribe).toHaveBeenCalledWith("apps:status");
+  await waitFor(() =>
+    expect(f.client.events.unsubscribeMany).toHaveBeenCalledWith([
+      "notification:show",
+      "external-open:open",
+      "apps:lifecycle",
+    ]),
+  );
+  await waitFor(() =>
+    expect(f.client.events.unsubscribe).toHaveBeenCalledWith("apps:status"),
+  );
 });
 
 it("handles targeted OAuth delivery once, independently of the broadcast watch", () => {

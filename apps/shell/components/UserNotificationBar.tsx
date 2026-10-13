@@ -27,6 +27,7 @@ import {
   type AgentMessageNotificationData,
 } from "@vibestudio/shared/userNotifications";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
+import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 
 import { openConversationSurfaceAtom } from "../state/commandAgentAtoms";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
@@ -193,14 +194,21 @@ export function UserNotificationBar() {
   // own and the line clears itself. Nothing to retry, nothing to dismiss.
   useEffect(() => {
     if (!awaitingReview) return;
-    const off = events.on(
-      SHELL_APPROVAL_PENDING_CHANGED_EVENT,
-      () => void refresh(),
-    );
-    void events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT);
+    const observation = observeDurableProjection({
+      listen: (invalidate) =>
+        events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, invalidate),
+      admit: () => events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+      leave: () => events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+      read: async () => {
+        await refresh();
+      },
+      apply: () => undefined,
+      error: (error) => setError(userFacingError(error)),
+    });
     return () => {
-      off();
-      void events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT);
+      void observation
+        .stop()
+        .catch((error: unknown) => setError(userFacingError(error)));
     };
   }, [awaitingReview, refresh]);
   useShellEvent(
