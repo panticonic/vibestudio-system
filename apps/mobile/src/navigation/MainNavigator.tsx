@@ -163,7 +163,7 @@ function RetainedWorkspaceScreens({
         />
       )}
       {approvalOwner &&
-        approvalOwner.approvals !== null &&
+        approvalOwner.approvalStatus === "ready" &&
         (!approvalSession || approvalSession.state === "ready") &&
         (approvalSession ? (
           <WorkspaceScope session={approvalSession} visible scheme={scheme}>
@@ -210,7 +210,11 @@ function RetainedWorkspaceScreens({
               </Text>
               <Button
                 label="Try again"
-                onPress={() => void directory.retryFailedApprovalOwners()}
+                onPress={() =>
+                  void directory
+                    .retryFailedApprovalOwners()
+                    .catch(() => undefined)
+                }
               />
             </View>
           </View>
@@ -219,7 +223,7 @@ function RetainedWorkspaceScreens({
       {directory.approvalWorkspaceId &&
         (!approvalSession ||
           approvalSession.state !== "ready" ||
-          approvalSession.approvals === null) && (
+          approvalSession.approvalStatus !== "ready") && (
           <AppModal
             transparent
             visible
@@ -256,7 +260,7 @@ function RetainedWorkspaceScreens({
                   · Approvals
                 </Text>
                 {approvalSession?.state === "failed" ||
-                approvalSession?.approvalError ? (
+                approvalSession?.approvalStatus === "failed" ? (
                   <>
                     <Text style={{ color: colors.textSecondary }}>
                       {approvalSession.error ?? approvalSession.approvalError}

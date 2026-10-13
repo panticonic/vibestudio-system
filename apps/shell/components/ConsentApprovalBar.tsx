@@ -87,7 +87,6 @@ export const APPROVAL_OVERLAY_HOST_ID = "app-approval-host";
  * keeps a user from being stranded behind an invisible approval without
  * turning every render into an RPC call.
  */
-const APPROVAL_RECONCILE_INTERVAL_MS = 5_000;
 
 /** Workspace source path of Workspace History (the file-inspection surface
  *  the diff-review escape hatch deep-links into). */
@@ -262,14 +261,16 @@ export function ConsentApprovalBar({
       },
     });
     approvalController.current = controller;
-    controller.start();
-    const reconcileId = window.setInterval(() => {
-      void controller.refresh("manual");
-    }, APPROVAL_RECONCILE_INTERVAL_MS);
+    void controller.start().catch(() => undefined);
     return () => {
-      window.clearInterval(reconcileId);
       approvalController.current = null;
-      controller.stop();
+      void controller.stop().catch((error: unknown) => {
+        if (!isRpcConnectionLost(error))
+          console.warn(
+            "[ConsentApprovalBar] approval state retirement failed:",
+            error,
+          );
+      });
     };
   }, []);
 
@@ -607,7 +608,13 @@ export function ConsentApprovalBar({
       console.error("[ConsentApprovalBar] approval action failed:", error);
       return;
     }
-    await controller.refresh("manual");
+    try {
+      await controller.refresh("manual");
+    } catch {
+      // The controller has already published the queue failure. Without an
+      // authoritative read, this decision cannot be reconciled safely.
+      return;
+    }
     if (approvalController.current !== controller) return;
     // A denied decision can also mean the request was withdrawn or membership
     // changed. Only the current authoritative queue can put a request back.
@@ -955,7 +962,9 @@ export function ConsentApprovalBar({
                     size="1"
                     variant="soft"
                     onClick={() =>
-                      void approvalController.current?.refresh("manual")
+                      void approvalController.current
+                        ?.refresh("manual")
+                        .catch(() => undefined)
                     }
                   >
                     Retry

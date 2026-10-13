@@ -13,6 +13,10 @@ import type {
 
 const mockClients: Array<{ config: Record<string, any>; client: any }> = [];
 const mockOpening = new Map<string, Promise<void>>();
+const mockRecoveryHandlers = new Map<
+  string,
+  { resubscribe?: () => Promise<void>; coldRecover?: () => Promise<void> }
+>();
 const mockHubEventListeners = new Map<
   string,
   (payload: { workspaces: Array<Record<string, any>> }) => void
@@ -35,7 +39,28 @@ jest.mock("./shellClient", () => ({
         on: jest.fn(() => () => {}),
       },
       shellApproval: { listPending: jest.fn(async () => []) },
-      onRecoveryComplete: jest.fn(() => () => {}),
+      recovery: {
+        registerResubscribeHandler: jest.fn(
+          (_name: string, handler: () => Promise<void>) => {
+            const handlers = mockRecoveryHandlers.get(config.workspaceId) ?? {};
+            handlers.resubscribe = handler;
+            mockRecoveryHandlers.set(config.workspaceId, handlers);
+            return () => {
+              if (handlers.resubscribe === handler) delete handlers.resubscribe;
+            };
+          },
+        ),
+        registerColdRecoverHandler: jest.fn(
+          (_name: string, handler: () => Promise<void>) => {
+            const handlers = mockRecoveryHandlers.get(config.workspaceId) ?? {};
+            handlers.coldRecover = handler;
+            mockRecoveryHandlers.set(config.workspaceId, handlers);
+            return () => {
+              if (handlers.coldRecover === handler) delete handlers.coldRecover;
+            };
+          },
+        ),
+      },
       serverUrl: `http://localhost/${config["workspaceId"]}`,
       init: jest.fn(async () => {
         await config.connectWorkspace(() => undefined);
@@ -69,9 +94,7 @@ jest.mock("@vibestudio/service-schemas/clients/eventsClient", () => ({
     on: jest.fn(
       (
         event: string,
-        listener: (payload: {
-          workspaces: Array<Record<string, any>>;
-        }) => void,
+        listener: (payload: { workspaces: Array<Record<string, any>> }) => void,
       ) => {
         mockHubEventListeners.set(event, listener);
         return () => mockHubEventListeners.delete(event);
@@ -146,6 +169,7 @@ function fixture() {
 beforeEach(() => {
   mockClients.length = 0;
   mockOpening.clear();
+  mockRecoveryHandlers.clear();
   mockHubEventListeners.clear();
 });
 
@@ -160,8 +184,9 @@ describe("mobile workspace directory", () => {
         ? { ...entry, name: "Renamed project", running: true }
         : entry,
     );
-    jest.mocked(account.control.rpc.call).mockImplementation(
-      async (_target, method: { name: string }) => {
+    jest
+      .mocked(account.control.rpc.call)
+      .mockImplementation(async (_target, method: { name: string }) => {
         if (method.name === "shellApproval.listPending") return [];
         catalogReads += 1;
         if (catalogReads === 1) {
@@ -170,8 +195,7 @@ describe("mobile workspace directory", () => {
           });
         }
         return structuredClone(currentEntries);
-      },
-    );
+      });
     const publishedProjectNames: string[] = [];
     directory.subscribe(() => {
       const project = directory.entries.find(
@@ -308,7 +332,9 @@ describe("mobile workspace directory", () => {
     jest
       .mocked(account.control.rpc.call)
       .mockRejectedValueOnce(new Error("account queue unavailable"));
-    await directory.hubApproval.approvalState!.refresh("manual");
+    await expect(
+      directory.hubApproval.approvalState!.refresh("manual"),
+    ).rejects.toThrow("account queue unavailable");
     expect(directory.approvalOwnerErrors).toEqual([
       "Account: account queue unavailable",
     ]);
@@ -344,6 +370,150 @@ describe("mobile workspace directory", () => {
     expect(directory.sessions.get("project")?.state).toBe("ready");
     expect(directory.activeWorkspaceId).toBe("personal");
     expect(directory.presented.has("project")).toBe(false);
+    await directory.dispose();
+  });
+
+  it("keeps a workspace opening until approval admission and its first authoritative read complete", async () => {
+    const { directory } = fixture();
+    await directory.init();
+    let admit!: () => void;
+    const opening = directory.open("project");
+    const project = directory.sessions.get("project")!;
+    const client = project.client;
+    let finishRead!: (
+      pending: Awaited<ReturnType<typeof client.shellApproval.listPending>>,
+    ) => void;
+    jest.mocked(client.events.subscribe).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          admit = resolve;
+        }),
+    );
+    jest.mocked(client.shellApproval.listPending).mockImplementationOnce(
+      () =>
+        new Promise<
+          Awaited<ReturnType<typeof client.shellApproval.listPending>>
+        >((resolve) => {
+          finishRead = resolve;
+        }),
+    );
+
+    for (let attempt = 0; attempt < 20 && !admit; attempt += 1)
+      await Promise.resolve();
+    expect(admit).toBeDefined();
+    expect(project).toMatchObject({
+      state: "opening",
+      approvalStatus: "starting",
+      approvals: null,
+    });
+    expect(finishRead).toBeUndefined();
+    admit();
+    for (let attempt = 0; attempt < 20 && !finishRead; attempt += 1)
+      await Promise.resolve();
+    expect(finishRead).toBeDefined();
+    expect(project).toMatchObject({
+      state: "opening",
+      approvalStatus: "starting",
+      approvals: null,
+    });
+    finishRead([]);
+
+    await expect(opening).resolves.toBe(project);
+    expect(project).toMatchObject({
+      state: "ready",
+      approvalStatus: "ready",
+      approvals: [],
+    });
+    await directory.dispose();
+  });
+
+  it("fails workspace opening with the original approval readiness error", async () => {
+    const { directory } = fixture();
+    await directory.init();
+    const failure = new Error("project approval queue unavailable");
+    const opening = directory.open("project");
+    const project = directory.sessions.get("project")!;
+    jest
+      .mocked(project.client.shellApproval.listPending)
+      .mockRejectedValueOnce(failure);
+
+    await expect(opening).rejects.toBe(failure);
+    expect(project).toMatchObject({
+      state: "failed",
+      error: failure.message,
+      approvalStatus: "failed",
+      approvalError: failure.message,
+    });
+    expect(project.client.close).toHaveBeenCalled();
+    await directory.dispose();
+  });
+
+  it("joins approval admission before directory disposal completes", async () => {
+    const { directory } = fixture();
+    await directory.init();
+    let admit!: () => void;
+    const opening = directory.open("project");
+    const project = directory.sessions.get("project")!;
+    jest.mocked(project.client.events.subscribe).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          admit = resolve;
+        }),
+    );
+    for (let attempt = 0; attempt < 20 && !admit; attempt += 1)
+      await Promise.resolve();
+    expect(admit).toBeDefined();
+
+    const disposing = directory.dispose();
+    let disposed = false;
+    void disposing.then(() => {
+      disposed = true;
+    });
+    await Promise.resolve();
+    expect(disposed).toBe(false);
+    expect(project.client.events.unsubscribe).not.toHaveBeenCalled();
+
+    admit();
+    await expect(opening).rejects.toThrow("controller is stopped");
+    await disposing;
+    expect(project.client.events.unsubscribe).toHaveBeenCalled();
+    expect(project.client.close).toHaveBeenCalled();
+  });
+
+  it("keeps recovery incomplete until the authoritative approval refresh settles", async () => {
+    const { directory } = fixture();
+    await directory.init();
+    const personal = directory.sessions.get("personal")!;
+    let finishRead!: (
+      pending: Awaited<
+        ReturnType<typeof personal.client.shellApproval.listPending>
+      >,
+    ) => void;
+    jest
+      .mocked(personal.client.shellApproval.listPending)
+      .mockImplementationOnce(
+        () =>
+          new Promise<
+            Awaited<
+              ReturnType<typeof personal.client.shellApproval.listPending>
+            >
+          >((resolve) => {
+            finishRead = resolve;
+          }),
+      );
+
+    const recovering = mockRecoveryHandlers.get("personal")!.resubscribe!();
+    let recovered = false;
+    void recovering.then(() => {
+      recovered = true;
+    });
+    await Promise.resolve();
+    expect(finishRead).toBeDefined();
+    expect(recovered).toBe(false);
+
+    finishRead([]);
+    await recovering;
+    expect(recovered).toBe(true);
     await directory.dispose();
   });
 
