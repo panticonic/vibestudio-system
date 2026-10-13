@@ -219,9 +219,15 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
                       <Badge color={statusColor(unit.status)}>{statusLabel(unit.status)}</Badge>
                       {pendingUpdate ? <Badge color="blue">pending desktop update</Badge> : null}
                       {unit.lastError ? (
-                        <Text size="1" color="red">
-                          {unit.lastError}
-                        </Text>
+                        unit.status === "running" ? (
+                          <Text size="1" color="amber">
+                            Update not adopted: {unit.lastError} The previous version keeps running.
+                          </Text>
+                        ) : (
+                          <Text size="1" color="red">
+                            {unit.lastError}
+                          </Text>
+                        )
                       ) : null}
                     </Flex>
                   </Table.Cell>
