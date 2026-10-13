@@ -143,6 +143,15 @@ to one Node process; separate workspace servers do not share it, so it is not a
 host-wide memory budget. Disk-backed build or dependency caches protect RAM
 from scratch files, but do not bound compiler heap or resident memory.
 
+Treat exhaustive workspace-release preparation as one batch operation. All
+template roles and runtime builds must share its single operation-scoped
+compiler budget; raising that budget must not raise the interactive BuildV2
+default or start independent producers. Choose it from the runner's aggregate
+CPU and memory allowance, including native executors and compiler children,
+then join every admitted build and retain every failure. Publication verifies,
+hashes, and copies artifacts after compilation, so bound that I/O separately
+when measurements show it is the next bottleneck.
+
 When reproducing memory pressure, use an explicit OS memory quota where the
 platform provides one, and observe it from an owner outside the constrained
 process group so a killed workload cannot take its evidence collector with it.
@@ -174,6 +183,14 @@ when you need to attribute objects.
 Read the startup profile before raw server logs. Look at supervision health and
 logs for one specific runtime. Use durable-work diagnostics for queue, claim,
 execution, settlement, and recovery timing.
+
+Keep exhaustive release production outside the application-startup interval.
+Produce one complete immutable release for the exact host fingerprint and
+template pins, then let each consumer reuse it only through the canonical
+validation path. Record a cold producer run separately from startup with a
+prepared release. Do not publish source-only or partially built records to make
+the readiness timestamp earlier; that duplicates compilation and changes the
+input observed by the consumer.
 
 For isolate CPU, list the available targets and run the real workload inside
 `profileWorkerd` or `profileDO`. Regular workers may share a host target; DOs
