@@ -11,63 +11,12 @@ import { isRpcConnectionLost } from "@vibestudio/rpc";
  */
 
 import { useEffect, useLayoutEffect, useRef } from "react";
-import type {
-  EventName,
-  EventPayloads,
-  ShellWorkspaceClient,
-} from "./workspaceClient";
+import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
+import type { EventName, EventPayloads } from "./workspaceClient";
 import { useShellWorkspaceClient } from "./workspaceContext";
 
 // Re-export for consumers
 export type { EventPayloads } from "./client.js";
-
-/** Refcount per event name. Shared across all hook instances. */
-type Subscription = { count: number; ready: Promise<void> };
-const references = new WeakMap<
-  ShellWorkspaceClient["events"],
-  Map<EventName, Subscription>
->();
-function subscriptionsFor(events: ShellWorkspaceClient["events"]) {
-  let refs = references.get(events);
-  if (!refs) {
-    refs = new Map();
-    references.set(events, refs);
-  }
-  return refs;
-}
-
-function addSubscription(
-  events: ShellWorkspaceClient["events"],
-  event: EventName,
-): Promise<void> {
-  const refs = subscriptionsFor(events);
-  const existing = refs.get(event);
-  if (existing) {
-    existing.count += 1;
-    return existing.ready;
-  }
-  const ready = events.subscribe(event);
-  refs.set(event, { count: 1, ready });
-  return ready;
-}
-
-function removeSubscription(
-  events: ShellWorkspaceClient["events"],
-  event: EventName,
-): void {
-  const subscriptionRefcounts = subscriptionsFor(events);
-  const subscription = subscriptionRefcounts.get(event);
-  if (!subscription) return;
-  if (subscription.count === 1) {
-    subscriptionRefcounts.delete(event);
-    void events.unsubscribe(event).catch((err: unknown) => {
-      if (!isRpcConnectionLost(err))
-        console.warn(`[useShellEvent] unsubscribe ${event} failed:`, err);
-    });
-  } else {
-    subscription.count -= 1;
-  }
-}
 
 /**
  * Subscribe to a shell event from the main process.
@@ -98,23 +47,31 @@ export function useShellEvent<E extends EventName>(
   });
 
   useEffect(() => {
-    const cleanup = events.on(event, (payload) => callbackRef.current(payload));
     const lifetime = new AbortController();
-    // Read only after the watch is installed. Revisions at the consumer then
-    // close the event/query race, including updates during watch opening.
-    void addSubscription(events, event)
-      .then(() => {
-        if (!lifetime.signal.aborted) return readSnapshot?.(lifetime.signal);
-      })
-      .catch((error: unknown) => {
+    const observation = observeDurableProjection({
+      listen: (invalidate) =>
+        events.on(event, (payload) => {
+          callbackRef.current(payload);
+          invalidate();
+        }),
+      admit: () => events.subscribe(event),
+      leave: () => events.unsubscribe(event),
+      read: async () => {
+        if (!lifetime.signal.aborted) await readSnapshot?.(lifetime.signal);
+      },
+      apply: () => undefined,
+      error: (error) => {
         if (!lifetime.signal.aborted && !isRpcConnectionLost(error))
           console.warn(`[useShellEvent] watch ${event} failed:`, error);
-      });
+      },
+    });
 
     return () => {
       lifetime.abort();
-      cleanup();
-      removeSubscription(events, event);
+      void observation.stop().catch((error: unknown) => {
+        if (!isRpcConnectionLost(error))
+          console.warn(`[useShellEvent] retire ${event} failed:`, error);
+      });
     };
   }, [events, event, readSnapshot]);
 }

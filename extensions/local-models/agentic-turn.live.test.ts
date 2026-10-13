@@ -73,6 +73,14 @@ async function withLocalAgent(
       },
     },
     emit: () => {},
+    invocation: {
+      current: () => ({
+        requestId: "native-local-live-host",
+        extensionName: "@workspace-extensions/local-models",
+        method: "attestRuntime",
+        caller: { callerKind: "server" as const, callerId: "main" },
+      }),
+    },
     subscriptions: {
       push: (disposable) => {
         disposables.push(disposable);
@@ -137,6 +145,7 @@ async function withLocalAgent(
       }),
     );
     const loads: string[] = [];
+    const preparedModels = new Map<string, string>();
     const rpcForContext = (
       nativeContext: import("@panticonic/pi-chord").Context,
     ): RpcCaller =>
@@ -145,22 +154,22 @@ async function withLocalAgent(
           const [target, method, args, options] = invocation;
           context.abortSignal?.throwIfAborted();
           expect(target).toBe("main");
-          expect(method).toBe("extensions.invoke");
+          expect(method).toBe("localModelRuntime.prepareNativeModel");
           expect(options?.signal).toBe(nativeContext.abortSignal);
-          const [extension, name, input] = args;
+          const [request] = args;
           if (
-            extension !== "@workspace-extensions/local-models" ||
-            !Array.isArray(input)
+            typeof request !== "object" ||
+            request === null ||
+            Reflect.get(request, "providerId") !== "local" ||
+            typeof Reflect.get(request, "modelId") !== "string"
           )
             throw new Error("Unexpected protected local model invocation");
-          let value: unknown;
-          if (name === "ensureLoaded" && typeof input[0] === "string") {
-            loads.push(input[0]);
-            value = await local.ensureLoaded(input[0]);
-          } else if (name === "getLoopbackAuth")
-            value = await local.getLoopbackAuth();
-          else throw new Error(`Unexpected local model method ${String(name)}`);
-          return value;
+          const modelId = Reflect.get(request, "modelId") as string;
+          loads.push(modelId);
+          await local.ensureLoaded(modelId);
+          const runtime = await local.attestRuntime(modelId);
+          preparedModels.set(runtime.baseUrl, modelId);
+          return { baseUrl: runtime.baseUrl };
         },
         stream: () => {
           throw new Error("Local host fixture has no RPC streams");
@@ -205,9 +214,26 @@ async function withLocalAgent(
         modelRequests: createProtectedModelProvider({
           rpcForRequest: (_request, _api, nativeContext) => {
             const rpc = rpcForContext(nativeContext);
-            return {rpc,cleanupRpc:rpc};
+            return { rpc, cleanupRpc: rpc };
           },
-          egressFetch: fetch,
+          egressFetch: async (input, init) => {
+            const url = new URL(
+              typeof input === "string" || input instanceof URL
+                ? input
+                : input.url,
+            );
+            const prepared = [...preparedModels.entries()].find(([baseUrl]) =>
+              url.href.startsWith(baseUrl),
+            );
+            if (!prepared)
+              throw new Error(`No prepared local runtime for ${url.href}`);
+            const runtime = await local.attestRuntime(prepared[1]);
+            if (!url.href.startsWith(runtime.baseUrl))
+              throw new Error("Prepared local runtime endpoint changed");
+            const headers = new Headers(init?.headers);
+            headers.set("authorization", `Bearer ${runtime.apiKey}`);
+            return fetch(input, { ...init, headers });
+          },
           waitForAuthority: async () => {
             throw new Error(
               "Trusted local test host unexpectedly requested approval",

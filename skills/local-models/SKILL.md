@@ -11,40 +11,35 @@ server directly.
 
 ## Check availability
 
-From agent eval, read the extension's state:
+From agent eval, read the model catalog:
 
 ```ts
 const { localModelsExtensionMethods } =
   await import("@workspace/model-catalog/localModels");
 const extension = "@workspace-extensions/local-models";
-const [statusValue, modelsValue] = await Promise.all([
-  services.extensions.invoke(
-    extension,
-    localModelsExtensionMethods.status.method,
-    [],
-  ),
-  services.extensions.invoke(
-    extension,
-    localModelsExtensionMethods.listModels.method,
-    [],
-  ),
-]);
-const status = localModelsExtensionMethods.status.result.parse(statusValue);
+const modelsValue = await services.extensions.invoke(
+  extension,
+  localModelsExtensionMethods.listModels.method,
+  [],
+);
 const models = localModelsExtensionMethods.listModels.result.parse(modelsValue);
-return { status, models };
+return models;
 ```
 
-Extension invocation rejects when the owning operation fails. Successful
-results are decoded with the shared method descriptors above, so malformed
-wire data remains an error instead of being treated as a partial status.
+`listModels` is the read-only discovery operation and is safe in a connected
+website's causal chain. Lifecycle methods remain closed there because they
+start profile-scoped processes or change persistent machine state. Extension
+invocation rejects when the owning operation fails. Successful results are
+decoded with the shared method descriptor above, so malformed wire data
+remains an error instead of being treated as partial availability.
 
 The preferred local model is `local:qwen3.8-27b`, on hardware where
-`listModels` offers it. `status.fallback.modelRef` is a small emergency
-fallback, not the recommended default. A model row is usable when its `state`
+`listModels` offers it. The small LFM2.5 model is an emergency fallback, not
+the recommended default. A model row is usable when its `state`
 is `startable` (downloaded and healthy, but not running) or `ready` (running).
 Report `downloading`, `starting`, and `error` as they are; don't lump them
-together as a generic failure. Call `getHardwareProfile` only when model choice
-or performance depends on the machine.
+together as a generic failure. Call `getHardwareProfile` only from a trusted
+native operation when model choice or performance depends on the machine.
 
 ## Install only when the user asks
 
@@ -63,10 +58,11 @@ await services.extensions.invoke(
 The call returns after the download finishes and the executable has been
 validated. It returns a job record for a completed download, or `null` if the
 current artifact was already present and passed validation. Installation
-failures reject the call. During installation, `listModels` and `status` show
-progress; a download started by another client stays in progress until its
-transfer completes. Don't start a duplicate download, make up a catalog slug,
-or remove a successfully installed model as cleanup.
+failures reject the call. During installation, `listModels` and the Local
+Models management panel show progress; a download started by another client
+stays in progress until its transfer completes. Don't start a duplicate
+download, make up a catalog slug, or remove a successfully installed model as
+cleanup.
 
 Before spawning a child agent on a local model, confirm that model's row is
 `startable` or `ready`. A model that is still downloading cannot run: track its
@@ -85,6 +81,12 @@ A local model cannot reuse a cloud provider's context cache, so a fork from a
 cloud model sends the full history without the cache savings a same-model fork
 would get. The runtime starts the model's server and injects loopback
 authentication for the child.
+
+The host prepares the selected local model and re-attests its exact live
+endpoint and bearer key for each request. `ensureLoaded` and `attestRuntime`
+are internal lifecycle and secret-bearing operations: never call them from
+agent eval, ask for their results, or copy an endpoint or key into a message,
+catalog record, journal, or panel state.
 
 Do any useful work in the meantime, then suspend while the child runs. Don't
 poll the child. When it delivers its result, the task has completed or failed

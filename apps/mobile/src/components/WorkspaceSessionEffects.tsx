@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import type {
   MobileWorkspaceDirectory,
   MobileWorkspaceSession,
@@ -95,15 +96,6 @@ export function WorkspaceSessionEffects({
       "external-open:open",
       ...(isAppSource ? ["supervision:changed" as const] : []),
     ] as const;
-    const subscribe = async () => {
-      try {
-        await client.events.subscribeAll(topics);
-        if (!active) await client.events.unsubscribeMany(topics);
-      } catch (error) {
-        if (active)
-          console.warn("[WorkspaceNotifications] Subscription failed", error);
-      }
-    };
     const openExternal = (payload: ExternalOpenPayload) => {
       if (!active || directory.sessions.get(session.workspaceId) !== session)
         return;
@@ -117,24 +109,46 @@ export function WorkspaceSessionEffects({
         });
       });
     };
-    const stopExternal = client.events.on("external-open:open", openExternal);
-    const stopExternalDirect = client.onDirectEvent(
-      "external-open:open",
-      openExternal,
-    );
-    const stopEvent = client.events.on("notification:show", present);
-    const stopDirect = client.onDirectEvent("notification:show", present);
-    void subscribe();
+    const observation = observeDurableProjection({
+      listen: (invalidate) => {
+        const stopExternal = client.events.on(
+          "external-open:open",
+          (payload) => {
+            openExternal(payload);
+            invalidate();
+          },
+        );
+        const stopExternalDirect = client.onDirectEvent(
+          "external-open:open",
+          openExternal,
+        );
+        const stopEvent = client.events.on("notification:show", (payload) => {
+          present(payload);
+          invalidate();
+        });
+        const stopDirect = client.onDirectEvent("notification:show", present);
+        return () => {
+          stopExternal();
+          stopExternalDirect();
+          stopEvent();
+          stopDirect();
+        };
+      },
+      admit: () => client.events.subscribeAll(topics),
+      leave: () => client.events.unsubscribeMany(topics),
+      read: async () => undefined,
+      apply: () => undefined,
+      error: (error) =>
+        console.warn("[WorkspaceNotifications] Observation failed", error),
+    });
     return () => {
       active = false;
       stopAppLifecycle?.();
-      stopExternal();
-      stopExternalDirect();
-      stopEvent();
-      stopDirect();
-      void client.events.unsubscribeMany(topics).catch((error: unknown) => {
-        console.warn("[WorkspaceNotifications] Unsubscribe failed", error);
-      });
+      void observation
+        .stop()
+        .catch((error: unknown) =>
+          console.warn("[WorkspaceNotifications] Retirement failed", error),
+        );
     };
   }, [directory, session, notify]);
   return null;

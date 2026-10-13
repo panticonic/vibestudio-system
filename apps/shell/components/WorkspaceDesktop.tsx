@@ -20,6 +20,7 @@ import {
 import { Button, Callout, Text } from "@radix-ui/themes";
 import { GearIcon, LightningBoltIcon, ReloadIcon } from "@radix-ui/react-icons";
 import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
+import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import {
   app,
   createWorkspaceShellClient,
@@ -67,7 +68,10 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "workspace-sidebar-width";
 
 function sidebarWidthBounds(windowWidth: number) {
   const min = windowWidth <= 720 ? 180 : 220;
-  return { min, max: Math.max(min, Math.min(600, Math.floor(windowWidth / 2))) };
+  return {
+    min,
+    max: Math.max(min, Math.min(600, Math.floor(windowWidth / 2))),
+  };
 }
 
 function clampSidebarWidth(width: number, windowWidth: number) {
@@ -95,7 +99,9 @@ export function WorkspaceDesktop({
   const openings = useRef(new Map<string, Promise<OpenWorkspace>>());
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [panelQuery, setPanelQuery] = useState("");
-  const navigatePanelHandlers = useRef(new Map<string, (panelId: string) => void>());
+  const navigatePanelHandlers = useRef(
+    new Map<string, (panelId: string) => void>(),
+  );
   const pendingPanelNavigation = useRef<{
     workspaceId: string;
     panelId: string;
@@ -108,8 +114,12 @@ export function WorkspaceDesktop({
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
     try {
-      const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-      return Number.isFinite(saved) && saved > 0 ? saved : DEFAULT_SIDEBAR_WIDTH;
+      const saved = Number(
+        window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY),
+      );
+      return Number.isFinite(saved) && saved > 0
+        ? saved
+        : DEFAULT_SIDEBAR_WIDTH;
     } catch {
       return DEFAULT_SIDEBAR_WIDTH;
     }
@@ -117,7 +127,10 @@ export function WorkspaceDesktop({
   const visibleSidebarWidth = clampSidebarWidth(sidebarWidth, windowWidth);
   useEffect(() => {
     try {
-      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+      window.localStorage.setItem(
+        SIDEBAR_WIDTH_STORAGE_KEY,
+        String(sidebarWidth),
+      );
     } catch {
       // The in-memory width still works when browser storage is unavailable.
     }
@@ -130,7 +143,10 @@ export function WorkspaceDesktop({
   const resizeSidebar = useCallback(
     (delta: number) =>
       setSidebarWidth((current) =>
-        clampSidebarWidth(clampSidebarWidth(current, windowWidth) + delta, windowWidth),
+        clampSidebarWidth(
+          clampSidebarWidth(current, windowWidth) + delta,
+          windowWidth,
+        ),
       ),
     [windowWidth],
   );
@@ -138,7 +154,11 @@ export function WorkspaceDesktop({
     async (workspaceId: string, query: string, cursor?: string) => {
       const owner = owners.current.get(workspaceId);
       if (owner)
-        return owner.client.panel.searchTree({ query, ...(cursor ? { cursor } : {}), limit: 50 });
+        return owner.client.panel.searchTree({
+          query,
+          ...(cursor ? { cursor } : {}),
+          limit: 50,
+        });
       const transient = await createWorkspaceShellClient(workspaceId);
       try {
         return await transient.client.panel.searchTree({
@@ -172,7 +192,9 @@ export function WorkspaceDesktop({
     if (!focusedId || openingStartedAt.current === null) return;
     // Native shell mount precedes workspace readiness. Keep this separate
     // user-timing boundary so profiles include the opening screen's lifetime.
-    performance.measure("workspace:initial-open", { start: openingStartedAt.current });
+    performance.measure("workspace:initial-open", {
+      start: openingStartedAt.current,
+    });
     openingStartedAt.current = null;
   }, [focusedId]);
   const focusedRef = useRef(focusedId);
@@ -489,8 +511,7 @@ export function WorkspaceDesktop({
             focus: location.focus ?? true,
           });
       } catch (error) {
-        if (live)
-          setError(userFacingError(error));
+        if (live) setError(userFacingError(error));
       }
     };
     const release = incomingPanelLocation.onLocation((location) => {
@@ -680,7 +701,9 @@ export function WorkspaceDesktop({
               <ResizableDivider
                 orientation="vertical"
                 label="Resize panel tree sidebar"
-                valueNow={(visibleSidebarWidth / Math.max(1, windowWidth)) * 100}
+                valueNow={
+                  (visibleSidebarWidth / Math.max(1, windowWidth)) * 100
+                }
                 onDrag={resizeSidebar}
                 onKeyboardStep={resizeSidebar}
                 onReset={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
@@ -749,7 +772,10 @@ export function WorkspaceDesktop({
                               ).catch(() => undefined);
                             },
                             registerNavigateToPanel: (navigate) =>
-                              registerPanelNavigation(owner.workspace.workspaceId, navigate),
+                              registerPanelNavigation(
+                                owner.workspace.workspaceId,
+                                navigate,
+                              ),
                           }}
                         >
                           <WorkspacePanelOwner
@@ -794,14 +820,22 @@ function WorkspacePanelOwner({
   const connection = useRef(onConnection);
   connection.current = onConnection;
   useEffect(() => {
-    const releaseStatus = owner.client.events.on(
-      "server-connection-changed",
-      (event) => connection.current(event.status === "connected"),
-    );
-    void owner.client.events.subscribe("server-connection-changed");
+    const observation = observeDurableProjection({
+      listen: (invalidate) =>
+        owner.client.events.on("server-connection-changed", (event) => {
+          connection.current(event.status === "connected");
+          invalidate();
+        }),
+      admit: () => owner.client.events.subscribe("server-connection-changed"),
+      leave: () => owner.client.events.unsubscribe("server-connection-changed"),
+      // Connection changes are transient edges. Admission has no authoritative
+      // status snapshot, so preserve the last observed state until an event.
+      read: async () => undefined,
+      apply: () => undefined,
+      error: () => connection.current(false),
+    });
     return () => {
-      releaseStatus();
-      void owner.client.events.unsubscribe("server-connection-changed");
+      void observation.stop().catch(() => connection.current(false));
     };
   }, [owner]);
   return (

@@ -1,6 +1,7 @@
 import React from "react";
 import { Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
+import type { DurableObservation } from "@vibestudio/shell-core/durableObservation";
 import type {
   TerminalBrowserExit,
   TerminalBrowserHost,
@@ -181,6 +182,7 @@ export class TerminalBrowser {
   private apps: TerminalApp[] | null = null;
   private appsProblem: string | null = null;
   private approvals: PendingApproval[] = [];
+  private approvalObservation: DurableObservation | null = null;
   private seenApprovals = new Set<string>();
   private overlay: Overlay | null = null;
   private launcher: ListState = { query: "", selected: 0 };
@@ -285,11 +287,19 @@ export class TerminalBrowser {
     process.on("SIGCONT", onContinue);
     this.cleanups.push(() => process.off("SIGCONT", onContinue));
 
-    this.cleanups.push(
-      this.approvalsClient.onChange(() => {
-        void this.refreshApprovals();
-      })
+    const approvalObservation = this.approvalsClient.observe(
+      (pending) => this.guard(() => this.applyApprovals(pending)),
+      (error) => this.log("warn", `Approval queue observation failed: ${describeError(error)}`)
     );
+    this.approvalObservation = approvalObservation;
+    this.cleanups.push(() => {
+      if (this.approvalObservation === approvalObservation) this.approvalObservation = null;
+      void approvalObservation
+        .stop()
+        .catch((error: unknown) =>
+          this.log("warn", `Approval queue retirement failed: ${describeError(error)}`)
+        );
+    });
     this.cleanups.push(
       this.services.sessions.onChange((entries) => this.guard(() => this.applyEntries(entries)))
     );
@@ -453,13 +463,14 @@ export class TerminalBrowser {
   }
 
   private async refreshApprovals(): Promise<void> {
-    let pending: PendingApproval[];
     try {
-      pending = await this.approvalsClient.list();
+      await this.approvalObservation?.refresh();
     } catch (error) {
       this.log("warn", `Approvals could not be refreshed: ${describeError(error)}`);
-      return;
     }
+  }
+
+  private applyApprovals(pending: PendingApproval[]): void {
     if (this.finished) return;
     const fresh = pending.filter((approval) => !this.seenApprovals.has(approval.approvalId));
     this.seenApprovals = new Set(pending.map((approval) => approval.approvalId));

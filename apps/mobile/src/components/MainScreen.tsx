@@ -1,5 +1,6 @@
 import type { NativeWebsiteRequest } from "../services/websiteDocumentHost";
 import { observeWebsiteConnections } from "@vibestudio/shell-core/websiteConnections";
+import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import { websiteConnectionSnapshotAtom } from "../state/shellClientAtom";
 import type { MobileShellSurface } from "../services/mobileShellSurfaces";
 import { asPanelEntityId } from "@vibestudio/shared/panel/ids";
@@ -224,7 +225,7 @@ export function MainScreen({
   useEffect(() => {
     setWebsiteConnections({ owner: shellClient, entries: new Map() });
     if (!shellClient) return;
-    return observeWebsiteConnections({
+    const observation = observeWebsiteConnections({
       list: () => shellClient.websiteConnections.list(),
       listen: (changed) =>
         shellClient.events.on("website:connection-changed", (event) => {
@@ -244,6 +245,16 @@ export function MainScreen({
       error: (error) =>
         console.warn("[MainScreen] Website connection inventory failed", error),
     });
+    return () => {
+      void observation
+        .stop()
+        .catch((error: unknown) =>
+          console.warn(
+            "[MainScreen] Website connection retirement failed",
+            error,
+          ),
+        );
+    };
   }, [shellClient, setWebsiteConnections]);
   const panelTreeRevision = useAtomValue(panelTreeRevisionAtom);
   const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
@@ -375,7 +386,6 @@ export function MainScreen({
   const [userNotifications, setUserNotifications] = useState<
     UserNotification[]
   >([]);
-  const userNotificationRefreshSeq = useRef(0);
 
   const [addressBarVisible, setAddressBarVisible] = useState(false);
   const [addressQuery, setAddressQuery] = useState("");
@@ -397,9 +407,11 @@ export function MainScreen({
   );
   useEffect(() => {
     if (!shellClient) return;
-    return shellClient.events.on(
-      "browser-permissions:changed",
-      ({ grants }) => {
+    const observation = observeDurableProjection({
+      listen: (changed) =>
+        shellClient.onDirectEvent("browser-permissions:changed", changed),
+      read: () => shellClient.snapshotBrowserNotificationPermissions(),
+      apply: ({ grants }) => {
         shellClient.updateBrowserNotificationPermissions(grants);
         const notifications = grants
           .filter((grant) => grant.capability === "notifications")
@@ -407,7 +419,22 @@ export function MainScreen({
         for (const handle of webViewRefsMap.current.values())
           handle?.updateWebsiteNotificationPermissions(notifications);
       },
-    );
+      error: (error) =>
+        console.warn(
+          "[MainScreen] Failed to refresh browser permissions:",
+          error,
+        ),
+    });
+    return () => {
+      void observation
+        .stop()
+        .catch((error: unknown) =>
+          console.warn(
+            "[MainScreen] Browser permission observation retirement failed",
+            error,
+          ),
+        );
+    };
   }, [shellClient]);
   const webViewThemeSignaturesRef = useRef<Map<string, string>>(new Map());
   const [materializationEpoch, setMaterializationEpoch] = useState(0);
@@ -430,49 +457,47 @@ export function MainScreen({
     webViewNavigationRef.current = webViewNavigation;
   }, [webViewNavigation]);
   useEffect(() => {
-    userNotificationRefreshSeq.current += 1;
     if (!shellClient) {
       setUserNotifications([]);
       return;
     }
-    let disposed = false;
-    const refresh = async () => {
-      const refreshSequence = ++userNotificationRefreshSeq.current;
-      const next = await shellClient.userNotifications.list();
-      if (!disposed && userNotificationRefreshSeq.current === refreshSequence) {
-        setUserNotifications(next);
-      }
-    };
-    void refresh().catch((error: unknown) => {
-      if (!disposed)
-        console.warn("[MainScreen] Failed to load user notifications:", error);
+    const observation = observeDurableProjection({
+      listen: (changed) => {
+        const stopEvent = shellClient.onDirectEvent(
+          "user-notifications-changed",
+          changed,
+        );
+        const stopResubscribe = shellClient.recovery.registerResubscribeHandler(
+          "mobile-user-notifications",
+          () => changed(),
+        );
+        const stopColdRecover = shellClient.recovery.registerColdRecoverHandler(
+          "mobile-user-notifications",
+          () => changed(),
+        );
+        return () => {
+          stopEvent();
+          stopResubscribe();
+          stopColdRecover();
+        };
+      },
+      read: () => shellClient.userNotifications.list(),
+      apply: setUserNotifications,
+      error: (error) =>
+        console.warn(
+          "[MainScreen] Failed to refresh user notifications:",
+          error,
+        ),
     });
-    const unsubscribeEvent = shellClient.onDirectEvent(
-      "user-notifications-changed",
-      () =>
-        void refresh().catch((error: unknown) =>
+    return () => {
+      void observation
+        .stop()
+        .catch((error: unknown) =>
           console.warn(
-            "[MainScreen] Failed to refresh user notifications:",
+            "[MainScreen] Notification observation retirement failed",
             error,
           ),
-        ),
-    );
-    const unsubscribeResubscribe =
-      shellClient.recovery.registerResubscribeHandler(
-        "mobile-user-notifications",
-        refresh,
-      );
-    const unsubscribeColdRecover =
-      shellClient.recovery.registerColdRecoverHandler(
-        "mobile-user-notifications",
-        refresh,
-      );
-    return () => {
-      disposed = true;
-      userNotificationRefreshSeq.current += 1;
-      unsubscribeEvent();
-      unsubscribeResubscribe();
-      unsubscribeColdRecover();
+        );
     };
   }, [shellClient]);
   // Route host→panel RPC envelopes (relay replies + events) into the target
@@ -991,21 +1016,6 @@ export function MainScreen({
   useEffect(() => {
     if (!shellClient) return;
     refreshTree();
-    const eventNames = ["workspace:revision-bumped"] as const;
-    const subscribeAll = async () => {
-      await Promise.all(
-        eventNames.map(async (name) => {
-          try {
-            await shellClient.events.subscribe(name);
-          } catch (error) {
-            console.warn(`[MainScreen] Failed to subscribe to ${name}:`, error);
-          }
-        }),
-      );
-    };
-    void subscribeAll().catch((error: unknown) =>
-      console.warn("[MainScreen] Event subscription failed", error),
-    );
     const unsubNavigate = shellClient.onNavigateToPanel((panelId) => {
       refreshTree();
       activatePanel(panelId);
@@ -1023,35 +1033,10 @@ export function MainScreen({
         if (panelId) activatePanel(panelId);
       },
     );
-    const unsubWorkspaceRevision = shellClient.events.on(
-      "workspace:revision-bumped",
-      () => {
-        void shellClient.panels
-          .refresh()
-          .then(refreshTree)
-          .catch((error: unknown) => {
-            console.warn(
-              "[MainScreen] Panel refresh after workspace revision failed:",
-              error,
-            );
-            return refreshTree();
-          })
-          .catch((error: unknown) =>
-            console.warn(
-              "[MainScreen] Panel tree fallback refresh failed:",
-              error,
-            ),
-          );
-      },
-    );
     return () => {
       unsubNavigate();
       unsubCreated();
       unsubNav();
-      unsubWorkspaceRevision();
-      for (const name of eventNames) {
-        void shellClient.events.unsubscribe(name).catch(() => {});
-      }
     };
   }, [activatePanel, refreshTree, shellClient]);
   useEffect(() => {

@@ -44,8 +44,8 @@
             "kind": "open"
           },
           "website": {
-            "kind": "closed",
-            "reason": "Controls profile-scoped model processes, account state and local downloads."
+            "kind": "eligible",
+            "rationale": "Returns read-only model availability metadata; it neither starts processes nor returns loopback credentials."
           }
         },
         "ensureLoaded": {
@@ -66,13 +66,13 @@
             "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
-        "getLoopbackAuth": {
+        "attestRuntime": {
           "effect": {
             "kind": "open"
           },
           "website": {
             "kind": "closed",
-            "reason": "Controls profile-scoped model processes, account state and local downloads."
+            "reason": "Returns a live model-scoped loopback endpoint and credential to the trusted host runtime only."
           }
         },
         "getHardwareProfile": {

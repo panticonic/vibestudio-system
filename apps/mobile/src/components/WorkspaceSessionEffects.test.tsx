@@ -17,6 +17,8 @@ jest.mock("../services/appUpdatePrompt", () => ({
 function setup(workspaceId = "personal") {
   const listeners = new Map<string, (payload: unknown) => void>();
   const directListeners = new Map<string, (payload: unknown) => void>();
+  const resubscribeHandlers = new Map<string, () => Promise<void>>();
+  const coldRecoverHandlers = new Map<string, () => Promise<void>>();
   const stop = jest.fn();
   const client = {
     panels: { updateTheme: jest.fn(async (_theme: string) => undefined) },
@@ -25,8 +27,11 @@ function setup(workspaceId = "personal") {
         source: "apps/mobile",
         name: "mobile",
       })),
+      mobileUpdateStatus: jest.fn(async (): Promise<any> => null),
     },
     events: {
+      subscribe: jest.fn(async (_topic: string) => undefined),
+      unsubscribe: jest.fn(async (_topic: string) => undefined),
       subscribeAll: jest.fn(async (_topics: Iterable<string>) => undefined),
       unsubscribeMany: jest.fn(async (_topics: Iterable<string>) => undefined),
       on: jest.fn((event: string, listener: (payload: unknown) => void) => {
@@ -41,6 +46,20 @@ function setup(workspaceId = "personal") {
       },
     ),
     transport: { onReconnect: jest.fn(() => stop) },
+    recovery: {
+      registerResubscribeHandler: jest.fn(
+        (key: string, handler: () => Promise<void>) => {
+          resubscribeHandlers.set(key, handler);
+          return () => resubscribeHandlers.delete(key);
+        },
+      ),
+      registerColdRecoverHandler: jest.fn(
+        (key: string, handler: () => Promise<void>) => {
+          coldRecoverHandlers.set(key, handler);
+          return () => coldRecoverHandlers.delete(key);
+        },
+      ),
+    },
   };
   const session = { workspaceId, client };
   const directory = {
@@ -62,6 +81,8 @@ function setup(workspaceId = "personal") {
     session,
     notify,
     props,
+    resubscribeHandlers,
+    coldRecoverHandlers,
     stop,
     direct: (event: string, payload: unknown) =>
       directListeners.get(event)?.(payload),
@@ -162,21 +183,21 @@ it("attributes external handoff failure to its owner without changing the active
   expect(f.directory.activate).not.toHaveBeenCalled();
 });
 
-it("subscribes to existing native app lifecycle only in System, even while its panels are unvisited", async () => {
+it("reconciles the selected native app update from supervision in System", async () => {
   const system = setup("system");
   const personal = setup();
-  render(
-    <>
-      <WorkspaceSessionEffects {...system.props} />
-      <WorkspaceSessionEffects {...personal.props} />
-    </>,
-  );
   const event = {
     identity: { kind: "app", entityId: "mobile" },
     change: "adopted",
     source: "apps/mobile",
     app: { target: "react-native" },
   };
+  const view = render(
+    <>
+      <WorkspaceSessionEffects {...system.props} />
+      <WorkspaceSessionEffects {...personal.props} />
+    </>,
+  );
   system.emit("supervision:changed", event);
   personal.emit("supervision:changed", event);
   await waitFor(() =>
@@ -194,6 +215,7 @@ it("subscribes to existing native app lifecycle only in System, even while its p
     "notification:show",
     "external-open:open",
   ]);
+  view.unmount();
 });
 
 it("does not present old app lifecycle work after its System session is replaced", async () => {
@@ -218,11 +240,13 @@ it("does not present old app lifecycle work after its System session is replaced
   });
   expect(handleMobileSupervisionChange).not.toHaveBeenCalled();
   view.unmount();
-  expect(f.client.events.unsubscribeMany).toHaveBeenCalledWith([
-    "notification:show",
-    "external-open:open",
-    "supervision:changed",
-  ]);
+  await waitFor(() =>
+    expect(f.client.events.unsubscribeMany).toHaveBeenCalledWith([
+      "notification:show",
+      "external-open:open",
+      "supervision:changed",
+    ]),
+  );
 });
 
 it("handles targeted OAuth delivery once, independently of the broadcast watch", () => {

@@ -421,8 +421,45 @@ describe("ConsentApprovalBar coordinator", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "approvals couldn’t be loaded",
     );
+    const subscribeCount = shellClient.subscribe.mock.calls.length;
+    const unsubscribeCount = shellClient.unsubscribe.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(shellClient.unsubscribe).toHaveBeenCalledTimes(unsubscribeCount + 1);
+    expect(shellClient.subscribe).toHaveBeenCalledTimes(subscribeCount + 1);
+    view.unmount();
+  });
+
+  it("retires and replaces a controller whose event admission failed", async () => {
+    const failure = new Error("Approval watch unavailable");
+    const subscribe = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(undefined);
+    const unsubscribe = vi.fn(async () => undefined);
+    const view = mountBar((client) => ({
+      owner: { kind: "hub" },
+      shellApproval: client.shellApproval,
+      events: {
+        subscribe,
+        unsubscribe,
+        on: () => () => undefined,
+      },
+    }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      failure.message,
+    );
+    expect(shellClient.listPending).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(subscribe).toHaveBeenCalledTimes(2);
+    expect(shellClient.listPending).toHaveBeenCalledTimes(1);
+    expect(unsubscribe.mock.invocationCallOrder[0]).toBeLessThan(
+      subscribe.mock.invocationCallOrder[1]!,
+    );
     view.unmount();
   });
 

@@ -59,6 +59,8 @@ import {
 } from "../state/connectionAtoms";
 import { serverUrlAtom } from "../state/authAtoms";
 import { getNativeAppStorage } from "./nativeAppStorage";
+import type { EventPayloads } from "@vibestudio/shared/events";
+import { serializeByKey } from "@vibestudio/shared/keyedSerializer";
 
 export interface MobileWorkspaceSession {
   readonly workspaceId: string;
@@ -67,6 +69,7 @@ export interface MobileWorkspaceSession {
   state: "opening" | "ready" | "failed";
   error: string | null;
   approvals: PendingApproval[] | null;
+  approvalStatus: "starting" | "ready" | "failed";
   approvalState: ApprovalStateController | null;
   approvalError: string | null;
   stopApprovalRecovery?: () => void;
@@ -79,8 +82,10 @@ export interface MobileApprovalOwner {
   readonly events: EventsClient;
   readonly session?: MobileWorkspaceSession;
   approvals: PendingApproval[] | null;
+  approvalStatus: "starting" | "ready" | "failed";
   approvalState: ApprovalStateController | null;
   approvalError: string | null;
+  approvalAdmissionError?: unknown;
 }
 
 /** Account-owned directory. A workspace's client and UI store are never rebound. */
@@ -182,12 +187,31 @@ export class MobileWorkspaceDirectory {
   }
 
   async retryFailedApprovalOwners(): Promise<void> {
+    if (this.disposed) throw new Error("The mobile account is closed");
     const failed = this.failedApprovalOwners;
     await Promise.all(
       failed.map(async (owner) => {
-        const controller = owner.approvalState;
-        if (!controller) return;
-        await controller.refresh("manual");
+        const key =
+          owner.owner.kind === "workspace"
+            ? `workspace:${owner.owner.workspaceId}`
+            : "hub";
+        let operation!: Promise<void>;
+        operation = serializeByKey(this.approvalReplacements, key, async () => {
+          const session = owner.session;
+          if (session?.state === "failed") {
+            await this.open(session.workspaceId);
+            return;
+          }
+          await this.retireApprovalState(owner);
+          if (!this.disposed) await this.startApprovalState(owner);
+        });
+        this.approvalReplacementReceipts.set(key, operation);
+        try {
+          await operation;
+        } finally {
+          if (this.approvalReplacementReceipts.get(key) === operation)
+            this.approvalReplacementReceipts.delete(key);
+        }
       }),
     );
   }
@@ -227,7 +251,7 @@ export class MobileWorkspaceDirectory {
         );
         this.requestedApproval = null;
       } else if (
-        this.sessions.get(requested.workspaceId)?.approvals !== null &&
+        this.sessions.get(requested.workspaceId)?.approvalStatus === "ready" &&
         this.sessions.get(requested.workspaceId)?.state === "ready"
       ) {
         this.requestedApproval = null;
@@ -245,6 +269,15 @@ export class MobileWorkspaceDirectory {
   private selectionGeneration = 0;
   private readonly listeners = new Set<() => void>();
   private readonly opening = new Map<string, Promise<MobileWorkspaceSession>>();
+  private readonly startupOperations = new Set<Promise<void>>();
+  private readonly approvalRetirements = new Set<Promise<void>>();
+  private readonly approvalReplacements = new Map<string, Promise<unknown>>();
+  private readonly approvalReplacementReceipts = new Map<
+    string,
+    Promise<void>
+  >();
+  private stopWorkspaceCatalog: (() => void) | null = null;
+  private workspaceCatalogGeneration = 0;
   private disposed = false;
   private closing: Promise<void> | null = null;
 
@@ -252,14 +285,23 @@ export class MobileWorkspaceDirectory {
     readonly account: MobileWorkspaceAccount,
     private readonly stored: StoredMobileConnection,
   ) {
-    this.hubControl = createTypedRpcServiceClient(account.control.rpc, { targetId: "main", namespace: "hubControl" }, hubControlMethods);
-    const shellApproval = createTypedRpcServiceClient(account.control.rpc, { targetId: "main", namespace: "shellApproval" }, shellApprovalMethods);
+    this.hubControl = createTypedRpcServiceClient(
+      account.control.rpc,
+      { targetId: "main", namespace: "hubControl" },
+      hubControlMethods,
+    );
+    const shellApproval = createTypedRpcServiceClient(
+      account.control.rpc,
+      { targetId: "main", namespace: "shellApproval" },
+      shellApprovalMethods,
+    );
     this.hubApproval = {
       owner: { kind: "hub" },
       label: "Account",
       shellApproval,
       events: new EventsClient(account.control.rpc),
       approvals: null,
+      approvalStatus: "starting",
       approvalState: null,
       approvalError: null,
     };
@@ -277,13 +319,21 @@ export class MobileWorkspaceDirectory {
   }
 
   async init(): Promise<void> {
-    this.startHubApprovalState();
     const [pair, saved] = await Promise.all([
       this.hubControl.ensureUserWorkspaces(),
       getNativeAppStorage().getItem(this.selectionKey),
+      this.startHubApprovalState(),
     ]);
     this.personalWorkspaceId = pair.personal.workspaceId;
     this.systemWorkspaceId = pair.system.workspaceId;
+    this.stopWorkspaceCatalog = this.hubApproval.events.on(
+      "hub:workspace-catalog-changed",
+      (payload) => {
+        this.workspaceCatalogGeneration += 1;
+        this.applyWorkspaceEntries(payload.workspaces);
+      },
+    );
+    await this.hubApproval.events.subscribe("hub:workspace-catalog-changed");
     await this.refresh();
     // open() publishes the System owner synchronously. Personal captures that
     // same app-source client while both workspace connections become ready.
@@ -291,21 +341,61 @@ export class MobileWorkspaceDirectory {
     const selected = this.entries.some((entry) => entry.workspaceId === saved)
       ? saved!
       : this.personalWorkspaceId;
-    const startup = [
-      system.then((session) => session.client.refreshAccountProfile()),
-      this.activate(selected),
-    ];
-    try {
-      await Promise.all(startup);
-    } catch (error) {
-      await Promise.allSettled(startup);
-      throw error;
-    }
+    this.ownSystemStartup(
+      system.then(async (session) => {
+        await session.client.refreshAccountProfile();
+      }),
+    );
+    // The selected workspace owns first presentation. System remains the
+    // canonical app-source owner, but its independent initialization and
+    // profile read cannot withhold an already restored selected workspace.
+    await this.activate(selected);
   }
 
-  private startHubApprovalState(): void {
-    const owner = this.hubApproval;
-    owner.approvalState = createApprovalStateController({
+  private ownSystemStartup(operation: Promise<void>): void {
+    let owned!: Promise<void>;
+    owned = operation
+      .catch((error: unknown) => {
+        if (this.disposed) return;
+        const session = this.sessions.get(this.systemWorkspaceId);
+        if (session && session.state !== "failed") {
+          session.state = "failed";
+          session.error =
+            error instanceof Error ? error.message : String(error);
+          session.client.dispose();
+          this.changed();
+        }
+      })
+      .finally(() => this.startupOperations.delete(owned));
+    this.startupOperations.add(owned);
+  }
+
+  private ownApprovalRetirement(operation: Promise<void>): void {
+    this.approvalRetirements.add(operation);
+    void operation.then(
+      () => this.approvalRetirements.delete(operation),
+      (error: unknown) => {
+        this.approvalRetirements.delete(operation);
+        if (this.disposed) return;
+        this.error = error instanceof Error ? error.message : String(error);
+        this.changed();
+      },
+    );
+  }
+
+  private createApprovalState(
+    owner: MobileApprovalOwner,
+  ): ApprovalStateController {
+    const session = owner.session;
+    owner.approvalStatus = "starting";
+    owner.approvalError = null;
+    owner.approvalAdmissionError = undefined;
+    if (session) {
+      session.approvalStatus = "starting";
+      session.approvalError = null;
+    }
+    let controller!: ApprovalStateController;
+    controller = createApprovalStateController({
       listPending: () => owner.shellApproval.listPending(),
       subscribePendingChanged: () =>
         owner.events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
@@ -314,23 +404,91 @@ export class MobileWorkspaceDirectory {
       onPendingChanged: (listener) =>
         owner.events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, listener),
       onChange: (pending) => {
-        if (this.disposed) return;
+        if (this.disposed || owner.approvalState !== controller) return;
         owner.approvals = pending;
+        owner.approvalStatus = "ready";
         owner.approvalError = null;
+        if (session) {
+          session.approvals = pending;
+          session.approvalStatus = "ready";
+          session.approvalError = null;
+          this.updateApprovalCount(
+            session.workspaceId,
+            actionableRuntimeApprovals(pending).length,
+          );
+        }
         this.changed();
       },
       onError: (error, phase) => {
-        if (this.disposed) return;
+        if (this.disposed || owner.approvalState !== controller) return;
+        if (phase === "subscribe") owner.approvalAdmissionError = error;
         owner.approvalError =
           error instanceof Error ? error.message : String(error);
+        owner.approvalStatus = "failed";
+        if (session) {
+          session.approvalError = owner.approvalError;
+          session.approvalStatus = "failed";
+        }
         console.warn(
-          `[WorkspaceDirectory] Account approval ${phase} failed`,
+          session
+            ? `[WorkspaceDirectory] Approval ${phase} failed in ${session.workspaceId}`
+            : `[WorkspaceDirectory] Account approval ${phase} failed`,
           error,
         );
         this.changed();
       },
     });
-    owner.approvalState.start();
+    owner.approvalState = controller;
+    if (session) session.approvalState = controller;
+    return controller;
+  }
+
+  private async startApprovalState(owner: MobileApprovalOwner): Promise<void> {
+    await this.createApprovalState(owner).start();
+  }
+
+  private async retireApprovalState(owner: MobileApprovalOwner): Promise<void> {
+    const controller = owner.approvalState;
+    if (!controller) return;
+    try {
+      await controller.stop();
+    } catch (error) {
+      // A failed start is already presented. The same rejection after stop
+      // means its unsubscribe completed; a different failure is retirement.
+      if (error !== owner.approvalAdmissionError) throw error;
+    } finally {
+      if (owner.approvalState === controller) owner.approvalState = null;
+      if (owner.session?.approvalState === controller)
+        owner.session.approvalState = null;
+    }
+  }
+
+  private async retireWorkspaceOwner(
+    owner: MobileApprovalOwner,
+    client: ShellClient,
+  ): Promise<void> {
+    const failures: unknown[] = [];
+    try {
+      await this.retireApprovalState(owner);
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await client.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(
+        failures,
+        "Approval observation and workspace connection retirement failed",
+        { cause: failures[0] },
+      );
+  }
+
+  private async startHubApprovalState(): Promise<void> {
+    await this.startApprovalState(this.hubApproval);
   }
 
   private get selectionKey(): string {
@@ -338,56 +496,72 @@ export class MobileWorkspaceDirectory {
   }
 
   async refresh(): Promise<void> {
-    try {
-      const entries = await this.hubControl.listWorkspaces();
-      if (this.disposed) return;
-      this.entries = entries.sort((a, b) => {
-        const rank = (entry: MobileHubWorkspace) =>
-          entry.workspaceId === this.personalWorkspaceId
-            ? 0
-            : entry.workspaceId === this.systemWorkspaceId
-              ? 2
-              : 1;
-        return rank(a) - rank(b) || a.name.localeCompare(b.name);
-      });
-      const accessible = new Set(entries.map((entry) => entry.workspaceId));
-      for (const id of this.pendingApprovalCounts.keys()) {
-        if (!accessible.has(id)) {
-          this.pendingApprovalCounts.delete(id);
-          if (this.requestedApproval?.workspaceId === id)
-            this.requestedApproval = null;
-        }
+    for (;;) {
+      const observed = this.workspaceCatalogGeneration;
+      try {
+        const entries = await this.hubControl.listWorkspaces();
+        if (this.disposed) return;
+        if (observed !== this.workspaceCatalogGeneration) continue;
+        this.applyWorkspaceEntries(entries);
+        return;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : String(error);
+        this.changed();
+        throw error;
       }
-      for (const entry of entries) {
-        const session = this.sessions.get(entry.workspaceId);
-        if (session?.approvals == null || session.state !== "ready") {
-          this.pendingApprovalCounts.set(
-            entry.workspaceId,
-            entry.pendingApprovalCount,
-          );
-        }
-      }
-      for (const [id, session] of this.sessions) {
-        if (!entries.some((entry) => entry.workspaceId === id)) {
-          session.approvalState?.stop();
-          session.stopApprovalRecovery?.();
-          session.client.dispose();
-          this.sessions.delete(id);
-          this.workspaceApprovalOwners.delete(id);
-          this.expanded.delete(id);
-          this.presented.delete(id);
-          this.pendingApprovalCounts.delete(id);
-          if (this.requestedApproval?.workspaceId === id)
-            this.requestedApproval = null;
-        }
-      }
-      this.error = null;
-      this.changed();
-    } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error);
-      this.changed();
-      throw error;
     }
+  }
+
+  private applyWorkspaceEntries(
+    incoming: EventPayloads["hub:workspace-catalog-changed"]["workspaces"],
+  ): void {
+    const entries = [...incoming];
+    this.entries = entries.sort((a, b) => {
+      const rank = (entry: MobileHubWorkspace) =>
+        entry.workspaceId === this.personalWorkspaceId
+          ? 0
+          : entry.workspaceId === this.systemWorkspaceId
+            ? 2
+            : 1;
+      return rank(a) - rank(b) || a.name.localeCompare(b.name);
+    });
+    const accessible = new Set(entries.map((entry) => entry.workspaceId));
+    for (const id of this.pendingApprovalCounts.keys()) {
+      if (!accessible.has(id)) {
+        this.pendingApprovalCounts.delete(id);
+        if (this.requestedApproval?.workspaceId === id)
+          this.requestedApproval = null;
+      }
+    }
+    for (const entry of entries) {
+      const session = this.sessions.get(entry.workspaceId);
+      if (session?.approvalStatus !== "ready" || session.state !== "ready") {
+        this.pendingApprovalCounts.set(
+          entry.workspaceId,
+          entry.pendingApprovalCount,
+        );
+      }
+    }
+    for (const [id, session] of this.sessions) {
+      if (!entries.some((entry) => entry.workspaceId === id)) {
+        session.stopApprovalRecovery?.();
+        const approvalOwner = this.workspaceApprovalOwners.get(id);
+        this.ownApprovalRetirement(
+          approvalOwner
+            ? this.retireWorkspaceOwner(approvalOwner, session.client)
+            : session.client.close(),
+        );
+        this.sessions.delete(id);
+        this.workspaceApprovalOwners.delete(id);
+        this.expanded.delete(id);
+        this.presented.delete(id);
+        this.pendingApprovalCounts.delete(id);
+        if (this.requestedApproval?.workspaceId === id)
+          this.requestedApproval = null;
+      }
+    }
+    this.error = null;
+    this.changed();
   }
 
   /** Report the visible workspace, not merely a paired credential or System connection. */
@@ -442,9 +616,13 @@ export class MobileWorkspaceDirectory {
       return Promise.reject(
         new Error("You no longer have access to this workspace"),
       );
-    existing?.approvalState?.stop();
     existing?.stopApprovalRecovery?.();
-    existing?.client.dispose();
+    const existingApprovalOwner = this.workspaceApprovalOwners.get(workspaceId);
+    const retireExisting = existing
+      ? existingApprovalOwner
+        ? this.retireWorkspaceOwner(existingApprovalOwner, existing.client)
+        : existing.client.close()
+      : Promise.resolve();
     const store = createStore();
     const client = new ShellClient({
       credentials: { deviceId: this.stored.credential.deviceId },
@@ -486,6 +664,7 @@ export class MobileWorkspaceDirectory {
       state: "opening",
       error: null,
       approvals: null,
+      approvalStatus: "starting",
       approvalState: null,
       approvalError: null,
     };
@@ -496,72 +675,73 @@ export class MobileWorkspaceDirectory {
       events: client.events,
       session,
       approvals: null,
+      approvalStatus: "starting",
       approvalState: null,
       approvalError: null,
     };
     this.sessions.set(workspaceId, session);
     this.workspaceApprovalOwners.set(workspaceId, approvalOwner);
     this.changed();
-    const opening = client
-      .init()
-      .then(() => {
+    const opening = retireExisting
+      .then(() => client.init())
+      .then(async () => {
         if (this.disposed || this.sessions.get(workspaceId) !== session) {
-          client.dispose();
           throw new Error("The workspace was closed while opening");
         }
         store.set(serverUrlAtom, client.serverUrl);
+        await this.startApprovalState(approvalOwner);
+        if (this.disposed || this.sessions.get(workspaceId) !== session) {
+          await this.retireApprovalState(approvalOwner);
+          await client.close();
+          throw new Error("The workspace was closed while opening");
+        }
         session.state = "ready";
-        session.approvalState = createApprovalStateController({
-          listPending: () => client.shellApproval.listPending(),
-          subscribePendingChanged: () =>
-            client.events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-          unsubscribePendingChanged: () =>
-            client.events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-          onPendingChanged: (listener) =>
-            client.events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, listener),
-          onChange: (pending) => {
-            if (this.sessions.get(workspaceId) !== session || this.disposed)
-              return;
-            session.approvals = pending;
-            session.approvalError = null;
-            approvalOwner.approvals = pending;
-            approvalOwner.approvalError = null;
-            this.updateApprovalCount(
-              workspaceId,
-              actionableRuntimeApprovals(pending).length,
-            );
-            this.changed();
-          },
-          onError: (error, phase) => {
-            session.approvalError =
-              error instanceof Error ? error.message : String(error);
-            approvalOwner.approvalError = session.approvalError;
-            console.warn(
-              `[WorkspaceDirectory] Approval ${phase} failed in ${workspaceId}`,
-              error,
-            );
-            this.changed();
-          },
-        });
-        approvalOwner.approvalState = session.approvalState;
-        session.approvalState.start();
-        session.stopApprovalRecovery = client.onRecoveryComplete(() => {
-          void session.approvalState?.refresh("manual");
-          void drainBackgroundActionQueue(client).catch((error) =>
-            console.warn(
-              "[WorkspaceDirectory] Unable to send queued approval",
-              error,
-            ),
-          );
-        });
+        const recoverApprovals = async () => {
+          const key = `workspace:${workspaceId}`;
+          const replacement = this.approvalReplacementReceipts.get(key);
+          await serializeByKey(this.approvalReplacements, key, async () => {
+            if (replacement) await replacement;
+            const controller = session.approvalState;
+            if (!controller)
+              throw new Error(
+                `Approval observation is unavailable for ${workspaceId}`,
+              );
+            await controller.refresh("manual");
+            await drainBackgroundActionQueue(client);
+          });
+        };
+        const stopResubscribe = client.recovery.registerResubscribeHandler(
+          `mobile-approval-state:${workspaceId}`,
+          recoverApprovals,
+          { includeCurrentGeneration: false },
+        );
+        const stopColdRecover = client.recovery.registerColdRecoverHandler(
+          `mobile-approval-state:${workspaceId}`,
+          recoverApprovals,
+        );
+        session.stopApprovalRecovery = () => {
+          stopResubscribe();
+          stopColdRecover();
+        };
         this.changed();
         return session;
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         session.state = "failed";
         session.error = error instanceof Error ? error.message : String(error);
-        client.dispose();
+        const cleanup = await Promise.allSettled([
+          this.retireWorkspaceOwner(approvalOwner, client),
+        ]);
         this.changed();
+        const cleanupFailures = cleanup.flatMap((result) =>
+          result.status === "rejected" ? [result.reason] : [],
+        );
+        if (cleanupFailures.length)
+          throw new AggregateError(
+            [error, ...cleanupFailures],
+            "Workspace approval startup and cleanup failed",
+            { cause: error },
+          );
         throw error;
       })
       .finally(() => this.opening.delete(workspaceId));
@@ -613,7 +793,11 @@ export class MobileWorkspaceDirectory {
     locator: import("@vibestudio/service-schemas/templates").TemplateLocator,
   ) {
     const system = await this.open(this.systemWorkspaceId);
-    const extensions = createTypedRpcServiceClient(system.client.transport, { targetId: "main", namespace: "extensions" }, extensionsMethods);
+    const extensions = createTypedRpcServiceClient(
+      system.client.transport,
+      { targetId: "main", namespace: "extensions" },
+      extensionsMethods,
+    );
     const templates = createTypedServiceClient(
       "@workspace-extensions/templates",
       templatesMethods,
@@ -771,7 +955,7 @@ export class MobileWorkspaceDirectory {
       const session = this.sessions.get(entry.workspaceId);
       if (
         session?.state === "ready" &&
-        session.approvals !== null &&
+        session.approvalStatus === "ready" &&
         !session.approvalError
       )
         return [];
@@ -863,16 +1047,35 @@ export class MobileWorkspaceDirectory {
 
   private async close(): Promise<void> {
     this.disposed = true;
-    this.hubApproval.approvalState?.stop();
+    this.stopWorkspaceCatalog?.();
+    this.stopWorkspaceCatalog = null;
     const sessions = [...this.sessions.values()];
+    const workspaceApprovalOwners = new Map(this.workspaceApprovalOwners);
     for (const session of sessions) {
-      session.approvalState?.stop();
       session.stopApprovalRecovery?.();
     }
     this.sessions.clear();
     this.workspaceApprovalOwners.clear();
-    const results = await Promise.allSettled(
-      sessions.map((session) => session.client.close()),
+    const startupOperations = [...this.startupOperations];
+    const approvalRetirements = [...this.approvalRetirements];
+    const approvalOwnership = [...this.approvalReplacements.values()];
+    const approvalReplacements = [...this.approvalReplacementReceipts.values()];
+    const results: PromiseSettledResult<unknown>[] = await Promise.allSettled([
+      ...(this.hubApproval.approvalState
+        ? [this.retireApprovalState(this.hubApproval)]
+        : []),
+      ...sessions.map(async (session) => {
+        const owner = workspaceApprovalOwners.get(session.workspaceId);
+        if (owner) await this.retireWorkspaceOwner(owner, session.client);
+        else await session.client.close();
+      }),
+    ]);
+    results.push(...(await Promise.allSettled(startupOperations)));
+    results.push(...(await Promise.allSettled(approvalRetirements)));
+    results.push(...(await Promise.allSettled(approvalOwnership)));
+    results.push(...(await Promise.allSettled(approvalReplacements)));
+    results.push(
+      ...(await Promise.allSettled([this.hubApproval.events.unsubscribeAll()])),
     );
     results.push(...(await Promise.allSettled([this.account.close()])));
     this.changed();

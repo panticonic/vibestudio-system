@@ -20,6 +20,10 @@ stay inside their workspace.
 - Long-lived device credentials and the native Endpoint identity live in
   `@vibestudio/mobile-iroh`. This app uses the active Iroh transport and
   short-lived app principal grants.
+- A cold app process derives the same connection owner from its installed
+  Endpoint identity and each authenticated server reach. Keep that identity
+  stable so admission replaces the dead process before server-to-shell work is
+  routed; do not generate a new connection owner on every launch.
 - Bundle installation and self-update use the shared streamed delivery helper
   in `@vibestudio/mobile-iroh`. Don't add direct HTTP artifact fetches or
   native workspace-selection APIs.
@@ -104,6 +108,14 @@ stay inside their workspace.
   app-source `MobileRpcClient` transport, then activates the prepared bundle.
 - Roll back first changes the trusted server build, then activates the
   selected bundle.
+- The native host's persisted active bundle build key is authoritative for
+  what this installation has adopted. Query update status by comparing that
+  device-relative key with the System workspace's selected React Native build.
+  `apps:status` only invalidates that query; its workspace-global active build
+  and rollback history never prove that a particular phone installed it.
+- Bundle activation persists the native active build key before React Native
+  reloads. Preserve that order so the reloaded app immediately queries as
+  current and cannot prompt again for the bundle it is already running.
 - `rnHostAbi` in `package.json` declares the native host contract the app was
   written for. The build fails, naming the expected value, when it differs from
   the host's `RN_HOST_ABI`.
@@ -133,6 +145,45 @@ stay inside their workspace.
   `@workspace/omnibox-core`. The sheet drops search-engine rows (they are an
   address-bar feature, not a destination) and does not fetch favicons.
   `nav.history` re-scopes the sheet to `@history:` instead of navigating.
+
+## Durable observations
+
+- Treat events that announce durable state as invalidations of an
+  authoritative projection, not as a complete state store. Install local event
+  handlers before admitting a watch or direct-event source, so no transition
+  can land between the initial read and listener registration.
+- Prefer a server admission snapshot when the event service provides one. If
+  it does not, pair the admitted listener with an authoritative read and a
+  synchronous generation counter: discard or repeat any read crossed by an
+  event, so a stale in-flight response can never overwrite newer state.
+- Use `@vibestudio/shell-core/durableObservation` for event-backed projections
+  shared with desktop or terminal clients. Its `ready` receipt owns admission
+  and the first authoritative read. Its asynchronous `stop()` owns late
+  admission, the in-flight read, and remote leave; cleanup must observe that
+  promise rather than treating removal of a local listener as retirement.
+- Register recovery handlers with the durable observation's Promise-returning
+  invalidation receipt. Recovery completion must await the authoritative
+  refresh instead of merely scheduling it, and the handler must be removed as
+  part of the observation's local listener lifetime.
+- Approval observation is part of workspace readiness. Keep its state explicit
+  as `starting`, `ready`, or `failed`; await event admission and the initial
+  authoritative queue read before publishing a ready workspace. Register its
+  refresh with the recovery coordinator so recovery completion awaits the
+  read, and join remote unsubscription before closing the workspace transport.
+  A controller whose event admission failed cannot be repaired by a list read:
+  retire that exact lifetime, then create and start a new controller. Serialize
+  replacement per owner so repeated Retry actions never overlap ownership.
+- Panel startup follows this contract explicitly. Admit the complete panel
+  projection watch before post-paint reconciliation, then repeat the
+  authoritative panel read if a lease, tree, presentation, activation, or
+  activation-failure event arrives while that read is in flight. First paint
+  may use a restored or freshly loaded tree; it is not the final reconciliation
+  boundary.
+- Events that represent transient commands rather than durable state may remain
+  edge-triggered. They still own event admission and asynchronous retirement;
+  use a no-op projection read rather than a second fire-and-forget subscription
+  path. Do not manufacture product state for an action that has no
+  authoritative current value.
 
 ## Verification
 
