@@ -27,7 +27,19 @@ vi.mock("../shell/client", () => ({
   },
 }));
 vi.mock("../shell/useShellOverlay", () => ({ useShellOverlay: vi.fn() }));
-vi.mock("../shell/useShellEvent", () => ({ useShellEvent: vi.fn() }));
+vi.mock("../shell/useShellEvent", async () => {
+  const { useShellEventFixture } = await import("../test/shellEventFixture");
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  return {
+    useShellEvent: vi.fn(
+      (
+        event: string,
+        callback: (payload: unknown) => void,
+        readSnapshot?: (signal: AbortSignal) => void | Promise<void>
+      ) => useShellEventFixture(listeners, event, callback, readSnapshot)
+    ),
+  };
+});
 vi.mock("./PairedDevicesSection", () => ({
   PairedDevicesSection: () => <div>Device access settings</div>,
 }));

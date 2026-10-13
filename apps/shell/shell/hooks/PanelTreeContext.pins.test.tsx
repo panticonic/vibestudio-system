@@ -5,6 +5,10 @@ import { Provider, createStore, useAtomValue } from "jotai";
 import { useEffect, useRef } from "react";
 import { RpcBoundaryError } from "@vibestudio/rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  emitShellEventFixture,
+  type ShellEventFixtureListeners,
+} from "../../test/shellEventFixture";
 
 // The shell client facade is mocked so we control the tree + pin sources.
 const getRootGroups = vi.fn();
@@ -40,24 +44,32 @@ vi.mock("../client.js", () => ({
 }));
 
 // Capture the `panel-tree-invalidated` handler so a test can push a fresh snapshot.
-let connectionHandler: ((data: unknown) => void) | null = null;
-let treeUpdateHandler: ((data: unknown) => void) | null = null;
-let presentationChangeHandler: ((data: { revision: number; panelIds: string[] }) => void) | null =
-  null;
-vi.mock("../useShellEvent.js", () => ({
-  useShellEvent: (event: string, handler: (data: unknown) => void) => {
-    if (event === "panel-tree-invalidated") treeUpdateHandler = handler;
-    if (event === "server-connection-changed") connectionHandler = handler;
-  },
-}));
-vi.mock("../useDirectShellEvent.js", () => ({
-  useDirectShellEvent: (
-    event: string,
-    handler: (data: { revision: number; panelIds: string[] }) => void
-  ) => {
-    if (event === "panel-presentation-changed") presentationChangeHandler = handler;
-  },
-}));
+const shellEventListeners: ShellEventFixtureListeners = new Map();
+const directEventListeners: ShellEventFixtureListeners = new Map();
+vi.mock("../useShellEvent.js", async () => {
+  const { useShellEventFixture } = await import("../../test/shellEventFixture");
+  return {
+    useShellEvent: (
+      event: string,
+      handler: (data: unknown) => void,
+      readSnapshot?: (signal: AbortSignal) => void | Promise<void>
+    ) => useShellEventFixture(shellEventListeners, event, handler, readSnapshot),
+  };
+});
+vi.mock("../useDirectShellEvent.js", async () => {
+  const { useShellEventFixture } = await import("../../test/shellEventFixture");
+  return {
+    useDirectShellEvent: (
+      event: string,
+      handler: (data: { revision: number; panelIds: string[] }) => void
+    ) =>
+      useShellEventFixture(
+        directEventListeners,
+        event,
+        handler as (data: unknown) => void
+      ),
+  };
+});
 
 import {
   flattenTree,
@@ -184,7 +196,7 @@ function renderProvider() {
 
 function emitInvalidation(revision: number) {
   act(() => {
-    treeUpdateHandler?.({
+    emitShellEventFixture(shellEventListeners, "panel-tree-invalidated", {
       revision,
       reset: true,
       groups: [],
@@ -195,9 +207,8 @@ function emitInvalidation(revision: number) {
 }
 
 beforeEach(() => {
-  treeUpdateHandler = null;
-  connectionHandler = null;
-  presentationChangeHandler = null;
+  shellEventListeners.clear();
+  directEventListeners.clear();
   currentGroups = [];
   childSlotIds = new Map();
   getRootGroups.mockReset();
@@ -323,7 +334,7 @@ describe("useFullPanel local presentation", () => {
       ),
     );
     act(() => {
-      presentationChangeHandler?.({ revision: 2, panelIds: ["panel:tree/a"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 2, panelIds: ["panel:tree/a"] });
     });
     rerender(<FullPanelProbe panelId="panel:tree/b" />);
     await waitFor(() =>
@@ -373,7 +384,10 @@ describe("useFullPanel local presentation", () => {
     expect(screen.getByTestId("full-panel").textContent).toBe("");
     expect(screen.getByTestId("full-panel").dataset["loading"]).toBe("true");
 
-    resolveSecond(ready("panel:tree/b"));
+    await waitFor(() => expect(resolveSecond).toBeTypeOf("function"));
+    await act(async () => {
+      resolveSecond(ready("panel:tree/b"));
+    });
     await waitFor(() =>
       expect(screen.getByTestId("full-panel").textContent).toBe("panel:tree/b:ready")
     );
@@ -402,7 +416,9 @@ describe("useFullPanel local presentation", () => {
     render(<FullPanelProbe panelId="panel:tree/a" />);
 
     expect(screen.getByTestId("full-panel").dataset["loading"]).toBe("true");
-    expect(getPresentation).toHaveBeenCalledWith("panel:tree/a");
+    await waitFor(() =>
+      expect(getPresentation).toHaveBeenCalledWith("panel:tree/a")
+    );
 
     await waitFor(() =>
       expect(screen.getByTestId("full-panel").textContent).toBe("panel:tree/a:ready")
@@ -432,7 +448,7 @@ describe("useFullPanel local presentation", () => {
     );
 
     act(() => {
-      presentationChangeHandler?.({ revision: 3, panelIds: ["panel:tree/a"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 3, panelIds: ["panel:tree/a"] });
     });
 
     await waitFor(() =>
@@ -470,7 +486,7 @@ describe("useFullPanel local presentation", () => {
     );
 
     act(() => {
-      treeUpdateHandler?.({
+      emitShellEventFixture(shellEventListeners, "panel-tree-invalidated", {
         revision: 2,
         reset: true,
         groups: [],
@@ -540,7 +556,7 @@ describe("useFullPanel local presentation", () => {
     render(<FullPanelProbe panelId="panel:tree/browser" />);
     await waitFor(() => expect(getPresentation).toHaveBeenCalledOnce());
     act(() => {
-      presentationChangeHandler?.({ revision: 2, panelIds: ["panel:tree/browser"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 2, panelIds: ["panel:tree/browser"] });
     });
     await waitFor(() =>
       expect(screen.getByTestId("full-panel").dataset["hostedRuntimeEntityId"]).toBe(
@@ -602,7 +618,7 @@ describe("useFullPanel local presentation", () => {
     render(<FullPanelProbe panelId="panel:tree/a" />);
     await waitFor(() => expect(getPresentation).toHaveBeenCalledOnce());
     act(() => {
-      presentationChangeHandler?.({ revision: 2, panelIds: ["panel:tree/a"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 2, panelIds: ["panel:tree/a"] });
     });
     await waitFor(() => expect(getPresentation).toHaveBeenCalledTimes(2));
 
@@ -661,7 +677,7 @@ describe("PanelTreeProvider pin reconciliation", () => {
 
     liveTitle = "Workspace onboarding";
     act(() => {
-      presentationChangeHandler?.({ revision: 2, panelIds: ["panel:parent"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 2, panelIds: ["panel:parent"] });
     });
 
     await waitFor(() =>
@@ -865,7 +881,7 @@ describe("PanelTreeProvider local descendant selection", () => {
       selectedChildId: "panel:first",
     });
     act(() => {
-      presentationChangeHandler?.({ revision: 2, panelIds: ["panel:root"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 2, panelIds: ["panel:root"] });
     });
     await waitFor(() => expect(screen.getByTestId("descendant").textContent).toBe("panel:first"));
   });
@@ -894,9 +910,9 @@ describe("PanelTreeProvider local descendant selection", () => {
       .mockResolvedValueOnce({ id: "panel:root", selectedChildId: "panel:selected" });
 
     act(() => {
-      presentationChangeHandler?.({ revision: 3, panelIds: ["panel:root"] });
-      presentationChangeHandler?.({ revision: 4, panelIds: ["panel:root"] });
-      presentationChangeHandler?.({ revision: 2, panelIds: ["panel:root"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 3, panelIds: ["panel:root"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 4, panelIds: ["panel:root"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 2, panelIds: ["panel:root"] });
     });
 
     await waitFor(() => expect(screen.getByTestId("selection").textContent).toBe("panel:selected"));
@@ -911,7 +927,7 @@ describe("PanelTreeProvider local descendant selection", () => {
     const renderCount = screen.getByTestId("selection").dataset["renderCount"];
     getPresentation.mockResolvedValue({ id: "panel:root", selectedChildId: "panel:selected" });
     act(() => {
-      presentationChangeHandler?.({ revision: 5, panelIds: ["panel:root"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 5, panelIds: ["panel:root"] });
     });
     await waitFor(() => expect(getPresentation).toHaveBeenCalledTimes(3));
     expect(screen.getByTestId("selection").dataset["renderCount"]).toBe(renderCount);
@@ -959,8 +975,8 @@ describe("PanelTreeProvider local descendant selection", () => {
       );
 
     act(() => {
-      presentationChangeHandler?.({ revision: 3, panelIds: ["panel:a"] });
-      presentationChangeHandler?.({ revision: 4, panelIds: ["panel:b"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 3, panelIds: ["panel:a"] });
+      emitShellEventFixture(directEventListeners, "panel-presentation-changed", { revision: 4, panelIds: ["panel:b"] });
     });
     await waitFor(() => expect(getPresentations).toHaveBeenCalledTimes(2));
 
@@ -990,7 +1006,7 @@ it("refreshes the retained tree after an interrupted read when its owner becomes
   emitInvalidation(2);
   await waitFor(() => expect(getRootGroups).toHaveBeenCalledTimes(2));
   currentGroups = [{ ownerUserId: "alice", slotIds: ["after"] }];
-  act(() => connectionHandler?.({ status: "connected", isRemote: true }));
+  act(() => emitShellEventFixture(shellEventListeners, "server-connection-changed", { status: "connected", isRemote: true }));
   await waitFor(() => expect(getRootGroups).toHaveBeenCalledTimes(3));
   await waitFor(() => expect(screen.getByTestId("roots").textContent).toContain("after"));
 });

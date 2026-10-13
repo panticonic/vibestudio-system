@@ -3,6 +3,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ShellUserNotification } from "../shell/client";
+import { emitShellEventFixture } from "../test/shellEventFixture";
 
 const shellClient = vi.hoisted(() => ({
   createPanel: vi.fn(),
@@ -17,10 +18,10 @@ const toastClient = vi.hoisted(() => ({
   dismiss: vi.fn(),
 }));
 const watchedEventHandlers = vi.hoisted(
-  () => new Map<string, (payload: Record<string, unknown>) => void>(),
+  () => new Map<string, Set<(payload: unknown) => void>>(),
 );
 const directEventHandlers = vi.hoisted(
-  () => new Map<string, (payload: Record<string, unknown>) => void>(),
+  () => new Map<string, Set<(payload: unknown) => void>>(),
 );
 
 vi.mock("../shell/client", () => ({
@@ -33,22 +34,36 @@ vi.mock("../shell/client", () => ({
     unsubscribe: async () => undefined,
   },
 }));
-vi.mock("../shell/useShellEvent", () => ({
-  useShellEvent: (
-    event: string,
-    callback: (payload: Record<string, unknown>) => void,
-  ) => {
-    watchedEventHandlers.set(event, callback);
-  },
-}));
-vi.mock("../shell/useDirectShellEvent", () => ({
-  useDirectShellEvent: (
-    event: string,
-    callback: (payload: Record<string, unknown>) => void,
-  ) => {
-    directEventHandlers.set(event, callback);
-  },
-}));
+vi.mock("../shell/useShellEvent", async () => {
+  const { useShellEventFixture } = await import("../test/shellEventFixture");
+  return {
+    useShellEvent: (
+      event: string,
+      callback: (payload: Record<string, unknown>) => void,
+      readSnapshot?: (signal: AbortSignal) => void | Promise<void>,
+    ) =>
+      useShellEventFixture(
+        watchedEventHandlers,
+        event,
+        callback as (payload: unknown) => void,
+        readSnapshot,
+      ),
+  };
+});
+vi.mock("../shell/useDirectShellEvent", async () => {
+  const { useShellEventFixture } = await import("../test/shellEventFixture");
+  return {
+    useDirectShellEvent: (
+      event: string,
+      callback: (payload: Record<string, unknown>) => void,
+    ) =>
+      useShellEventFixture(
+        directEventHandlers,
+        event,
+        callback as (payload: unknown) => void,
+      ),
+  };
+});
 vi.mock("@radix-ui/themes", () => ({
   Badge: ({
     children,
@@ -246,7 +261,7 @@ describe("UserNotificationBar", () => {
     await waitFor(() => expect(shellClient.list).toHaveBeenCalledTimes(1));
     shellClient.list.mockResolvedValue([channelNotification("live")]);
 
-    directEventHandlers.get("user-notifications-changed")?.({ changedAt: 20 });
+    emitShellEventFixture(directEventHandlers, "user-notifications-changed", { changedAt: 20 });
 
     expect(await screen.findByText("Conversation live")).toBeTruthy();
     expect(watchedEventHandlers.has("user-notifications-changed")).toBe(false);
@@ -271,8 +286,8 @@ describe("UserNotificationBar", () => {
     await waitFor(() => expect(shellClient.list).toHaveBeenCalledTimes(1));
 
     for (let changedAt = 1; changedAt <= 1_000; changedAt += 1) {
-      directEventHandlers.get("user-notifications-changed")?.({ changedAt });
-      watchedEventHandlers.get("server-connection-changed")?.({
+      emitShellEventFixture(directEventHandlers, "user-notifications-changed", { changedAt });
+      emitShellEventFixture(watchedEventHandlers, "server-connection-changed", {
         status: "connected",
         isRemote: true,
       });
@@ -472,7 +487,7 @@ describe("UserNotificationBar", () => {
         },
       }),
     ]);
-    directEventHandlers.get("user-notifications-changed")?.({ changedAt: 30 });
+    emitShellEventFixture(directEventHandlers, "user-notifications-changed", { changedAt: 30 });
     await waitFor(() => expect(toastClient.show).toHaveBeenCalledTimes(1));
     expect(toastClient.show.mock.calls[0]?.[0]).toMatchObject({
       title: "Deploy blocked",
