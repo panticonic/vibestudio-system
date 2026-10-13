@@ -1536,6 +1536,14 @@ export class TerminalBrowser {
 
   /** Open (or focus) the tab of a session and attach it. */
   private openTab(entry: TerminalSessionEntry): ShellSessionTab {
+    // The service's answer is authoritative: remember the session even before
+    // its change event arrives, so detaching lists it under Resume at once. A
+    // list requested before this answer is older, so it is dropped.
+    this.entriesGeneration += 1;
+    this.entries = [
+      entry,
+      ...(this.entries ?? []).filter((known) => known.sessionId !== entry.sessionId),
+    ].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
     const existing = this.sessions.findIndex((session) => session.sessionId === entry.sessionId);
     if (existing !== -1) {
       const session = this.sessions[existing]!;
@@ -1545,9 +1553,7 @@ export class TerminalBrowser {
     }
     const session = new ShellSessionTab(this.shell, entry, this.sessionSize(), this.sessionEvents());
     this.sessions.push(session);
-    if (this.entries?.some((known) => known.sessionId === entry.sessionId)) {
-      this.listedTabs.add(session);
-    }
+    this.listedTabs.add(session);
     this.focusTab(this.sessions.length - 1);
     void session.attach(true, true).then(() => this.changed());
     this.changed();
