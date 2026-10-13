@@ -216,12 +216,16 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           await directory.dispose();
           return;
         }
-        const system = directory.sessions.get(directory.systemWorkspaceId)!;
+        const selected = directory.activeWorkspaceId
+          ? directory.sessions.get(directory.activeWorkspaceId)
+          : undefined;
+        if (!selected)
+          throw new Error("The selected workspace did not finish opening.");
         setWorkspaceDirectory(directory);
         pendingDirectory = null;
-        setConnectionStatus(system.client.transport.status);
+        setConnectionStatus(selected.client.transport.status);
         setWorkspaceReadiness("shell-ready");
-        finishConnectedClient(system.client);
+        finishConnectedClient(selected.client);
         cancelConnectionRef.current = null;
       } catch (error) {
         await pendingDirectory?.dispose();

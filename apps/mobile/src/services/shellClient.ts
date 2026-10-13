@@ -123,6 +123,7 @@ import {
   saveMobileShellStartupSnapshot,
   type MobileShellStartupSnapshot,
 } from "./shellStartupSnapshot";
+import { PanelSelectionState } from "./panelSelection";
 import type { Panel } from "@vibestudio/shared/types";
 import {
   createHostCommandRegistry,
@@ -1312,7 +1313,7 @@ export class ShellClient {
     dispatchRun: (panelId, payload) =>
       this.panels.dispatchHostEvent(panelId, HOST_COMMAND_RUN_EVENT, payload),
   });
-  private navigationListeners = new Set<(panelId: string) => void>();
+  private readonly panelSelection = new PanelSelectionState();
   private readonly browserPrivacyPresentation =
     new BrowserPrivacyPresentationState();
   private readonly browserImportProvider: MobileBrowserImportProvider | null;
@@ -1425,7 +1426,7 @@ export class ShellClient {
       clientSessionId: config.credentials.deviceId,
       localStorageScope: this.localStorageScope,
       navigateToPanel: (panelId) => {
-        for (const listener of this.navigationListeners) listener(panelId);
+        this.panelSelection.select(panelId);
       },
       deliverToShell: (panelId, envelope) =>
         this.hostCommands.deliverShellEnvelope(panelId, envelope),
@@ -1972,10 +1973,7 @@ export class ShellClient {
     this.facade?.trimCache();
   }
   onNavigateToPanel(listener: (panelId: string) => void): () => void {
-    this.navigationListeners.add(listener);
-    return () => {
-      this.navigationListeners.delete(listener);
-    };
+    return this.panelSelection.subscribe(({ panelId }) => listener(panelId));
   }
   openShellSurface(target: unknown): void {
     const descriptor = mobileShellSurface(target);
@@ -2043,6 +2041,7 @@ export class ShellClient {
     for (const unsubscribe of this.panelRecoveryUnsubs ?? []) unsubscribe();
     this.panelRecoveryUnsubs = null;
     this.recoveryCompleteListeners.clear();
+    this.panelSelection.clear();
     this.shellSurfaceListeners.clear();
     this.browserPrivacyPresentation.clear();
     this.closing = (async () => {

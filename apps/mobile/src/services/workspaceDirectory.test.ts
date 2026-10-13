@@ -616,12 +616,66 @@ it("opens Personal alongside System while retaining System's app-source owner", 
     expect(personal.config["appSourceClient"]).toBe(
       directory.sessions.get("system")!.client,
     );
-    resolveSystem();
     await starting;
     expect(directory.activeWorkspaceId).toBe("personal");
+    expect(directory.sessions.get("personal")?.state).toBe("ready");
+    expect(directory.sessions.get("system")?.state).toBe("opening");
+    resolveSystem();
+    await directory.open("system");
+    expect(directory.sessions.get("system")?.state).toBe("ready");
   } finally {
     resolveSystem();
     await starting.catch(() => undefined);
     await directory.dispose();
   }
+});
+
+it("joins the retained System startup owner during directory disposal", async () => {
+  let resolveSystem!: () => void;
+  mockOpening.set(
+    "system",
+    new Promise<void>((resolve) => {
+      resolveSystem = resolve;
+    }),
+  );
+  const { directory } = fixture();
+  await directory.init();
+  const disposing = directory.dispose();
+  let disposed = false;
+  void disposing.then(() => {
+    disposed = true;
+  });
+
+  await Promise.resolve();
+  expect(disposed).toBe(false);
+  resolveSystem();
+  await disposing;
+  expect(disposed).toBe(true);
+});
+
+it("surfaces a retained System startup failure without retracting Personal", async () => {
+  let rejectSystem!: (error: Error) => void;
+  mockOpening.set(
+    "system",
+    new Promise<void>((_resolve, reject) => {
+      rejectSystem = reject;
+    }),
+  );
+  const { directory } = fixture();
+  await directory.init();
+  rejectSystem(new Error("System workspace unavailable"));
+  for (
+    let attempts = 0;
+    attempts < 20 && directory.sessions.get("system")?.state !== "failed";
+    attempts += 1
+  )
+    await Promise.resolve();
+
+  expect(directory.activeWorkspaceId).toBe("personal");
+  expect(directory.sessions.get("personal")?.state).toBe("ready");
+  expect(directory.sessions.get("system")).toMatchObject({
+    state: "failed",
+    error: "System workspace unavailable",
+  });
+  await directory.dispose();
 });

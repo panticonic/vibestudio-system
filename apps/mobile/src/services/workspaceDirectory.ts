@@ -245,6 +245,7 @@ export class MobileWorkspaceDirectory {
   private selectionGeneration = 0;
   private readonly listeners = new Set<() => void>();
   private readonly opening = new Map<string, Promise<MobileWorkspaceSession>>();
+  private readonly startupOperations = new Set<Promise<void>>();
   private disposed = false;
   private closing: Promise<void> | null = null;
 
@@ -291,16 +292,32 @@ export class MobileWorkspaceDirectory {
     const selected = this.entries.some((entry) => entry.workspaceId === saved)
       ? saved!
       : this.personalWorkspaceId;
-    const startup = [
-      system.then((session) => session.client.refreshAccountProfile()),
-      this.activate(selected),
-    ];
-    try {
-      await Promise.all(startup);
-    } catch (error) {
-      await Promise.allSettled(startup);
-      throw error;
-    }
+    this.ownSystemStartup(
+      system.then(async (session) => {
+        await session.client.refreshAccountProfile();
+      }),
+    );
+    // The selected workspace owns first presentation. System remains the
+    // canonical app-source owner, but its independent initialization and
+    // profile read cannot withhold an already restored selected workspace.
+    await this.activate(selected);
+  }
+
+  private ownSystemStartup(operation: Promise<void>): void {
+    let owned!: Promise<void>;
+    owned = operation
+      .catch((error: unknown) => {
+        if (this.disposed) return;
+        const session = this.sessions.get(this.systemWorkspaceId);
+        if (session && session.state !== "failed") {
+          session.state = "failed";
+          session.error = error instanceof Error ? error.message : String(error);
+          session.client.dispose();
+          this.changed();
+        }
+      })
+      .finally(() => this.startupOperations.delete(owned));
+    this.startupOperations.add(owned);
   }
 
   private startHubApprovalState(): void {
@@ -871,9 +888,11 @@ export class MobileWorkspaceDirectory {
     }
     this.sessions.clear();
     this.workspaceApprovalOwners.clear();
+    const startupOperations = [...this.startupOperations];
     const results = await Promise.allSettled(
       sessions.map((session) => session.client.close()),
     );
+    results.push(...(await Promise.allSettled(startupOperations)));
     results.push(...(await Promise.allSettled([this.account.close()])));
     this.changed();
     const failures = results.flatMap((result) =>
