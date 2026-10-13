@@ -6,7 +6,7 @@ import {
   type PrefixKeyId,
 } from "./input/keymap.js";
 
-/** Terminal browser preferences, stored per person in the session registry (they follow you across devices). */
+/** Terminal browser preferences, stored per person by the System workspace's terminal launch service (they follow you across devices). */
 export interface BrowserSettings {
   prefixKey: PrefixKeyId;
   /** Open the approvals overlay by itself when the focused session asks for approval. */

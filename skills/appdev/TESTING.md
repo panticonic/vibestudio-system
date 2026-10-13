@@ -41,7 +41,7 @@ Host target selection changes should also test that:
   other apps
 - React Native bootstrap and grants use the selected `apps/<name>` source
 - pinned builds/commits stay active when newer approved builds arrive
-- `vibestudio terminal` opens the terminal app selected for the System
+- `vibestudio terminal` opens the terminal client app selected for the System
   workspace's `hostTargets.terminal.app`
 
 Build artifact/provider changes:

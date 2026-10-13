@@ -105,7 +105,7 @@ The event types are:
 The adoption policy is the same for every target. `prompt` (for
 `update-available`) means the client keeps its loaded build and asks the user
 when to adopt the new one. `immediate` is used for first load and
-user-requested rollback. Every target runs on a client: a terminal app adopts
+user-requested rollback. Every target runs on a client: a terminal client app adopts
 a new build when `vibestudio terminal` loads it again (on relaunch, or when the
 CLI reconnects after an update).
 

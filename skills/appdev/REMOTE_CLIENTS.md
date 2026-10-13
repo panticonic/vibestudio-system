@@ -80,11 +80,11 @@ the refresh token in JS.
 
 The terminal target is a client module, like the desktop shell: the System
 workspace builds it and the `vibestudio terminal` CLI runs it on the device.
-It never runs as a server process. Other workspaces may keep terminal app
+It never runs as a server process. Other workspaces may keep terminal client app
 source for authoring. `hostTargets.terminal.app` in `meta/vibestudio.yml`
 names the app the CLI opens; the System template declares
 `apps/terminal-browser` (`@workspace-apps/terminal-browser`), the reference
-terminal app.
+terminal client app.
 
 `vibestudio terminal` routes to the account's System workspace, runs the
 launch gate for the `terminal` target (startup approvals are asked in line
@@ -99,7 +99,7 @@ bound to that connection's transport endpoint, so it works locally and over
 Iroh. It returns the connection grant, the device-scoped caller id
 (`app:apps/terminal-browser:<device-id>`), and the exact build the principal
 may run. The CLI downloads that build's primary `index.mjs` over the same
-connection, imports it, and calls its exported `run(host)`. A terminal app
+connection, imports it, and calls its exported `run(host)`. A terminal client app
 should:
 
 - export `run(host)` (contract: `TerminalBrowserHost` in
@@ -151,8 +151,8 @@ Remote-client UX should handle:
 - expired pairing code or unreachable configured relays
 - Endpoint ID mismatch after an explicit server identity rotation
 - no active mobile app bootstrap
-- no built terminal app (`hostTargets.terminal.app` missing or not ready)
-- terminal app principal grant refused, or the terminal connection lost
+- no built terminal client app (`hostTargets.terminal.app` missing or not ready)
+- terminal client app principal grant refused, or the terminal connection lost
 
 The recovery surface must stay usable even when the workspace app cannot
 load.

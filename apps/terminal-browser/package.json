@@ -14,21 +14,21 @@
       "provides": [],
       "requests": []
     },
-    "description": "Browse and run terminal apps, resume sessions and answer approvals from any terminal."
+    "description": "Start terminal apps and shells, resume your running sessions and answer approvals from any terminal."
   },
   "dependencies": {
+    "@vibestudio/extension": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "@vibestudio/shell-core": "workspace:*",
-    "@workspace-workers/terminal-sessions": "workspace:*",
-    "@workspace/terminal-host-protocol": "workspace:*",
+    "@workspace/pty-stream": "workspace:*",
     "@xterm/headless": "^5.5.0",
     "ink": "^6.8.0",
     "react": "^19.0.0"
   },
   "devDependencies": {
-    "@workspace/terminal-shim": "workspace:*",
+    "@workspace-extensions/shell": "workspace:*",
     "vitest": "^3.2.7"
   }
 }

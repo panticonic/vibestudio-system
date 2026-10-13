@@ -1,8 +1,5 @@
 import React from "react";
-import { Box, Text } from "ink";
-import { randomUUID } from "node:crypto";
-import * as os from "node:os";
-import * as path from "node:path";
+import { Text } from "ink";
 import type { ApprovalDecisionId } from "@vibestudio/shared/approvalContract";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type {
@@ -11,8 +8,6 @@ import type {
   TerminalBrowserWorkspace,
   TerminalServerConnectionState,
 } from "@vibestudio/shell-core/terminal/terminalBrowserHost";
-import { bytesToBase64 } from "@workspace/terminal-host-protocol";
-import type { TerminalSessionRecord } from "@workspace-workers/terminal-sessions/contract";
 import { createApprovalsClient, type ApprovalsClient } from "./approvals/approvalsClient.js";
 import { ApprovalsOverlay } from "./approvals/ApprovalsOverlay.js";
 import {
@@ -27,7 +22,13 @@ import { Compositor } from "./compositor/compositor.js";
 import { InkLayer } from "./compositor/inkLayer.js";
 import type { CursorState, Rect, Screen } from "./compositor/screen.js";
 import { fuzzyFilter } from "./input/fuzzy.js";
-import { KeyRouter, prefixBytes, prefixLabel, type Command } from "./input/keymap.js";
+import {
+  KeyRouter,
+  approvalsKeyLabel,
+  prefixBytes,
+  prefixLabel,
+  type Command,
+} from "./input/keymap.js";
 import {
   InputTokenizer,
   navKeyOf,
@@ -36,20 +37,23 @@ import {
   type MouseEvent,
 } from "./input/tokenizer.js";
 import {
-  SessionRegistryClient,
-  createSessionContext,
-  listTerminalApps,
-  type TerminalApp,
-} from "./sessions/registry.js";
+  TerminalServiceUnavailableError,
+  createTerminalSessions,
+  type TerminalSessionEntry,
+  type TerminalSessions,
+  type TerminalSettingsStore,
+} from "./sessions/launcher.js";
 import {
-  TerminalSessionClient,
+  ShellSessionTab,
   describeError,
-  type HostRequest,
-} from "./sessions/sessionClient.js";
+  describeExit,
+  shellClient,
+  type ShellClient,
+} from "./sessions/shellSession.js";
+import { emojiIcon, listTerminalApps, type TerminalApp } from "./sessions/terminalApps.js";
 import { DEFAULT_SETTINGS, SETTING_ROWS, parseSettings, type BrowserSettings } from "./settings.js";
 import { TerminalOwnership, captureConsole, type CapturedConsole } from "./tty/terminal.js";
 import {
-  FileRequestDialog,
   HelpOverlay,
   ListOverlay,
   LogsOverlay,
@@ -67,8 +71,6 @@ import { clampScroll } from "./ui/Scrollable.js";
 
 const MIN_COLUMNS = 40;
 const MIN_ROWS = 8;
-/** Largest file a session may receive through `requestFile` (it travels base64-encoded over RPC). */
-const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_LOG_LINES = 1000;
 
 const DECISION_BY_DIGIT: Record<number, ApprovalDecisionId> = {
@@ -103,16 +105,8 @@ type Overlay =
       error: string | null;
     } & ListState)
   | { kind: "confirm-close"; sessionId: string }
-  | { kind: "open-url"; session: TerminalSessionClient; requestId: string; url: string }
-  | {
-      kind: "request-file";
-      session: TerminalSessionClient;
-      requestId: string;
-      prompt?: string;
-      path: string;
-      error: string | null;
-      busy: boolean;
-    };
+  | ({ kind: "links"; tabTitle: string; urls: string[] } & ListState)
+  | { kind: "open-url"; tabTitle: string; url: string };
 
 interface CopyState {
   sessionId: string;
@@ -135,16 +129,26 @@ interface Layout {
   status: Rect;
 }
 
+/** The browser's server-side services; the launch service by default. */
+export interface TerminalBrowserServices {
+  /** The person's terminal sessions in the shown workspace. */
+  sessions: TerminalSessions;
+  /** The person's browser settings (kept in System). */
+  settings: TerminalSettingsStore;
+}
+
 /**
- * The terminal browser: owns the TTY, composes session grids and its own Ink
- * chrome into one screen, routes keys (prefix commands vs. session input),
- * and manages sessions, approvals and the user's host-side confirmations.
+ * The terminal browser: a tmux-like client of the person's terminal sessions
+ * in the shown workspace. It owns the TTY, composes session grids and its own
+ * Ink chrome into one screen, routes keys (prefix commands vs. session input),
+ * and shows approvals and link confirmations in chrome no program can draw.
  */
 export class TerminalBrowser {
   private readonly terminal: TerminalOwnership;
   private readonly tokenizer = new InputTokenizer();
   private readonly router: KeyRouter;
-  private readonly registry: SessionRegistryClient;
+  private readonly services: TerminalBrowserServices;
+  private readonly shell: ShellClient;
   private readonly approvalsClient: ApprovalsClient;
   private readonly compositor: Compositor;
   private readonly tabsLayer: InkLayer;
@@ -152,11 +156,16 @@ export class TerminalBrowser {
   private readonly overlayLayer: InkLayer;
 
   private settings: BrowserSettings = DEFAULT_SETTINGS;
-  private sessions: TerminalSessionClient[] = [];
+  private sessions: ShellSessionTab[] = [];
   private focusedIndex = -1;
   private previousFocusedIndex = -1;
-  private resumable: TerminalSessionRecord[] = [];
-  private registryProblem: string | null = null;
+  /** The person's sessions in the shown workspace, newest activity first (null until listed). */
+  private entries: TerminalSessionEntry[] | null = null;
+  private sessionsProblem: string | null = null;
+  /** Bumped per applied session list, so a listing older than an event is dropped. */
+  private entriesGeneration = 0;
+  /** Tabs whose session appeared in a list: only those can be found to have ended. */
+  private readonly listedTabs = new WeakSet<ShellSessionTab>();
   private apps: TerminalApp[] | null = null;
   private appsProblem: string | null = null;
   private approvals: PendingApproval[] = [];
@@ -164,7 +173,6 @@ export class TerminalBrowser {
   private overlay: Overlay | null = null;
   private launcher: ListState = { query: "", selected: 0 };
   private copy: CopyState | null = null;
-  private readonly hostRequests = new Map<string, HostRequest[]>();
   private notice: string | null = null;
   private readonly logs: LogLine[] = [];
   private connection: TerminalServerConnectionState;
@@ -179,12 +187,20 @@ export class TerminalBrowser {
   private readonly cleanups: Array<() => void> = [];
   private console: CapturedConsole | null = null;
 
-  constructor(private readonly host: TerminalBrowserHost) {
+  constructor(
+    private readonly host: TerminalBrowserHost,
+    services?: TerminalBrowserServices
+  ) {
     this.terminal = new TerminalOwnership({ stdin: host.stdin, stdout: host.stdout });
     this.router = new KeyRouter(this.settings.prefixKey);
-    // The browser's own state lives in System (its app principal); the
-    // workspace it shows owns the apps, their sessions and their approvals.
-    this.registry = new SessionRegistryClient(host.rpc);
+    // Settings live in System (the browser's app principal); the workspace it
+    // shows owns the apps, the person's sessions and their approvals, reached
+    // as this device's session there.
+    this.services = services ?? {
+      sessions: createTerminalSessions(host.workspaceRpc),
+      settings: createTerminalSessions(host.rpc),
+    };
+    this.shell = shellClient(host.workspaceRpc);
     this.approvalsClient = createApprovalsClient(host.workspaceRpc);
     this.connection = host.connectionState();
     const layout = this.layout();
@@ -262,29 +278,32 @@ export class TerminalBrowser {
         void this.refreshApprovals();
       })
     );
+    this.cleanups.push(
+      this.services.sessions.onChange((entries) => this.guard(() => this.applyEntries(entries)))
+    );
   }
 
   private async load(): Promise<void> {
-    const settings = this.registry.getSettings().then(
+    const settings = this.services.settings.getSettings().then(
       (raw) => this.applySettings(parseSettings(raw), false),
       (error: unknown) =>
         this.log("warn", `Settings could not be loaded; using defaults: ${describeError(error)}`)
     );
-    const sessions = this.refreshResumable();
+    const sessions = this.refreshSessions();
     const apps = this.refreshApps();
     void this.refreshApprovals();
     await Promise.all([settings, sessions, apps]);
-    if (this.finished) return;
-    // Resume where the person left off: the most recently used session.
-    const latest = this.resumable[0];
-    if (latest && this.sessions.length === 0) {
+    if (this.finished || this.sessions.length > 0) return;
+    // Resume where the person left off: the most recently active running session.
+    const latest = this.entries?.find((entry) => entry.running && entry.shellSessionId);
+    if (latest) {
       this.openTab(latest);
-      const more = this.resumable.length;
-      if (more > 0) {
-        this.setNotice(
-          `Resumed ${latest.title} · ${more} more in the launcher (${this.prefix()} c)`
-        );
-      }
+      const more = this.resumable().length;
+      this.setNotice(
+        more > 0
+          ? `Resumed ${latest.title} · ${more} more in the launcher (${this.prefix()} c)`
+          : `Resumed ${latest.title}`
+      );
     }
     this.changed();
   }
@@ -335,14 +354,14 @@ export class TerminalBrowser {
     }
     if (state.phase === "connected" && previous.phase !== "connected") {
       this.log("info", "Reconnected to the server");
-      // The attachments did not survive the outage: reattach and catch up.
+      // The attachments did not survive the outage: resume each after the last byte it got.
       for (const session of this.sessions) {
         if (session.status.kind === "disconnected" || session.status.kind === "error") {
-          void session.attach(this.sessions[this.focusedIndex] === session);
+          void session.attach(this.sessions[this.focusedIndex] === session, false);
         }
       }
       void this.refreshApprovals();
-      void this.refreshResumable();
+      void this.refreshSessions();
     } else if (state.phase === "reconnecting") {
       this.log("warn", `Connection interrupted: ${state.cause}`);
     }
@@ -361,17 +380,49 @@ export class TerminalBrowser {
 
   // ── data ───────────────────────────────────────────────────────────────────
 
-  private async refreshResumable(): Promise<void> {
+  private async refreshSessions(): Promise<void> {
+    const generation = this.entriesGeneration;
     try {
-      const rows = await this.registry.list(this.host.workspace.id);
-      const open = new Set(this.sessions.map((s) => s.sessionId));
-      this.resumable = rows.filter((row) => !open.has(row.sessionId));
-      this.registryProblem = null;
+      const entries = await this.services.sessions.list();
+      // A change event that arrived meanwhile is newer than this listing.
+      if (generation === this.entriesGeneration) this.applyEntries(entries);
+      this.sessionsProblem = null;
     } catch (error) {
-      this.registryProblem = describeError(error);
-      this.log("warn", `Session registry unavailable: ${this.registryProblem}`);
+      this.sessionsProblem = describeError(error);
+      this.entries = this.entries ?? [];
+      this.log("warn", `Sessions could not be listed: ${this.sessionsProblem}`);
     }
     this.changed();
+  }
+
+  /** The person's sessions changed: update the resume list and the open tabs. */
+  private applyEntries(entries: TerminalSessionEntry[]): void {
+    if (this.finished) return;
+    this.entriesGeneration += 1;
+    this.entries = [...entries].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+    const byId = new Map(entries.map((entry) => [entry.sessionId, entry]));
+    for (const session of [...this.sessions]) {
+      const entry = byId.get(session.sessionId);
+      if (!entry) {
+        // A tab opened after this list was made is simply not in it yet.
+        if (!this.listedTabs.has(session)) continue;
+        // Ended (here or on another device): nothing is left to show.
+        this.removeTab(session);
+        this.setNotice(`${session.title} was ended`);
+        continue;
+      }
+      this.listedTabs.add(session);
+      if (session.updateEntry(entry) && entry.shellSessionId) {
+        void session.attach(session === this.focusedSession(), true);
+      }
+    }
+    this.changed();
+  }
+
+  /** Sessions that are not open in a tab, newest activity first. */
+  private resumable(): TerminalSessionEntry[] {
+    const open = new Set(this.sessions.map((session) => session.sessionId));
+    return (this.entries ?? []).filter((entry) => !open.has(entry.sessionId));
   }
 
   private async refreshApps(): Promise<void> {
@@ -407,7 +458,7 @@ export class TerminalBrowser {
       else overlay.selected = Math.max(0, Math.min(overlay.selected, pending.length - 1));
     } else if (focused && this.settings.autoOpenApprovals && !this.isModalOpen()) {
       const index = pending.findIndex(
-        (approval) => fresh.includes(approval) && approval.callerId === focused.targetId
+        (approval) => fresh.includes(approval) && requestedBy(approval, focused)
       );
       if (index !== -1) this.openApprovals(index, `requested by ${focused.title} (this tab)`);
     }
@@ -500,19 +551,20 @@ export class TerminalBrowser {
 
   private tabViews(): TabView[] {
     return this.sessions.map((session, index) => {
-      const approvals = this.approvals.some((approval) => approval.callerId === session.targetId);
-      const requests = (this.hostRequests.get(session.sessionId)?.length ?? 0) > 0;
-      const app = this.apps?.find((candidate) => candidate.source === session.record.source);
+      const approvals = this.approvals.some((approval) => requestedBy(approval, session));
+      const icon = this.iconFor(session.entry);
+      const kind = session.status.kind;
       return {
         title: session.title,
-        ...(app?.icon ? { icon: app.icon } : {}),
+        ...(icon ? { icon } : {}),
         focused: index === this.focusedIndex,
-        badge: approvals ? "!" : requests ? "?" : session.attention ? "●" : null,
-        status: session.isLive()
-          ? "live"
-          : session.status.kind === "attaching"
-            ? "attaching"
-            : "problem",
+        badge: approvals ? "!" : session.attention ? "●" : null,
+        status:
+          kind === "live" || kind === "attaching"
+            ? kind
+            : kind === "exited"
+              ? "ended"
+              : "problem",
       };
     });
   }
@@ -555,9 +607,26 @@ export class TerminalBrowser {
     const prefix = this.prefix();
     if (!overlay) {
       const session = this.focusedSession();
-      if (!session || session.isLive()) return null;
+      if (!session || session.isLive() || this.copy) return null;
       const message = this.sessionMessage(session);
-      const rect = this.centered(layout, Math.min(72, body.width - 4), Math.min(8, body.height));
+      const width = Math.min(76, body.width - 4);
+      // Border and title, plus every line as it wraps inside the border and padding.
+      const textWidth = Math.max(1, width - 4);
+      const wrapped = message.lines.reduce(
+        (rows, line) => rows + wrappedRows(line, textWidth),
+        0
+      );
+      const height = Math.min(wrapped + 3, body.height);
+      // An ended program's last output stays readable above the note.
+      const rect =
+        session.status.kind === "exited"
+          ? {
+              x: body.x + Math.floor((body.width - width) / 2),
+              y: body.y + body.height - height,
+              width,
+              height,
+            }
+          : this.centered(layout, width, height);
       return { rect, element: <MessageBox {...message} width={rect.width} height={rect.height} /> };
     }
     switch (overlay.kind) {
@@ -712,20 +781,49 @@ export class TerminalBrowser {
       }
       case "confirm-close": {
         const session = this.sessions.find((s) => s.sessionId === overlay.sessionId);
-        const rect = this.centered(layout, Math.min(64, body.width - 4), 7);
+        const running = session?.entry.running ?? false;
+        const rect = this.centered(layout, Math.min(68, body.width - 4), 7);
         return {
           rect,
           element: (
             <MessageBox
               title={`End ${session?.title ?? "this session"}?`}
               lines={[
-                "The app discards this session's state and it can no longer be resumed.",
-                `To keep it for later, press Esc and use ${prefix} d (detach) instead.`,
+                running
+                  ? "The program is stopped and the session can no longer be resumed."
+                  : "The session and its output are discarded; it can no longer be resumed.",
+                running
+                  ? `To keep it running, press Esc and use ${prefix} d (detach) instead.`
+                  : `To keep it in the launcher, press Esc and use ${prefix} d instead.`,
                 "y end it · Esc keep it",
               ]}
               tone="warn"
               width={rect.width}
               height={rect.height}
+            />
+          ),
+        };
+      }
+      case "links": {
+        const rect = {
+          ...this.centered(layout, Math.min(90, body.width - 4), Math.min(16, body.height)),
+          y: body.y,
+        };
+        const items = this.linkItems(overlay);
+        overlay.selected = Math.min(overlay.selected, Math.max(0, items.length - 1));
+        return {
+          rect,
+          element: (
+            <ListOverlay
+              title={`Links in ${overlay.tabTitle}`}
+              query={overlay.query}
+              placeholder="type to filter"
+              items={items}
+              selected={overlay.selected}
+              width={rect.width}
+              height={rect.height}
+              empty={<Text dimColor>{`Nothing matches “${overlay.query}”.`}</Text>}
+              footer="↑↓ choose · Enter open… · Esc close"
             />
           ),
         };
@@ -736,26 +834,9 @@ export class TerminalBrowser {
           rect,
           element: (
             <OpenUrlDialog
-              sessionTitle={overlay.session.title}
+              sessionTitle={overlay.tabTitle}
               url={overlay.url}
               allowed={isOpenableUrl(overlay.url)}
-              width={rect.width}
-              height={rect.height}
-            />
-          ),
-        };
-      }
-      case "request-file": {
-        const rect = this.centered(layout, Math.min(80, body.width - 4), Math.min(12, body.height));
-        return {
-          rect,
-          element: (
-            <FileRequestDialog
-              sessionTitle={overlay.session.title}
-              {...(overlay.prompt ? { prompt: overlay.prompt } : {})}
-              path={overlay.path}
-              error={overlay.error}
-              busy={overlay.busy}
               width={rect.width}
               height={rect.height}
             />
@@ -765,49 +846,50 @@ export class TerminalBrowser {
     }
   }
 
-  private sessionMessage(session: TerminalSessionClient): {
+  private sessionMessage(session: ShellSessionTab): {
     title: string;
     lines: string[];
     tone: "info" | "warn" | "error";
   } {
     const prefix = this.prefix();
+    const restart = session.entry.kind === "app" ? "start it again" : "open a new shell";
     switch (session.status.kind) {
       case "attaching":
+        return { title: `Attaching to ${session.title}…`, lines: [], tone: "info" };
+      case "exited":
         return {
-          title: `Opening ${session.title}…`,
-          lines: ["Starting the app on the server."],
-          tone: "info",
-        };
-      case "superseded":
-        return {
-          title: `${session.title} is open in another terminal`,
-          lines: [`${prefix} r brings it back here · ${prefix} d closes this tab`],
-          tone: "warn",
+          title: `${session.title} ${describeExit(session.status)}`,
+          lines: [
+            `${prefix} r ${restart} · ${prefix} [ read its output · ${prefix} x end the session · ${prefix} d close the tab`,
+          ],
+          tone: session.status.code === 0 ? "info" : "warn",
         };
       case "disconnected":
-        return this.connection.phase === "connected"
+      case "error":
+        if (this.connection.phase !== "connected") {
+          return {
+            title: "Reconnecting to the server…",
+            lines: [`${session.title} reattaches by itself once the connection is back.`],
+            tone: "warn",
+          };
+        }
+        return session.status.kind === "error"
           ? {
-              title: `${session.title} stopped responding`,
+              title: `Problem with ${session.title}`,
               lines: [
-                `${capitalize(session.status.reason)}.`,
+                session.status.message,
+                `${prefix} r try again · ${prefix} x end the session · ${prefix} l browser log`,
+              ],
+              tone: "error",
+            }
+          : {
+              title: `Lost the connection to ${session.title}`,
+              lines: [
+                `${capitalize(session.status.reason)}; the program may still be running.`,
                 `${prefix} r reattach · ${prefix} x end the session · ${prefix} d close the tab`,
               ],
               tone: "warn",
-            }
-          : {
-              title: "Reconnecting to the server…",
-              lines: [`${session.title} reattaches by itself once the connection is back.`],
-              tone: "warn",
             };
-      case "error":
-        return {
-          title: `${session.title} could not be opened`,
-          lines: [
-            session.status.message,
-            `${prefix} r try again · ${prefix} x end the session · ${prefix} l browser log`,
-          ],
-          tone: "error",
-        };
       case "live":
         return { title: session.title, lines: [], tone: "info" };
     }
@@ -828,16 +910,39 @@ export class TerminalBrowser {
 
   private launcherEntries(): PaletteEntry[] {
     const entries: PaletteEntry[] = [];
-    for (const record of this.resumable) {
+    const workspace = this.host.workspace.name;
+    for (const entry of this.resumable()) {
+      const icon = this.iconFor(entry);
+      const state = entry.running ? "running" : entry.exit ? describeExit(entry.exit) : "ended";
       entries.push({
-        key: `resume:${record.sessionId}`,
+        key: `resume:${entry.sessionId}`,
         section: "Resume",
-        label: `${this.iconFor(record.source)}${record.title}`,
-        detail: `${this.appTitle(record.source)} · last used ${relativeTime(record.lastAttachedAt)}`,
-        hint: "resume",
-        run: () => this.resume(record),
+        label: `${icon ? `${icon} ` : ""}${entry.title}`,
+        detail: `${this.kindLabel(entry)} · ${state} · active ${relativeTime(entry.lastActiveAt)}`,
+        hint: entry.running ? "running" : "restart",
+        run: () => void this.resume(entry),
       });
     }
+    if (this.sessionsProblem) {
+      entries.push({
+        key: "resume:problem",
+        section: "Resume",
+        label: "Your sessions could not be listed",
+        detail: this.sessionsProblem,
+        hint: "retry",
+        run: () => {
+          this.command({ kind: "launcher" });
+        },
+      });
+    }
+    entries.push({
+      key: "start:shell",
+      section: "Start",
+      label: "Shell",
+      detail: `Your login shell in ${workspace}`,
+      hint: "new",
+      run: () => void this.launch(null),
+    });
     for (const app of this.apps ?? []) {
       entries.push({
         key: `start:${app.source}`,
@@ -846,6 +951,29 @@ export class TerminalBrowser {
         detail: app.description ?? app.source,
         hint: "new",
         run: () => void this.launch(app),
+      });
+    }
+    if (this.appsProblem) {
+      entries.push({
+        key: "start:problem",
+        section: "Start",
+        label: "Terminal apps could not be listed",
+        detail: this.appsProblem,
+        hint: "retry",
+        run: () => {
+          this.command({ kind: "launcher" });
+        },
+      });
+    } else if (this.apps?.length === 0) {
+      entries.push({
+        key: "start:none",
+        section: "Start",
+        label: `${workspace} has no terminal apps yet`,
+        detail: "Programs in terminal-apps/<name> appear here once built. Ask an agent to “make a terminal app that …”.",
+        hint: "help",
+        run: () => {
+          this.overlay = { kind: "help", scroll: 0, contentHeight: 0 };
+        },
       });
     }
     return entries;
@@ -865,31 +993,7 @@ export class TerminalBrowser {
   }
 
   private launcherEmpty(query: string): React.ReactElement {
-    if (query) return <Text dimColor>{`Nothing matches “${query}”.`}</Text>;
-    if (this.apps === null) return <Text dimColor>Looking for terminal apps…</Text>;
-    return (
-      <Box flexDirection="column">
-        {this.appsProblem ? (
-          <Text color="red" wrap="wrap">{`Could not list terminal apps: ${this.appsProblem}`}</Text>
-        ) : (
-          <Text bold>{`${this.host.workspace.name} has no terminal apps yet.`}</Text>
-        )}
-        <Text wrap="wrap">
-          {`Other workspaces have their own (Server Logs is in ${this.host.system.name}): ${this.prefix()} w switches workspace.`}
-        </Text>
-        <Text wrap="wrap">
-          A terminal app is a worker whose package.json declares a terminal block, for example:
-        </Text>
-        <Text color="cyan">
-          {'  "vibestudio": { "terminal": { "renderer": "ink", "title": "My app" } }'}
-        </Text>
-        <Text wrap="wrap">
-          Its Durable Object renders an Ink UI with @workspace/terminal-shim. Ask an agent to “make
-          a terminal app that …”, or read docs/terminal-apps.md. Apps appear here as soon as they
-          are built.
-        </Text>
-      </Box>
-    );
+    return <Text dimColor>{`Nothing matches “${query}”.`}</Text>;
   }
 
   private paletteItems(query: string): PaletteEntry[] {
@@ -929,8 +1033,14 @@ export class TerminalBrowser {
         `${prefix} [`
       );
       action(
+        "links",
+        `Links in ${focused.title}`,
+        () => this.command({ kind: "links" }),
+        `${prefix} o`
+      );
+      action(
         "detach",
-        `Detach ${focused.title}`,
+        `Detach ${focused.title} (keeps running)`,
         () => this.command({ kind: "detach" }),
         `${prefix} d`
       );
@@ -958,7 +1068,7 @@ export class TerminalBrowser {
     action("help", "Help: key bindings", () => this.command({ kind: "help" }), `${prefix} ?`);
     action(
       "quit",
-      "Quit (sessions stay resumable)",
+      "Quit (programs keep running)",
       () => this.command({ kind: "quit" }),
       `${prefix} q`
     );
@@ -988,13 +1098,32 @@ export class TerminalBrowser {
     return ranked;
   }
 
-  private iconFor(source: string): string {
-    const icon = this.apps?.find((app) => app.source === source)?.icon;
-    return icon ? `${icon} ` : "";
+  /** A session's emoji icon: its own, else its app's. */
+  private iconFor(entry: TerminalSessionEntry): string | undefined {
+    return (
+      emojiIcon(entry.icon) ??
+      (entry.source ? this.apps?.find((app) => app.source === entry.source)?.icon : undefined)
+    );
   }
 
-  private appTitle(source: string): string {
-    return this.apps?.find((app) => app.source === source)?.title ?? source;
+  private kindLabel(entry: TerminalSessionEntry): string {
+    if (entry.kind === "shell") return "Shell";
+    return this.apps?.find((app) => app.source === entry.source)?.title ?? entry.source ?? "App";
+  }
+
+  private linkItems(overlay: Extract<Overlay, { kind: "links" }>): PaletteEntry[] {
+    const entries = overlay.urls.map((url) => ({
+      key: url,
+      label: url,
+      hint: isOpenableUrl(url) ? undefined : "can't open",
+      run: () => {
+        this.overlay = { kind: "open-url", tabTitle: overlay.tabTitle, url };
+      },
+    }));
+    return fuzzyFilter(entries, overlay.query, (entry) => entry.label).map(({ item, match }) => ({
+      ...item,
+      match,
+    }));
   }
 
   // ── input ──────────────────────────────────────────────────────────────────
@@ -1087,6 +1216,17 @@ export class TerminalBrowser {
       if (encoded) session.sendInput(encoded);
       return;
     }
+    if (event.action === "press" && event.code === 0) {
+      // A click on a link the program drew (OSC 8) asks to open it.
+      const top = this.copy?.sessionId === session.sessionId ? this.copy.top : session.grid.liveTop();
+      const url = session.grid.linkAt(event.x - layout.body.x, top + event.y - layout.body.y);
+      if (url) {
+        this.copy = null;
+        this.overlay = { kind: "open-url", tabTitle: session.title, url };
+        this.changed();
+      }
+      return;
+    }
     if (event.action === "wheel-up") this.scrollCopy(session, -3);
     else if (event.action === "wheel-down") this.scrollCopy(session, 3);
   }
@@ -1101,13 +1241,16 @@ export class TerminalBrowser {
     switch (overlay.kind) {
       case "palette":
       case "launcher":
-      case "workspaces": {
+      case "workspaces":
+      case "links": {
         const items =
           overlay.kind === "palette"
             ? this.paletteItems(overlay.query)
             : overlay.kind === "launcher"
               ? this.launcherItems(overlay.query)
-              : this.workspaceItems(overlay);
+              : overlay.kind === "links"
+                ? this.linkItems(overlay)
+                : this.workspaceItems(overlay);
         const result = editList(overlay, event, items.length);
         if (result === "cancel") {
           if (overlay.kind === "launcher" && this.sessions.length === 0) {
@@ -1163,17 +1306,12 @@ export class TerminalBrowser {
       case "open-url":
         if (event.kind === "key" && event.name === "o" && isOpenableUrl(overlay.url)) {
           this.overlay = null;
-          void this.answerOpenUrl(overlay.session, overlay.requestId, overlay.url, true);
-        } else if (event.kind === "key" && event.name === "escape") {
+          void this.openUrl(overlay.url);
+        } else if (event.kind === "key" && (event.name === "escape" || event.name === "q")) {
           this.overlay = null;
-          void this.answerOpenUrl(overlay.session, overlay.requestId, overlay.url, false);
         }
         break;
-      case "request-file":
-        this.onFileRequestKey(overlay, event);
-        break;
     }
-    if (!this.overlay) this.nextHostRequest();
     this.changed();
   }
 
@@ -1244,37 +1382,6 @@ export class TerminalBrowser {
     }
   }
 
-  private onFileRequestKey(
-    overlay: Extract<Overlay, { kind: "request-file" }>,
-    event: Exclude<InputEvent, MouseEvent>
-  ): void {
-    if (overlay.busy) return;
-    if (event.kind === "paste") {
-      overlay.path += event.text.replace(/[\r\n]+/g, "");
-      overlay.error = null;
-      return;
-    }
-    if (event.name === "escape") {
-      this.overlay = null;
-      void this.replyFile(overlay.session, overlay.requestId, null);
-    } else if (event.name === "enter") {
-      if (!overlay.path.trim()) {
-        overlay.error = "Type a path first, or press Esc to decline.";
-        return;
-      }
-      overlay.busy = true;
-      overlay.error = null;
-      void this.sendFile(overlay);
-    } else if (event.name === "backspace" || event.name === "C-h") {
-      overlay.path = overlay.path.slice(0, -1);
-    } else if (event.name === "C-u") {
-      overlay.path = "";
-    } else if ([...event.name].length === 1 && event.name >= " ") {
-      overlay.path += event.name;
-      overlay.error = null;
-    }
-  }
-
   // ── commands ───────────────────────────────────────────────────────────────
 
   private command(command: Command): void {
@@ -1286,7 +1393,7 @@ export class TerminalBrowser {
       case "launcher":
         this.overlay = { kind: "launcher", query: "", selected: 0 };
         void this.refreshApps();
-        void this.refreshResumable();
+        void this.refreshSessions();
         break;
       case "tab":
         if (command.index < this.sessions.length) this.focusTab(command.index);
@@ -1327,7 +1434,10 @@ export class TerminalBrowser {
         if (session) this.overlay = { kind: "confirm-close", sessionId: session.sessionId };
         break;
       case "reattach":
-        if (session) void session.attach(true);
+        if (session) void this.reattach(session);
+        break;
+      case "links":
+        if (session) this.openLinks(session);
         break;
       case "workspace":
         this.openWorkspaces();
@@ -1381,7 +1491,7 @@ export class TerminalBrowser {
     if (next.prefixKey !== previous.prefixKey) this.router.setPrefix(next.prefixKey);
     if (next.mouse !== previous.mouse) this.terminal.setMouse(next.mouse);
     if (persist) {
-      void this.registry.setSettings({ ...next }).then(
+      void this.services.settings.setSettings({ ...next }).then(
         () => {
           if (this.overlay?.kind === "settings") this.overlay.error = null;
           this.changed();
@@ -1399,101 +1509,108 @@ export class TerminalBrowser {
 
   // ── sessions ───────────────────────────────────────────────────────────────
 
-  private focusedSession(): TerminalSessionClient | null {
+  private focusedSession(): ShellSessionTab | null {
     return this.sessions[this.focusedIndex] ?? null;
   }
 
   private sessionEvents() {
     return {
       changed: () => this.changed(),
-      titled: (session: TerminalSessionClient) => {
-        // Remembered so the launcher shows the session's own title after a restart.
-        void this.registry
-          .setTitle(session.sessionId, session.title)
-          .catch((error: unknown) =>
-            this.log(
-              "warn",
-              `Could not remember the title of ${session.title}: ${describeError(error)}`
-            )
-          );
-        this.changed();
-      },
       output: () => this.compositor.invalidate(),
-      hostRequest: (session: TerminalSessionClient, request: HostRequest) =>
-        this.guard(() => this.onHostRequest(session, request)),
-      ended: (session: TerminalSessionClient, reason: string | undefined) =>
-        this.guard(() => this.onSessionEnded(session, reason)),
-      bell: (session: TerminalSessionClient) => this.guard(() => this.onBell(session)),
+      bell: (session: ShellSessionTab) => this.guard(() => this.onBell(session)),
+      copy: (session: ShellSessionTab, text: string) =>
+        this.guard(() => {
+          this.copyToClipboard(text);
+          this.setNotice(`Copied ${characters(text)} from ${session.title}`);
+        }),
       log: (level: "info" | "warn" | "error", message: string) => this.log(level, message),
     };
   }
 
-  private openTab(record: TerminalSessionRecord): TerminalSessionClient {
-    const existing = this.sessions.findIndex((session) => session.sessionId === record.sessionId);
+  /** Open (or focus) the tab of a session and attach it. */
+  private openTab(entry: TerminalSessionEntry): ShellSessionTab {
+    const existing = this.sessions.findIndex((session) => session.sessionId === entry.sessionId);
     if (existing !== -1) {
+      const session = this.sessions[existing]!;
+      if (session.updateEntry(entry)) void session.attach(true, true);
       this.focusTab(existing);
-      return this.sessions[existing]!;
+      return session;
     }
-    const session = new TerminalSessionClient(
-      this.host.workspaceRpc,
-      record,
-      this.sessionSize(),
-      this.sessionEvents()
-    );
+    const session = new ShellSessionTab(this.shell, entry, this.sessionSize(), this.sessionEvents());
     this.sessions.push(session);
-    this.resumable = this.resumable.filter((row) => row.sessionId !== record.sessionId);
+    if (this.entries?.some((known) => known.sessionId === entry.sessionId)) {
+      this.listedTabs.add(session);
+    }
     this.focusTab(this.sessions.length - 1);
-    void session.attach(true).then(() => this.changed());
+    void session.attach(true, true).then(() => this.changed());
     this.changed();
     return session;
   }
 
-  private resume(record: TerminalSessionRecord): void {
-    this.openTab(record);
-    void this.registry
-      .markAttached(record.sessionId)
-      .catch((error: unknown) =>
-        this.log(
-          "warn",
-          `Could not record that ${record.title} was resumed: ${describeError(error)}`
-        )
-      );
-  }
-
-  private async launch(app: TerminalApp): Promise<void> {
-    this.setNotice(`Starting ${app.title}…`);
-    let contextId: string;
-    try {
-      contextId = await createSessionContext(this.host.workspaceRpc);
-    } catch (error) {
-      this.log("error", `Could not start ${app.title}: ${describeError(error)}`);
-      this.setNotice(
-        `Could not start ${app.title}: ${describeError(error)} (details: ${this.prefix()} l)`
-      );
+  /** Resume a session from the launcher; one that is not running is started again. */
+  private async resume(entry: TerminalSessionEntry): Promise<void> {
+    if (entry.running && entry.shellSessionId) {
+      this.openTab(entry);
       return;
     }
-    const draft = {
-      sessionId: `term-${randomUUID()}`,
-      workspaceId: this.host.workspace.id,
-      source: app.source,
-      className: app.className,
-      title: app.title,
-      contextId,
-    };
-    let record: TerminalSessionRecord;
+    await this.relaunch(entry.sessionId, entry.title, entry.kind);
+  }
+
+  private async relaunch(sessionId: string, title: string, kind: TerminalSessionEntry["kind"]): Promise<void> {
+    this.setNotice(`Starting ${title} again…`);
+    const size = this.sessionSize();
     try {
-      record = await this.registry.record(draft);
+      const entry = await this.services.sessions.resume({
+        sessionId,
+        cols: size.columns,
+        rows: size.rows,
+      });
+      if (this.finished) return;
+      this.openTab(entry);
+      this.setNotice(null);
     } catch (error) {
-      record = { ...draft, createdAt: Date.now(), lastAttachedAt: Date.now() };
-      this.log("warn", `${app.title} will not be resumable: ${describeError(error)}`);
-      this.setNotice(
-        `${app.title} opened, but cannot be resumed later (session registry unavailable)`
-      );
+      this.reportLaunchFailure(title, kind, error);
     }
-    if (this.finished) return;
-    this.openTab(record);
-    if (this.notice === `Starting ${app.title}…`) this.notice = null;
-    this.changed();
+  }
+
+  /** Start a terminal app, or the person's login shell (`null`). */
+  private async launch(app: TerminalApp | null): Promise<void> {
+    const title = app?.title ?? "Shell";
+    this.setNotice(`Starting ${title}…`);
+    const size = this.sessionSize();
+    try {
+      const entry = await this.services.sessions.launch({
+        ...(app ? { source: app.source } : {}),
+        cols: size.columns,
+        rows: size.rows,
+        approvalsKey: approvalsKeyLabel(this.settings.prefixKey),
+      });
+      if (this.finished) return;
+      this.openTab(entry);
+      this.setNotice(null);
+    } catch (error) {
+      this.reportLaunchFailure(title, app ? "app" : "shell", error);
+    }
+  }
+
+  private reportLaunchFailure(title: string, kind: TerminalSessionEntry["kind"], error: unknown): void {
+    const reason = describeError(error);
+    const what = kind === "app" ? "Terminal apps" : "Shells";
+    const message =
+      error instanceof TerminalServiceUnavailableError
+        ? `${what} can't be started in ${this.host.workspace.name}: ${reason}`
+        : `Could not start ${title}: ${reason}`;
+    this.log("error", message);
+    this.setNotice(`${message} (details: ${this.prefix()} l)`);
+  }
+
+  /** `prefix r`: reattach; a session whose program ended is started again. */
+  private async reattach(session: ShellSessionTab): Promise<void> {
+    if (session.status.kind === "exited" || !session.entry.shellSessionId) {
+      await this.relaunch(session.sessionId, session.title, session.entry.kind);
+      return;
+    }
+    await session.attach(session === this.focusedSession(), true);
   }
 
   private focusTab(index: number): void {
@@ -1503,14 +1620,17 @@ export class TerminalBrowser {
     this.previousFocusedIndex = this.focusedIndex;
     this.focusedIndex = index;
     this.copy = null;
-    if (this.overlay?.kind === "launcher" || this.overlay?.kind === "palette") this.overlay = null;
+    if (
+      this.overlay?.kind === "launcher" ||
+      this.overlay?.kind === "palette" ||
+      this.overlay?.kind === "links"
+    ) {
+      this.overlay = null;
+    }
     const session = this.sessions[index]!;
     session.setFocused(true);
-    if (!this.overlay) this.nextHostRequest();
     if (!this.overlay && this.settings.autoOpenApprovals) {
-      const pendingIndex = this.approvals.findIndex(
-        (approval) => approval.callerId === session.targetId
-      );
+      const pendingIndex = this.approvals.findIndex((approval) => requestedBy(approval, session));
       if (pendingIndex !== -1)
         this.openApprovals(pendingIndex, `requested by ${session.title} (this tab)`);
     }
@@ -1518,14 +1638,14 @@ export class TerminalBrowser {
     this.changed();
   }
 
-  private removeTab(session: TerminalSessionClient): void {
+  private removeTab(session: ShellSessionTab): void {
     const index = this.sessions.indexOf(session);
     if (index === -1) return;
     session.dispose();
-    this.hostRequests.delete(session.sessionId);
     this.sessions.splice(index, 1);
-    if (this.overlay && "session" in this.overlay && this.overlay.session === session)
+    if (this.overlay?.kind === "confirm-close" && this.overlay.sessionId === session.sessionId) {
       this.overlay = null;
+    }
     if (this.copy?.sessionId === session.sessionId) this.copy = null;
     const wasFocused = index === this.focusedIndex;
     if (this.focusedIndex > index || (wasFocused && this.focusedIndex >= this.sessions.length)) {
@@ -1543,149 +1663,66 @@ export class TerminalBrowser {
     this.changed();
   }
 
-  private detachTab(session: TerminalSessionClient): void {
+  private detachTab(session: ShellSessionTab): void {
     this.removeTab(session);
-    this.setNotice(`Detached ${session.title} — resume it from the launcher (${this.prefix()} c)`);
-    void this.refreshResumable();
+    this.setNotice(
+      session.entry.running
+        ? `Detached ${session.title}; it keeps running · resume it from the launcher (${this.prefix()} c)`
+        : `Closed the tab of ${session.title} · it stays in the launcher (${this.prefix()} c)`
+    );
   }
 
   private async closeSession(sessionId: string): Promise<void> {
     const session = this.sessions.find((candidate) => candidate.sessionId === sessionId);
     if (!session) return;
     try {
-      await session.close();
+      await this.services.sessions.close(sessionId);
     } catch (error) {
-      this.log("warn", `${session.title} did not confirm closing: ${describeError(error)}`);
+      this.log("error", `Could not end ${session.title}: ${describeError(error)}`);
+      this.setNotice(`Could not end ${session.title}: ${describeError(error)}`);
+      return;
     }
-    await this.registry
-      .forget(sessionId)
-      .catch((error: unknown) =>
-        this.log(
-          "warn",
-          `Could not remove ${session.title} from the session list: ${describeError(error)}`
-        )
-      );
     this.removeTab(session);
+    this.entries = (this.entries ?? []).filter((entry) => entry.sessionId !== sessionId);
     this.setNotice(`Ended ${session.title}`);
   }
 
-  private onSessionEnded(session: TerminalSessionClient, reason: string | undefined): void {
-    if (!this.sessions.includes(session)) return;
-    void this.registry.forget(session.sessionId).catch(() => {});
-    this.removeTab(session);
-    this.setNotice(`${session.title} ended${reason && reason !== "closed" ? `: ${reason}` : ""}`);
+  private onBell(session: ShellSessionTab): void {
+    // The focused tab's bell reaches the real terminal, as in any terminal;
+    // a background tab's only when the person asked for that.
+    if (session === this.focusedSession() || this.settings.bell) this.terminal.write("\x07");
   }
 
-  private onBell(session: TerminalSessionClient): void {
-    const focused = session === this.focusedSession();
-    if (!focused && !session.attention) {
-      session.attention = { reason: "bell" };
-      this.changed();
+  // ── links & clipboard ──────────────────────────────────────────────────────
+
+  private openLinks(session: ShellSessionTab): void {
+    const urls = session.grid.links();
+    if (urls.length === 0) {
+      this.setNotice(`${session.title} has not shown any links (programs mark them with OSC 8)`);
+      return;
     }
-    if (focused || this.settings.bell) this.terminal.write("\x07");
-  }
-
-  // ── host requests ──────────────────────────────────────────────────────────
-
-  private onHostRequest(session: TerminalSessionClient, request: HostRequest): void {
-    const queue = this.hostRequests.get(session.sessionId) ?? [];
-    queue.push(request);
-    this.hostRequests.set(session.sessionId, queue);
-    if (session === this.focusedSession() && !this.overlay) this.nextHostRequest();
-    else if (session !== this.focusedSession()) {
-      const what = request.kind === "open-url" ? "wants to open a link" : "asks for a file";
-      const index = this.sessions.indexOf(session);
-      this.setNotice(`${session.title} ${what} — switch to it with ${this.prefix()} ${index + 1}`);
-    }
-    this.changed();
-  }
-
-  /** Show the focused session's next pending host request, if any. */
-  private nextHostRequest(): void {
-    const session = this.focusedSession();
-    if (!session || this.overlay) return;
-    const request = this.hostRequests.get(session.sessionId)?.shift();
-    if (!request) return;
     this.copy = null;
-    this.overlay =
-      request.kind === "open-url"
-        ? { kind: "open-url", session, requestId: request.requestId, url: request.url }
-        : {
-            kind: "request-file",
-            session,
-            requestId: request.requestId,
-            ...(request.prompt ? { prompt: request.prompt } : {}),
-            path: "",
-            error: null,
-            busy: false,
-          };
+    this.overlay = { kind: "links", tabTitle: session.title, urls, query: "", selected: 0 };
   }
 
-  private async answerOpenUrl(
-    session: TerminalSessionClient,
-    requestId: string,
-    url: string,
-    open: boolean
-  ): Promise<void> {
-    let opened = false;
-    if (open) {
-      try {
-        await this.host.openExternal(url);
-        opened = true;
-        this.setNotice(`Opened ${new URL(url).host} in your browser`);
-      } catch (error) {
-        this.log("error", `Could not open ${url}: ${describeError(error)}`);
-        this.setNotice(`Could not open the link: ${describeError(error)}`);
-      }
-    }
-    await session
-      .reply({ requestId, kind: "open-url", opened })
-      .catch((error: unknown) =>
-        this.log("warn", `${session.title} did not receive the answer: ${describeError(error)}`)
-      );
-  }
-
-  private async sendFile(overlay: Extract<Overlay, { kind: "request-file" }>): Promise<void> {
-    const filePath = expandHome(overlay.path.trim());
+  private async openUrl(url: string): Promise<void> {
     try {
-      const file = await this.host.readLocalFile(filePath);
-      if (file.bytes.byteLength > MAX_FILE_BYTES) {
-        throw new Error(
-          `it is ${formatBytes(file.bytes.byteLength)}; files up to ${formatBytes(MAX_FILE_BYTES)} can be sent`
-        );
-      }
-      await this.replyFile(overlay.session, overlay.requestId, {
-        name: file.name,
-        ...(file.mimeType ? { mimeType: file.mimeType } : {}),
-        data: bytesToBase64(file.bytes),
-      });
-      if (this.overlay === overlay) this.overlay = null;
-      this.setNotice(
-        `Sent ${file.name} (${formatBytes(file.bytes.byteLength)}) to ${overlay.session.title}`
-      );
+      await this.host.openExternal(url);
+      this.setNotice(`Opened ${new URL(url).host} in your browser`);
     } catch (error) {
-      overlay.error = `Could not send ${filePath}: ${describeError(error)}`;
-      overlay.busy = false;
+      this.log("error", `Could not open ${url}: ${describeError(error)}`);
+      this.setNotice(`Could not open the link: ${describeError(error)}`);
     }
-    if (!this.overlay) this.nextHostRequest();
-    this.changed();
   }
 
-  private async replyFile(
-    session: TerminalSessionClient,
-    requestId: string,
-    file: { name: string; mimeType?: string; data: string } | null
-  ): Promise<void> {
-    await session
-      .reply({ requestId, kind: "request-file", ...(file ? { file } : {}) })
-      .catch((error: unknown) =>
-        this.log("warn", `${session.title} did not receive the file: ${describeError(error)}`)
-      );
+  /** Put text on the person's clipboard through their terminal (OSC 52). */
+  private copyToClipboard(text: string): void {
+    this.terminal.write(`\x1b]52;c;${Buffer.from(text, "utf8").toString("base64")}\x07`);
   }
 
   // ── copy mode ──────────────────────────────────────────────────────────────
 
-  private enterCopy(session: TerminalSessionClient): void {
+  private enterCopy(session: ShellSessionTab): void {
     const grid = session.grid;
     const cursor = grid.cursor();
     this.copy = {
@@ -1696,7 +1733,7 @@ export class TerminalBrowser {
     };
   }
 
-  private scrollCopy(session: TerminalSessionClient, delta: number): void {
+  private scrollCopy(session: ShellSessionTab, delta: number): void {
     if (!this.copy || this.copy.sessionId !== session.sessionId) {
       if (delta > 0) return; // already live
       this.enterCopy(session);
@@ -1766,11 +1803,9 @@ export class TerminalBrowser {
       case "y":
       case "enter": {
         const text = selectedText(grid, copy);
-        this.terminal.write(`\x1b]52;c;${Buffer.from(text, "utf8").toString("base64")}\x07`);
+        this.copyToClipboard(text);
         this.copy = null;
-        this.setNotice(
-          `Copied ${text.length} character${text.length === 1 ? "" : "s"} to your clipboard (if your terminal allows OSC 52)`
-        );
+        this.setNotice(`Copied ${characters(text)} to your clipboard (if your terminal allows OSC 52)`);
         return;
       }
       case "q":
@@ -1898,7 +1933,7 @@ function normalizedSelection(copy: CopyState) {
   return { start: aFirst ? a : b, end: aFirst ? b : a };
 }
 
-function selectedText(grid: TerminalSessionClient["grid"], copy: CopyState): string {
+function selectedText(grid: ShellSessionTab["grid"], copy: CopyState): string {
   const selection = normalizedSelection(copy);
   if (!selection) return grid.lineText(copy.cursor.y);
   const lines: string[] = [];
@@ -1941,16 +1976,32 @@ function isOpenableUrl(url: string): boolean {
   }
 }
 
-function expandHome(filePath: string): string {
-  if (filePath === "~") return os.homedir();
-  if (filePath.startsWith("~/")) return path.join(os.homedir(), filePath.slice(2));
-  return path.resolve(filePath);
+/** Rows a line takes when word-wrapped greedily at `width` (as Ink wraps text). */
+function wrappedRows(line: string, width: number): number {
+  let rows = 1;
+  let used = 0;
+  for (const word of line.split(" ")) {
+    const length = [...word].length;
+    const needed = used === 0 ? length : used + 1 + length;
+    if (needed <= width) used = needed;
+    else {
+      rows += used === 0 ? 0 : 1;
+      rows += Math.max(0, Math.ceil(length / width) - 1);
+      used = length % width || Math.min(length, width);
+    }
+  }
+  return rows;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function characters(text: string): string {
+  const count = [...text].length;
+  return `${count} character${count === 1 ? "" : "s"}`;
+}
+
+/** Whether an approval was raised by the terminal app running in a tab. */
+function requestedBy(approval: PendingApproval, session: ShellSessionTab): boolean {
+  const principalId = session.entry.principalId;
+  return principalId !== undefined && approval.callerId === principalId;
 }
 
 function relativeTime(timestamp: number): string {

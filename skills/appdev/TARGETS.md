@@ -111,13 +111,18 @@ Manifest:
 }
 ```
 
-A terminal app builds to exactly one primary Node ESM (`.mjs`) entry artifact.
+A terminal client app builds to exactly one primary Node ESM (`.mjs`) entry artifact.
 Like the other targets it is a client: the System workspace server builds it
 and the `vibestudio terminal` CLI runs it on the user's device; it never runs
 as a server process. All three targets are hosted only in the protected
 System workspace; an app declared in another workspace keeps its source for
 authoring but is never offered for native launch. `hostTargets.terminal.app`
 in `meta/vibestudio.yml` names the app the CLI opens.
+
+A terminal client app is trusted chrome, not something people run inside it.
+The programs people start in the terminal browser are terminal apps (panels
+hosted by terminals, at `terminal-apps/<name>`): untrusted Node programs in
+workspace PTYs. See [the terminal-apps skill](../terminal-apps/SKILL.md).
 
 The server emits `apps:available` with `launchMode: "client-module"`.
 
@@ -141,7 +146,7 @@ Behavior:
 - A new build reaches a terminal when the CLI loads the app again: on the next
   `vibestudio terminal`, or when the CLI reconnects after an update.
 
-Use terminal apps for trusted terminal clients that should run with app
+Use terminal client apps for trusted terminal clients that should run with app
 capabilities instead of shell authority. `apps/terminal-browser` is the
 reference app.
 
@@ -203,7 +208,7 @@ Target-specific notes:
   the old trusted build until the user selects `Load`.
 - React Native apps report the server's active trusted bundle. Whether a given
   device has fetched and installed it is up to that device's native host.
-- Terminal apps, like React Native apps, report the server's active trusted
+- Terminal client apps, like React Native apps, report the server's active trusted
   build. Whether a terminal is running it is up to that device's
   `vibestudio terminal` CLI.
 

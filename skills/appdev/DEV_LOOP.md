@@ -84,7 +84,7 @@ app loaded adopt it explicitly:
   `Load update` and, when available, `Roll back`
 - mobile apps show a native prompt with `Install`, `Later`, and, when rollback
   history exists, `Roll back`
-- terminal apps keep the loaded build until `vibestudio terminal` loads the app
+- terminal client apps keep the loaded build until `vibestudio terminal` loads the app
   again: on the next run, or when the CLI reconnects after the update
 
 Clients can call
@@ -174,12 +174,12 @@ pnpm test:iroh-desktop-e2e
 pnpm test:iroh-mobile-e2e
 ```
 
-## Terminal App Loop
+## Terminal Client App Loop
 
-For terminal apps:
+For terminal client apps:
 
 - Expect `apps:available` with `launchMode: "client-module"`. The server only
-  builds terminal apps; it never runs them.
+  builds terminal client apps; it never runs them.
 - Run the app with `vibestudio terminal` (from the host checkout,
   `pnpm terminal [--instance ID]`). The CLI runs the launch gate for the
   `terminal` target, obtains the device's app principal through
@@ -197,7 +197,7 @@ For terminal apps:
   `vibestudio terminal` (or let a running one reconnect) and confirm the
   selected trusted build loads.
 
-Write terminal app source as a clean Node ESM module that exports
+Write terminal client app source as a clean Node ESM module that exports
 `run(host: TerminalBrowserHost)` from
 `@vibestudio/shell-core/terminal/terminalBrowserHost`, uses `host.rpc` (already
 authenticated as the app principal) and `host.stdin`/`host.stdout`, and
@@ -217,7 +217,7 @@ app's entity or release identity for the app's build and activation state, and
 is read-only and supports live following through `server-log:append`. Humans
 can open `about/server-logs`.
 
-Full terminal app smoke:
+Full terminal client app smoke:
 
 ```bash
 pnpm test:terminal-app-smoke

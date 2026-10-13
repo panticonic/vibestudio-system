@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ATTR_BOLD, ATTR_INVERSE, Screen } from "./screen.js";
 import { VtGrid } from "./vtGrid.js";
 
@@ -47,6 +47,54 @@ describe("VtGrid", () => {
     expect(screen.rowText(1)).toBe("two");
     expect(screen.attrs[0]! & ATTR_INVERSE).toBe(ATTR_INVERSE);
     expect(screen.attrs[2]! & ATTR_INVERSE).toBe(0);
+    grid.dispose();
+  });
+});
+
+describe("VtGrid signals", () => {
+  it("reports titles, notifications and clipboard writes", async () => {
+    const title = vi.fn();
+    const attention = vi.fn();
+    const copy = vi.fn();
+    const grid = new VtGrid({ columns: 20, rows: 3 }, { signals: { title, attention, copy } });
+    await grid.write("\x1b]0;first\x07\x1b]2;second\x1b\\");
+    expect(title.mock.calls).toEqual([["first"], ["second"]]);
+    await grid.write("\x1b]9;done\x07\x1b]9;4;1;50\x07\x1b]777;notify;Build;passed\x07");
+    expect(attention.mock.calls).toEqual([["done"], ["Build: passed"]]);
+    await grid.write(`\x1b]52;c;${Buffer.from("hi").toString("base64")}\x07\x1b]52;c;?\x07`);
+    expect(copy.mock.calls).toEqual([["hi"]]);
+    grid.dispose();
+  });
+
+  it("locates OSC 8 links, keeps them through scrolling and lists them newest first", async () => {
+    const grid = new VtGrid({ columns: 30, rows: 3 }, { scrollback: 3 });
+    await grid.write("top\r\nsee \x1b]8;;https://a.example/x\x1b\\docs\x1b]8;;\x1b\\ and ");
+    await grid.write("\x1b]8;id=1;https://b.example\x07b\x1b]8;;\x07\r\n");
+    expect(grid.linkAt(4, 1)).toBe("https://a.example/x");
+    expect(grid.linkAt(7, 1)).toBe("https://a.example/x");
+    expect(grid.linkAt(8, 1)).toBeNull();
+    expect(grid.linkAt(13, 1)).toBe("https://b.example");
+    // The buffer is full: the oldest line is trimmed and every line moves up one.
+    await grid.write("1\r\n2\r\n3\r\n4\r\n");
+    expect(grid.lineText(0)).toContain("see docs");
+    expect(grid.linkAt(4, 0)).toBe("https://a.example/x");
+    expect(grid.linkAt(4, 1)).toBeNull();
+    await grid.write("\x1b]8;;https://a.example/x\x07again\x1b]8;;\x07");
+    expect(grid.links()).toEqual(["https://a.example/x", "https://b.example"]);
+    grid.reset();
+    expect(grid.links()).toEqual([]);
+    grid.dispose();
+  });
+
+  it("tracks focus reporting and forgets tracked modes on RIS", async () => {
+    const grid = new VtGrid({ columns: 10, rows: 2 });
+    await grid.write("\x1b[?1004h\x1b[?25l\x1b]8;;https://x.example\x07x\x1b]8;;\x07");
+    expect(grid.reportsFocus()).toBe(true);
+    expect(grid.cursor().visible).toBe(false);
+    await grid.resetInOrder();
+    expect(grid.reportsFocus()).toBe(false);
+    expect(grid.cursor().visible).toBe(true);
+    expect(grid.links()).toEqual([]);
     grid.dispose();
   });
 });

@@ -1,84 +1,89 @@
 ---
 name: terminal-apps
-description: Build or change a terminal app — a worker whose Durable Object renders an Ink UI in the Vibestudio terminal browser — or explain how people use the terminal browser.
+description: Build or change a terminal app — a panel hosted by terminals, at terminal-apps/<name>, run as a Node program in a workspace PTY — or explain how people use the terminal browser.
 ---
 
 # Terminal apps
 
-A terminal app is a sandboxed worker that renders an [Ink](https://github.com/vadimdemedes/ink)
-UI. People open it from the terminal browser (`vibestudio terminal`): every
-worker that declares `vibestudio.terminal` appears in the launcher of the
-workspace it belongs to (the browser shows the person's Personal workspace by
-default and switches with the prefix key then `w`). Sessions run in that
-workspace, as the person's device, like panels the desktop shows. The browser
-is trusted chrome; your app's bytes never reach the real terminal, they are
-drawn into a grid the browser composes.
+A terminal app is a panel hosted by terminals: an ordinary Node program (Ink
+renders natively) at `terminal-apps/<name>` in a workspace. People start it
+from the terminal browser (`vibestudio terminal`) — every built terminal app
+of the shown workspace is listed under **Start**, next to **Shell** (the
+person's login shell). The browser shows the person's Personal workspace by
+default and switches with the prefix key then `w`.
 
-Reference implementation: `workers/terminal-server-logs` (a live, filterable
-server-log tail). Read it before writing a new app.
+The workspace's terminal launch service (`terminalApps.*`) runs the program
+in a PTY of the Base `shell` extension, inside the workspace's native runtime,
+as the app's own principal. It keeps the person's sessions: programs keep
+running when the browser detaches or quits, and the person resumes them from
+any device (also the desktop terminal panel). An app that ended is started
+again on resume; anything that must survive belongs in its durable session
+state.
+
+Reference implementation: `terminal-apps/chat` in the Base template.
 
 ## Manifest
 
 ```jsonc
-"vibestudio": {
-  "entry": "index.tsx",
-  "durable": { "classes": [{ "className": "MyAppSession" }] },
-  "terminal": {
-    "renderer": "ink",
-    "title": "My App",                          // ≤ 60 characters
+{
+  "name": "@workspace-terminal-apps/my-app",
+  "vibestudio": {
+    "title": "My App",                            // shown in the launcher
     "description": "What it is for, in one sentence.",
-    "icon": "🧭"                                 // optional, one emoji
-    // "className": "MyAppSession"               // only with several durable classes
-  }
+    "icon": "🧭",                                  // optional; an emoji (asset icons are not drawn in terminals)
+    "entry": "index.ts"
+  },
+  "dependencies": { "@workspace/terminal-app": "workspace:*" }
 }
 ```
 
-Dependencies: `@workspace/runtime`, `@workspace/terminal-shim`,
-`@workspace/terminal-host-protocol`, `ink`, `react`. The build validates the
-block and names the field to fix when it is wrong.
+## Program
 
-## Session Durable Object
+```ts
+import { startTerminalApp } from "@workspace/terminal-app";
 
-One DO instance is one session (object key = session id). Implement
-`TerminalSession` by forwarding each method to `InkTerminalSessionHost`,
-passing `this.caller?.callerId` so only the attached browser can drive the
-session. Copy the six `@rpc` methods from `workers/terminal-server-logs/index.tsx`
-unchanged: `terminalAttach`, `terminalInput`, `terminalResize`,
-`terminalFocus`, `terminalReply`, `terminalClose`.
-
-```tsx
-private readonly terminal = new InkTerminalSessionHost({
-  render: (session) => <MyApp session={session} />,
-  onClose: () => this.deleteStateValue("view"), // user ended the session
-});
+const app = await startTerminalApp();
+// app.rpc: the app's own principal in the workspace
+// app.state: durable per-session state (survives relaunch)
+// app.launch.approvalsKey: how the person opens approvals, e.g. "Ctrl-Space a"
 ```
+
+`startTerminalApp` reads the one-shot launch material the launch service
+hands the program and connects as the app's principal. A program started any
+other way exits with a message saying to start it from the launcher.
+
+## Talking to the terminal
+
+Use standard escape sequences; the terminal browser (and the desktop panel)
+turn them into chrome:
+
+- **Title**: OSC 0/2 (`\x1b]2;Build log\x07`) names the tab.
+- **Attention**: BEL, OSC 9 (`\x1b]9;Tests finished\x07`) or
+  `OSC 777;notify;title;body` badge a background tab.
+- **Links**: OSC 8 hyperlinks. The person clicks one or lists them with the
+  prefix key then `o`; nothing opens until they confirm, and only http/https
+  links open, on their machine.
+- **Copy**: OSC 52 puts text on the person's clipboard.
+- **Focus**: enable focus reports (`\x1b[?1004h`) to receive `\x1b[I` and
+  `\x1b[O` when the tab gains or loses focus.
+- **Paste**: enable bracketed paste (`\x1b[?2004h`) to receive pastes wrapped.
 
 ## Rules
 
-- **Rebuild from durable state.** `render` runs on every attach, including a
-  resume on another device after the DO was evicted. Keep anything that must
-  survive (filters, cursor, channel ids) in DO state, never in memory only.
-- **Size.** Use `useTerminalSize()` from `@workspace/terminal-shim` for
-  full-screen layouts; render exactly `rows` lines and truncate long lines.
-- **Keys.** Use Ink's `useInput`. Every key except the user's prefix key
-  (Ctrl-Space by default) reaches you. Show your keys on screen.
-- **Host requests.** `session.openUrl(url)` and `session.requestFile(prompt)`
-  ask the user in browser chrome and resolve `false`/`null` when declined or
-  detached. Never open URLs or read files another way.
-- **Attention.** `session.setAttention({ reason })` badges a background tab;
-  clear it with `null` when `onFocusChange` reports focus.
-- **Approvals.** Gated calls raise approvals the browser shows in its own
-  overlay. Never draw an approval prompt yourself; explain in your UI that an
-  approval may be waiting.
-- **Ending.** `session.end(reason)` (or Ink's `useApp().exit()`) closes the tab
-  and removes the session from the resume list.
+- **Keys.** Every key except the person's prefix key (Ctrl-Space by default)
+  reaches the program. Show your keys on screen.
+- **Size.** Follow the PTY size (`process.stdout.columns/rows`, `SIGWINCH`);
+  on attach the terminal resizes the PTY so full-screen programs redraw.
+- **Approvals.** Gated calls raise approvals attributed to the app; the
+  terminal shows them in chrome no program can draw. Never draw an approval
+  prompt yourself; say that one may be waiting and name `approvalsKey`.
+- **Files.** Read workspace files from the program itself; there is no
+  terminal-side file request.
+- **State.** Keep anything that must survive a restart in `app.state`, never
+  in memory only.
 
 ## Testing
 
-Attach an `InkTerminalSessionHost` directly in a Vitest test, read the
-returned stream with `TerminalEventDecoder`, and drive it with `host.input` —
-see `workers/terminal-server-logs/LogViewer.test.tsx`. Run it with
+Test the program's logic and rendering as ordinary Node code (for example a
+VT emulator such as `@xterm/headless` for escape sequences) and run it with
 `verify` like any unit.
-
-Full protocol and browser architecture: `docs/terminal-apps.md` in the
-Vibestudio repository.

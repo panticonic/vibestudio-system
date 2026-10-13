@@ -11,9 +11,10 @@ export interface TabView {
   title: string;
   icon?: string;
   focused: boolean;
-  /** Something in the tab wants the user: attention, a pending approval or host request. */
+  /** Something in the tab wants the person: a pending approval or attention. */
   badge: string | null;
-  status: "attaching" | "live" | "problem";
+  /** "ended": the program is not running (it exited). */
+  status: "attaching" | "live" | "ended" | "problem";
 }
 
 export function TabStrip({
@@ -45,7 +46,12 @@ export function TabStrip({
         const text = label.length > room ? `${label.slice(0, Math.max(1, room - 1))}…` : label;
         return (
           <Box key={index} width={share} flexShrink={0}>
-            <Text inverse={tab.focused} bold={tab.focused} wrap="truncate-end">
+            <Text
+              inverse={tab.focused}
+              bold={tab.focused}
+              dimColor={tab.status === "ended"}
+              wrap="truncate-end"
+            >
               {` ${text}`}
             </Text>
             {tab.badge ? (
@@ -86,7 +92,7 @@ export function StatusBar({
     return (
       <Box width={width} height={1}>
         <Text backgroundColor="yellow" color="black" wrap="truncate-end">
-          {` ${view.prefixLabel} › k palette · c new · 1-9 tabs · n/p next/prev · [ copy · a approvals · d detach · ? help · q quit · Esc cancel `.padEnd(
+          {` ${view.prefixLabel} › k palette · c new · 1-9 tabs · n/p next/prev · [ copy · o links · a approvals · d detach · ? help · q quit · Esc cancel `.padEnd(
             width
           )}
         </Text>
@@ -319,15 +325,22 @@ export function HelpOverlay(props: {
           }
         </Text>
         <Box height={1} />
-        <Text bold>Sessions</Text>
-        <Text wrap="wrap">
-          {`  Detaching (${p} d) or quitting (${p} q) keeps a session: resume it later from the launcher (${p} c), on this or another device. Ending it (${p} x) discards it.`}
-        </Text>
-        <Box height={1} />
-        <Text bold>Adding terminal apps</Text>
+        <Text bold>Links ({`${p} o`})</Text>
         <Text wrap="wrap">
           {
-            '  Any worker whose package.json declares "vibestudio": { "terminal": { "renderer": "ink", "title": ... } } appears in the launcher. See docs/terminal-apps.md.'
+            "  Programs can mark links (OSC 8). Click one, or list the tab's links. Nothing opens until you confirm with o; only http and https links open, in your browser on this computer."
+          }
+        </Text>
+        <Box height={1} />
+        <Text bold>Sessions</Text>
+        <Text wrap="wrap">
+          {`  Every tab is a program running in the workspace. Detaching (${p} d) or quitting (${p} q) leaves it running: resume it from the launcher (${p} c) on this or another device. Ending it (${p} x) stops it for good.`}
+        </Text>
+        <Box height={1} />
+        <Text bold>Terminal apps</Text>
+        <Text wrap="wrap">
+          {
+            "  A terminal app is a program in the workspace's terminal-apps/<name> folder: a panel hosted by terminals. It appears under Start in the launcher once built. Shell opens your login shell in the workspace."
           }
         </Text>
       </Scrollable>
@@ -434,7 +447,7 @@ export function SettingsOverlay(props: {
   );
 }
 
-// ── host requests (open URL, send file) ──────────────────────────────────────
+// ── links ────────────────────────────────────────────────────────────────────
 
 /** The URL with its host emphasised, so a lookalike domain is easy to spot. */
 function UrlLine({ url }: { url: string }): React.ReactElement {
@@ -480,7 +493,7 @@ export function OpenUrlDialog(props: {
       borderColor="yellow"
       paddingX={1}
     >
-      <Text bold color="yellow">{`${props.sessionTitle} wants to open a link`}</Text>
+      <Text bold color="yellow">{`Open a link from ${props.sessionTitle}?`}</Text>
       <Box height={1} />
       <UrlLine url={props.url} />
       {host ? <Text dimColor>{`Site: ${host}`}</Text> : null}
@@ -491,7 +504,7 @@ export function OpenUrlDialog(props: {
         </Text>
       ) : (
         <Text color="red" wrap="wrap">
-          Only http and https links can be opened. This request will be declined.
+          Only http and https links can be opened from the terminal.
         </Text>
       )}
       <Box flexGrow={1} />
@@ -507,57 +520,7 @@ export function OpenUrlDialog(props: {
         <Text color="red" bold>
           Esc
         </Text>
-        {" decline"}
-      </Text>
-    </Box>
-  );
-}
-
-export function FileRequestDialog(props: {
-  sessionTitle: string;
-  prompt?: string;
-  path: string;
-  error?: string | null;
-  busy: boolean;
-  width: number;
-  height: number;
-}): React.ReactElement {
-  return (
-    <Box
-      flexDirection="column"
-      width={props.width}
-      height={props.height}
-      borderStyle="double"
-      borderColor="yellow"
-      paddingX={1}
-    >
-      <Text bold color="yellow">{`${props.sessionTitle} asks for a file from this computer`}</Text>
-      {props.prompt ? <Text wrap="wrap">{`“${props.prompt}”`}</Text> : null}
-      <Box height={1} />
-      <Text wrap="wrap">
-        Type the path of the file to send. Nothing is sent until you press Enter.
-      </Text>
-      <Text>
-        <Text color="cyan">{"Path › "}</Text>
-        {props.path}
-        <Text inverse> </Text>
-      </Text>
-      {props.error ? (
-        <Text color="red" wrap="wrap">
-          {props.error}
-        </Text>
-      ) : null}
-      {props.busy ? <Text dimColor>Reading and sending…</Text> : null}
-      <Box flexGrow={1} />
-      <Text>
-        <Text color="green" bold>
-          Enter
-        </Text>
-        {" send   "}
-        <Text color="red" bold>
-          Esc
-        </Text>
-        {" decline"}
+        {" cancel"}
       </Text>
     </Box>
   );

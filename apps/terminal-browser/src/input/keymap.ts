@@ -29,6 +29,7 @@ export type Command =
   | { kind: "prev-tab" }
   | { kind: "last-tab" }
   | { kind: "copy-mode" }
+  | { kind: "links" }
   | { kind: "approvals" }
   | { kind: "logs" }
   | { kind: "help" }
@@ -54,26 +55,33 @@ export const PREFIX_BINDINGS: readonly Binding[] = [
     command: { kind: "palette" },
     description: "Command palette: apps, sessions, actions",
   },
-  { key: "c", command: { kind: "launcher" }, description: "Launch an app or resume a session" },
+  { key: "c", command: { kind: "launcher" }, description: "Start an app or a shell, or resume a session" },
   { key: "1-9", command: { kind: "tab", index: 0 }, description: "Go to tab 1-9" },
   { key: "n", command: { kind: "next-tab" }, description: "Next tab" },
   { key: "p", command: { kind: "prev-tab" }, description: "Previous tab" },
   { key: "Tab", command: { kind: "last-tab" }, description: "Last used tab" },
   { key: "[", command: { kind: "copy-mode" }, description: "Scroll back and copy text" },
+  { key: "o", command: { kind: "links" }, description: "Links in this tab (open one in your browser)" },
   { key: "a", command: { kind: "approvals" }, description: "Approvals waiting for you" },
   { key: "l", command: { kind: "logs" }, description: "Browser log" },
   { key: "s", command: { kind: "settings" }, description: "Settings" },
   {
     key: "d",
     command: { kind: "detach" },
-    description: "Detach this tab (the session keeps its state)",
+    description: "Detach: close this tab, the program keeps running",
   },
-  { key: "x", command: { kind: "close" }, description: "End this session for good" },
-  { key: "r", command: { kind: "reattach" }, description: "Reattach this tab" },
+  { key: "x", command: { kind: "close" }, description: "End this session for good (stops the program)" },
+  { key: "r", command: { kind: "reattach" }, description: "Reattach this tab (restarts an app that ended)" },
   { key: "w", command: { kind: "workspace" }, description: "Switch workspace" },
   { key: "?", command: { kind: "help" }, description: "Help: every key binding" },
-  { key: "q", command: { kind: "quit" }, description: "Quit (sessions stay resumable)" },
+  { key: "q", command: { kind: "quit" }, description: "Quit (programs keep running; resume them later)" },
 ];
+
+/** How the person opens approvals with this prefix, e.g. "Ctrl-Space a" (apps mention it). */
+export function approvalsKeyLabel(prefix: PrefixKeyId): string {
+  const binding = PREFIX_BINDINGS.find((entry) => entry.command.kind === "approvals")!;
+  return `${prefixLabel(prefix)} ${binding.key}`;
+}
 
 function commandForKey(name: string, prefix: PrefixKeyId): Command | null {
   if (name === prefix) return { kind: "send-prefix" };

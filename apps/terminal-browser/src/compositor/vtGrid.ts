@@ -32,22 +32,54 @@ export interface GridPaintOptions {
   marker?: { x: number; y: number } | null;
 }
 
+/** What a program asked its terminal for through standard control sequences. */
+export interface GridSignals {
+  /** OSC 0 / OSC 2: window title. */
+  title?(title: string): void;
+  /** OSC 9 or OSC 777;notify: a notification asking for the person's attention. */
+  attention?(message: string): void;
+  /** OSC 52: put text on the person's clipboard. */
+  copy?(text: string): void;
+}
+
+/** A hyperlink drawn with OSC 8, anchored to its buffer line by a marker (survives scrolling). */
+interface PlacedLink {
+  url: string;
+  buffer: "normal" | "alternate";
+  line: import("@xterm/headless").IMarker;
+  x1: number;
+  x2: number;
+}
+
+/** Links remembered per grid, for clicking and for the links list. */
+const MAX_TRACKED_LINKS = 200;
+
 /**
  * One headless VT emulator. Sessions render their output into one; the
  * browser's Ink chrome renders into others. The compositor copies grids into
  * its frame with `paint`. Also tracks the private modes that the browser must
- * honour on the session's behalf (cursor visibility, SGR mouse encoding).
+ * honour on the session's behalf (cursor visibility, SGR mouse encoding, focus
+ * reporting) and surfaces the standard requests a program makes of its
+ * terminal (title, attention, clipboard, hyperlinks).
  */
 export class VtGrid {
   private readonly term: HeadlessTerminal;
   private size: GridSize;
   private cursorHidden = false;
   private sgrMouse = false;
+  private focusReporting = false;
+  private openLink: { url: string; y: number; x: number } | null = null;
+  private readonly placedLinks: PlacedLink[] = [];
+  /** URLs in the order they were last drawn, most recent last, without duplicates. */
+  private readonly recentUrls: string[] = [];
   private readonly cell: BufferCell;
   private readonly bellListeners = new Set<() => void>();
   private disposed = false;
 
-  constructor(size: GridSize, options: { scrollback?: number } = {}) {
+  constructor(
+    size: GridSize,
+    options: { scrollback?: number; signals?: GridSignals } = {}
+  ) {
     this.size = { ...size };
     this.term = new Terminal({
       cols: size.columns,
@@ -62,6 +94,7 @@ export class VtGrid {
       for (const param of params) {
         if (param === 25) this.cursorHidden = !set;
         if (param === 1006) this.sgrMouse = set;
+        if (param === 1004) this.focusReporting = set;
       }
       return false; // let xterm apply the mode too
     };
@@ -71,9 +104,64 @@ export class VtGrid {
     this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (p) =>
       trackPrivateMode(p, false)
     );
+    // RIS (ESC c), from the program or `resetInOrder`, clears what we track too.
+    this.term.parser.registerEscHandler({ final: "c" }, () => {
+      this.forgetModes();
+      return false; // let xterm reset itself
+    });
     this.term.onBell(() => {
       for (const listener of [...this.bellListeners]) listener();
     });
+    const signals = options.signals ?? {};
+    this.term.onTitleChange((title) => signals.title?.(title));
+    this.term.parser.registerOscHandler(9, (data) => {
+      // OSC 9;4 is a progress report (ConEmu), not a notification.
+      if (!/^4;/.test(data)) signals.attention?.(data);
+      return true;
+    });
+    this.term.parser.registerOscHandler(777, (data) => {
+      const [kind, title, body] = data.split(";");
+      if (kind === "notify") signals.attention?.([title, body].filter(Boolean).join(": "));
+      return true;
+    });
+    this.term.parser.registerOscHandler(52, (data) => {
+      const payload = data.slice(data.indexOf(";") + 1);
+      if (payload === "?") return true; // clipboard reads are never answered
+      try {
+        signals.copy?.(Buffer.from(payload, "base64").toString("utf8"));
+      } catch {
+        // Malformed base64: nothing to copy.
+      }
+      return true;
+    });
+    this.term.parser.registerOscHandler(8, (data) => {
+      // OSC 8 ; params ; URI — a non-empty URI opens a link, an empty one closes it.
+      const url = data.slice(data.indexOf(";") + 1);
+      const buffer = this.term.buffer.active;
+      const here = { y: buffer.baseY + buffer.cursorY, x: buffer.cursorX };
+      const open = this.openLink;
+      if (open && open.y === here.y && here.x > open.x) this.placeLink(open.url, open.x, here.x - 1);
+      this.openLink = url ? { url, y: here.y, x: here.x } : null;
+      return true;
+    });
+  }
+
+  private placeLink(url: string, x1: number, x2: number): void {
+    const known = this.recentUrls.indexOf(url);
+    if (known !== -1) this.recentUrls.splice(known, 1);
+    this.recentUrls.push(url);
+    if (this.recentUrls.length > MAX_TRACKED_LINKS) this.recentUrls.shift();
+    const line = this.term.registerMarker(0);
+    if (!line) return;
+    this.placedLinks.push({ url, buffer: this.term.buffer.active.type, line, x1, x2 });
+    if (this.placedLinks.length > MAX_TRACKED_LINKS) this.placedLinks.shift()!.line.dispose();
+  }
+
+  private forgetLinks(): void {
+    this.openLink = null;
+    for (const link of this.placedLinks) link.line.dispose();
+    this.placedLinks.length = 0;
+    this.recentUrls.length = 0;
   }
 
   get columns(): number {
@@ -84,8 +172,8 @@ export class VtGrid {
     return this.size.rows;
   }
 
-  /** Feed output; resolves once the grid reflects it. */
-  write(data: string): Promise<void> {
+  /** Feed output (text or raw bytes); resolves once the grid reflects it. */
+  write(data: string | Uint8Array): Promise<void> {
     if (this.disposed) return Promise.resolve();
     return new Promise((resolve) => this.term.write(data, resolve));
   }
@@ -99,8 +187,43 @@ export class VtGrid {
   /** Forget everything (a new attachment repaints from scratch). */
   reset(): void {
     this.term.reset();
+    this.forgetModes();
+  }
+
+  private forgetModes(): void {
     this.cursorHidden = false;
     this.sgrMouse = false;
+    this.focusReporting = false;
+    this.forgetLinks();
+  }
+
+  /**
+   * Reset in order with output already written (RIS through the write queue),
+   * for a session whose scrollback was cleared while output is in flight.
+   */
+  resetInOrder(): Promise<void> {
+    return this.write("\x1bc");
+  }
+
+  /** Whether the program asked for focus in/out reports (CSI ?1004). */
+  reportsFocus(): boolean {
+    return this.focusReporting;
+  }
+
+  /** The URL of the OSC 8 link drawn at an absolute buffer position, if any. */
+  linkAt(x: number, y: number): string | null {
+    const buffer = this.term.buffer.active.type;
+    for (let i = this.placedLinks.length - 1; i >= 0; i--) {
+      const link = this.placedLinks[i]!;
+      if (link.buffer !== buffer || link.line.isDisposed) continue;
+      if (link.line.line === y && x >= link.x1 && x <= link.x2) return link.url;
+    }
+    return null;
+  }
+
+  /** URLs of the OSC 8 links the program drew, most recent first, without duplicates. */
+  links(): string[] {
+    return [...this.recentUrls].reverse();
   }
 
   onBell(listener: () => void): () => void {
