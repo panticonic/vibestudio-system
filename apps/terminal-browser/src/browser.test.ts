@@ -113,7 +113,8 @@ class FakeWorkspace {
         return new Response(
           new ReadableStream<Uint8Array>({
             start: (controller) => {
-              this.approvalStream = controller;
+              const events = args[0] as string[];
+              if (!events.includes("workspace:units-changed")) this.approvalStream = controller;
               controller.enqueue(
                 encodeEventWatchRecord({ kind: "watching", events: args[0] as never, epoch: "e" })
               );

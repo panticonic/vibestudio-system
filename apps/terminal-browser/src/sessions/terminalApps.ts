@@ -1,5 +1,6 @@
 import type { RpcClient } from "@vibestudio/rpc";
 import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
+import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import type { WorkspaceTreeNode } from "@vibestudio/service-schemas/workspace";
 
 /** Where terminal apps live in a workspace's source tree: `terminal-apps/<name>`. */
@@ -42,4 +43,21 @@ export function emojiIcon(icon: string | undefined): string | undefined {
   if ([...trimmed].length > 8 || !/\p{Extended_Pictographic}/u.test(trimmed)) return undefined;
   if (/[\p{L}\p{N}/.]/u.test(trimmed)) return undefined;
   return trimmed;
+}
+
+/**
+ * Call `listener` whenever the workspace's units change (an app was added,
+ * built or removed, or the workspace finished starting), so the launcher's
+ * list follows the workspace instead of a snapshot taken at startup.
+ */
+export function onTerminalAppsChanged(rpc: RpcClient, listener: () => void): () => void {
+  const events = new EventsClient(rpc);
+  const stop = events.on("workspace:units-changed", () => listener());
+  void events
+    .subscribe("workspace:units-changed")
+    .catch((error: unknown) => console.warn("[terminal-browser] app updates are unavailable:", error));
+  return () => {
+    stop();
+    void events.unsubscribe("workspace:units-changed").catch(() => {});
+  };
 }

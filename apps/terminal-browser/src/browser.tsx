@@ -49,7 +49,12 @@ import {
   shellClient,
   type ShellClient,
 } from "./sessions/shellSession.js";
-import { emojiIcon, listTerminalApps, type TerminalApp } from "./sessions/terminalApps.js";
+import {
+  emojiIcon,
+  listTerminalApps,
+  onTerminalAppsChanged,
+  type TerminalApp,
+} from "./sessions/terminalApps.js";
 import { DEFAULT_SETTINGS, SETTING_ROWS, parseSettings, type BrowserSettings } from "./settings.js";
 import { TerminalOwnership, captureConsole, type CapturedConsole } from "./tty/terminal.js";
 import {
@@ -279,6 +284,9 @@ export class TerminalBrowser {
     );
     this.cleanups.push(
       this.services.sessions.onChange((entries) => this.guard(() => this.applyEntries(entries)))
+    );
+    this.cleanups.push(
+      onTerminalAppsChanged(this.host.workspaceRpc, () => this.guard(() => void this.refreshApps()))
     );
   }
 

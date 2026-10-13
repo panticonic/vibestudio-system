@@ -13,6 +13,7 @@ import type { RpcClient } from "@vibestudio/rpc";
 import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import type { TerminalSessionEntry } from "@vibestudio/shared/terminalSessions";
+import type { JsonValue } from "@vibestudio/shared/wireValues";
 
 export type { TerminalSessionEntry };
 
@@ -44,7 +45,7 @@ export interface TerminalSessions {
 
 export interface TerminalSettingsStore {
   getSettings(): Promise<Record<string, unknown>>;
-  setSettings(settings: Record<string, unknown>): Promise<void>;
+  setSettings(settings: Record<string, JsonValue>): Promise<void>;
 }
 
 const SESSIONS_CHANGED_EVENT = "terminal-apps:sessions-changed";
