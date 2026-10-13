@@ -170,6 +170,9 @@ stay inside their workspace.
   authoritative queue read before publishing a ready workspace. Register its
   refresh with the recovery coordinator so recovery completion awaits the
   read, and join remote unsubscription before closing the workspace transport.
+  A controller whose event admission failed cannot be repaired by a list read:
+  retire that exact lifetime, then create and start a new controller. Serialize
+  replacement per owner so repeated Retry actions never overlap ownership.
 - Panel startup follows this contract explicitly. Admit the complete panel
   projection watch before post-paint reconciliation, then repeat the
   authoritative panel read if a lease, tree, presentation, activation, or

@@ -351,6 +351,36 @@ describe("mobile workspace directory", () => {
     await directory.dispose();
   });
 
+  it("retires and replaces account approval ownership after admission fails", async () => {
+    const { directory } = fixture();
+    const events = directory.hubApproval.events as unknown as {
+      subscribe: jest.Mock;
+      unsubscribe: jest.Mock;
+    };
+    const failure = new Error("account approval watch unavailable");
+    events.subscribe.mockRejectedValueOnce(failure);
+
+    await expect(directory.init()).rejects.toBe(failure);
+    expect(directory.hubApproval).toMatchObject({
+      approvalStatus: "failed",
+      approvalError: failure.message,
+    });
+
+    await directory.retryFailedApprovalOwners();
+
+    expect(events.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(events.subscribe).toHaveBeenCalledTimes(2);
+    expect(events.unsubscribe.mock.invocationCallOrder[0]).toBeLessThan(
+      events.subscribe.mock.invocationCallOrder[1]!,
+    );
+    expect(directory.hubApproval).toMatchObject({
+      approvalStatus: "ready",
+      approvalError: null,
+      approvals: [],
+    });
+    await directory.dispose();
+  });
+
   it("keeps the System app source separate from lazily opened workspace clients", async () => {
     const { directory, account } = fixture();
     await directory.init();
@@ -445,6 +475,15 @@ describe("mobile workspace directory", () => {
       approvalError: failure.message,
     });
     expect(project.client.close).toHaveBeenCalled();
+
+    await directory.retryFailedApprovalOwners();
+
+    expect(directory.sessions.get("project")).not.toBe(project);
+    expect(directory.sessions.get("project")).toMatchObject({
+      state: "ready",
+      approvalStatus: "ready",
+      approvalError: null,
+    });
     await directory.dispose();
   });
 

@@ -145,6 +145,10 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   topic and the matching `unsubscribe*` releases that ownership. Overlapping
   consumers may share one response-owned watch; one consumer's retirement must
   never remove a replacement or sibling consumer's topic demand.
+- A durable controller whose admission failed remains failed. Retry must join
+  its remote retirement and create a fresh controller; an authoritative read
+  alone cannot restore event ownership or publish readiness. Serialize repeated
+  replacement attempts for the same owner.
 
 - `view.createPanel` and `panel.createPanel` resolve once the panel's slot is
   committed. Preparing the runtime image, native attachment, navigation, and

@@ -123,6 +123,7 @@ export function ConsentApprovalBar({
   const [queueError, setQueueError] = useState<string | null>(null);
   const [pendingAccess, setPendingAccess] = useState<PendingApproval[]>([]);
   const approvalController = useRef<ApprovalStateController | null>(null);
+  const retryApprovalController = useRef<(() => Promise<void>) | null>(null);
   const authoritativePending = useRef<PendingApproval[]>([]);
   const [decisionError, setDecisionError] = useState<{
     approvalId: string;
@@ -236,35 +237,80 @@ export function ConsentApprovalBar({
   }, [focusCurrentApproval, workspaceVisible]);
 
   useEffect(() => {
-    const controller = createApprovalStateController({
-      listPending: () => shellApproval.listPending(),
-      subscribePendingChanged: () =>
-        events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-      unsubscribePendingChanged: () =>
-        events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-      onPendingChanged: (listener) =>
-        events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, (payload) =>
-          listener(payload),
-        ),
-      onChange: (pending) => {
-        setQueueError(null);
-        authoritativePending.current = pending;
-        setPendingAccess(pending);
-      },
-      onError: (err, phase) => {
-        setQueueError(userFacingError(err));
-        if (!isRpcConnectionLost(err))
-          console.warn(
-            `[ConsentApprovalBar] approval state ${phase} failed:`,
-            err,
-          );
-      },
-    });
-    approvalController.current = controller;
-    void controller.start().catch(() => undefined);
+    let active = true;
+    let operation = Promise.resolve();
+    const admissionFailures = new WeakMap<ApprovalStateController, unknown>();
+    const createController = () => {
+      let controller!: ApprovalStateController;
+      controller = createApprovalStateController({
+        listPending: () => shellApproval.listPending(),
+        subscribePendingChanged: () =>
+          events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+        unsubscribePendingChanged: () =>
+          events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+        onPendingChanged: (listener) =>
+          events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, (payload) =>
+            listener(payload),
+          ),
+        onChange: (pending) => {
+          setQueueError(null);
+          authoritativePending.current = pending;
+          setPendingAccess(pending);
+        },
+        onError: (err, phase) => {
+          if (phase === "subscribe") admissionFailures.set(controller, err);
+          setQueueError(userFacingError(err));
+          if (!isRpcConnectionLost(err))
+            console.warn(
+              `[ConsentApprovalBar] approval state ${phase} failed:`,
+              err,
+            );
+        },
+      });
+      return controller;
+    };
+    const startController = async () => {
+      const controller = createController();
+      approvalController.current = controller;
+      await controller.start();
+    };
+    const retireController = async (controller: ApprovalStateController) => {
+      try {
+        await controller.stop();
+      } catch (error) {
+        // A failed start is already visible. Its matching unsubscribe still
+        // completed when stop returns that same error; any distinct failure
+        // means retirement itself was not clean and blocks replacement.
+        if (error !== admissionFailures.get(controller)) throw error;
+      }
+    };
+    operation = startController();
+    void operation.catch(() => undefined);
+    retryApprovalController.current = () => {
+      operation = operation
+        .catch(() => undefined)
+        .then(async () => {
+          const previous = approvalController.current;
+          if (previous) {
+            approvalController.current = null;
+            await retireController(previous);
+          }
+          if (active) await startController();
+        });
+      void operation.catch(() => undefined);
+      return operation;
+    };
     return () => {
-      approvalController.current = null;
-      void controller.stop().catch((error: unknown) => {
+      active = false;
+      retryApprovalController.current = null;
+      operation = operation
+        .catch(() => undefined)
+        .then(async () => {
+          const controller = approvalController.current;
+          approvalController.current = null;
+          if (controller) await retireController(controller);
+        });
+      void operation.catch((error: unknown) => {
         if (!isRpcConnectionLost(error))
           console.warn(
             "[ConsentApprovalBar] approval state retirement failed:",
@@ -962,8 +1008,8 @@ export function ConsentApprovalBar({
                     size="1"
                     variant="soft"
                     onClick={() =>
-                      void approvalController.current
-                        ?.refresh("manual")
+                      void retryApprovalController
+                        .current?.()
                         .catch(() => undefined)
                     }
                   >
