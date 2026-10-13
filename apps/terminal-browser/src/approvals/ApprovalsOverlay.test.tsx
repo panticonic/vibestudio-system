@@ -447,8 +447,20 @@ describe("ApprovalsOverlay — bounded height", () => {
     expect(text).toContain("21. Request number 20");
     expect(text).not.toContain("1. Request number 0\n");
     expect(text).toMatch(/\d+ above, \d+ below/);
-    expect(text).toContain("[1] once");
+    expect(text).toContain("[1] Allow once");
+    expect(text).toContain("[4] Don't allow");
     expect(text).toContain("PgUp/PgDn scroll");
+  });
+
+  it("numbers only the decisions a critical confirmation accepts", () => {
+    const critical: PendingApproval = {
+      ...capability(0),
+      cardType: "confirm.critical",
+      allowedDecisions: ["once", "deny"],
+    } as PendingApproval;
+    const text = renderToText(<ApprovalsOverlay pending={[critical]} selectedIndex={0} height={14} />);
+    expect(text).toContain("[1] Confirm  [2] Cancel ");
+    expect(text).not.toContain("[3]");
   });
 
   it("scrolls a long install review without moving the decision keys", () => {

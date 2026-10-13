@@ -1,6 +1,5 @@
 import React from "react";
 import { Text } from "ink";
-import type { ApprovalDecisionId } from "@vibestudio/shared/approvalContract";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type {
   TerminalBrowserExit,
@@ -10,6 +9,7 @@ import type {
 } from "@vibestudio/shell-core/terminal/terminalBrowserHost";
 import { createApprovalsClient, type ApprovalsClient } from "./approvals/approvalsClient.js";
 import { ApprovalsOverlay } from "./approvals/ApprovalsOverlay.js";
+import { approvalRequestedBy } from "./approvals/approvalRequester.js";
 import {
   applyInstallReviewNav,
   focusedRowKeyOf,
@@ -76,13 +76,6 @@ import { clampScroll } from "./ui/Scrollable.js";
 const MIN_COLUMNS = 40;
 const MIN_ROWS = 8;
 const MAX_LOG_LINES = 1000;
-
-const DECISION_BY_DIGIT: Record<number, ApprovalDecisionId> = {
-  1: "once",
-  2: "session",
-  3: "version",
-  4: "deny",
-};
 
 interface ListState {
   query: string;
@@ -168,6 +161,12 @@ export class TerminalBrowser {
   private sessionsProblem: string | null = null;
   /** Bumped per applied session list, so a listing older than an event is dropped. */
   private entriesGeneration = 0;
+  /**
+   * The last title a session's program set (OSC 0/2) while it had a tab, by
+   * session id, so its Resume row reads as the tab did. Known only to this
+   * browser: the registry keeps the app's title, not the program's.
+   */
+  private readonly programTitles = new Map<string, string>();
   /** Tabs whose session appeared in a list: only those can be found to have ended. */
   private readonly listedTabs = new WeakSet<ShellSessionTab>();
   private apps: TerminalApp[] | null = null;
@@ -465,7 +464,8 @@ export class TerminalBrowser {
       else overlay.selected = Math.max(0, Math.min(overlay.selected, pending.length - 1));
     } else if (focused && this.settings.autoOpenApprovals && !this.isModalOpen()) {
       const index = pending.findIndex(
-        (approval) => fresh.includes(approval) && requestedBy(approval, focused)
+        (approval) =>
+          fresh.includes(approval) && approvalRequestedBy(approval, focused.entry.principalId)
       );
       if (index !== -1) this.openApprovals(index, `requested by ${focused.title} (this tab)`);
     }
@@ -558,7 +558,9 @@ export class TerminalBrowser {
 
   private tabViews(): TabView[] {
     return this.sessions.map((session, index) => {
-      const approvals = this.approvals.some((approval) => requestedBy(approval, session));
+      const approvals = this.approvals.some((approval) =>
+        approvalRequestedBy(approval, session.entry.principalId)
+      );
       const icon = this.iconFor(session.entry);
       const kind = session.status.kind;
       return {
@@ -924,7 +926,7 @@ export class TerminalBrowser {
       entries.push({
         key: `resume:${entry.sessionId}`,
         section: "Resume",
-        label: `${icon ? `${icon} ` : ""}${entry.title}`,
+        label: `${icon ? `${icon} ` : ""}${this.programTitles.get(entry.sessionId) ?? entry.title}`,
         detail: `${this.kindLabel(entry)} · ${state} · active ${relativeTime(entry.lastActiveAt)}`,
         hint: entry.running ? "running" : "restart",
         run: () => void this.resume(entry),
@@ -1347,7 +1349,7 @@ export class TerminalBrowser {
     } else if (shouldHandleInstallReviewNav(target, nav)) {
       overlay.nav = applyInstallReviewNav(overlay.nav, nav, target.parts);
     } else if (nav && typeof nav === "object" && "digit" in nav) {
-      const route = routeApprovalDigit(target, nav.digit, overlay.nav.selection, DECISION_BY_DIGIT);
+      const route = routeApprovalDigit(target, nav.digit, overlay.nav.selection);
       if (route.via === "resolve") {
         void this.approvalsClient
           .resolve(route.approvalId, route.decision)
@@ -1364,7 +1366,9 @@ export class TerminalBrowser {
 
   private reportApprovalFailure(error: unknown): void {
     this.log("error", `Approval decision failed: ${describeError(error)}`);
-    this.setNotice(`The decision was not recorded: ${describeError(error)}`);
+    this.setNotice(`Your decision was not recorded (details: ${this.prefix()} l)`);
+    // The queue may have moved on (decided elsewhere, withdrawn): show what is waiting now.
+    void this.refreshApprovals();
   }
 
   private onSettingsKey(
@@ -1639,7 +1643,9 @@ export class TerminalBrowser {
     const session = this.sessions[index]!;
     session.setFocused(true);
     if (!this.overlay && this.settings.autoOpenApprovals) {
-      const pendingIndex = this.approvals.findIndex((approval) => requestedBy(approval, session));
+      const pendingIndex = this.approvals.findIndex((approval) =>
+        approvalRequestedBy(approval, session.entry.principalId)
+      );
       if (pendingIndex !== -1)
         this.openApprovals(pendingIndex, `requested by ${session.title} (this tab)`);
     }
@@ -1652,6 +1658,8 @@ export class TerminalBrowser {
     if (index === -1) return;
     session.dispose();
     this.sessions.splice(index, 1);
+    if (session.title !== session.entry.title) this.programTitles.set(session.sessionId, session.title);
+    else this.programTitles.delete(session.sessionId);
     if (this.overlay?.kind === "confirm-close" && this.overlay.sessionId === session.sessionId) {
       this.overlay = null;
     }
@@ -1693,6 +1701,7 @@ export class TerminalBrowser {
     }
     this.removeTab(session);
     this.entries = (this.entries ?? []).filter((entry) => entry.sessionId !== sessionId);
+    this.programTitles.delete(sessionId);
     this.setNotice(`Ended ${session.title}`);
   }
 
@@ -2005,12 +2014,6 @@ function wrappedRows(line: string, width: number): number {
 function characters(text: string): string {
   const count = [...text].length;
   return `${count} character${count === 1 ? "" : "s"}`;
-}
-
-/** Whether an approval was raised by the terminal app running in a tab. */
-function requestedBy(approval: PendingApproval, session: ShellSessionTab): boolean {
-  const principalId = session.entry.principalId;
-  return principalId !== undefined && approval.callerId === principalId;
 }
 
 function relativeTime(timestamp: number): string {

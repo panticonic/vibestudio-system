@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { ApprovalDecisionId } from "@vibestudio/shared/approvalContract";
 import type {
   InstallReviewOrigin,
   InstallReviewPart,
@@ -16,13 +15,6 @@ import {
   shouldHandleInstallReviewNav,
   type PendingUnitInstallReviewApproval,
 } from "./installReviewNav.js";
-
-const GENERIC_DECISION_BY_DIGIT: Record<number, ApprovalDecisionId> = {
-  1: "once",
-  2: "session",
-  3: "version",
-  4: "deny",
-};
 
 function capabilityApproval(): PendingApproval {
   return {
@@ -269,7 +261,7 @@ describe("routeApprovalDigit — where a keypress-decision goes", () => {
     const approval = installReviewApproval([part(0), part(1)]);
     const state = applyInstallReviewNav(INITIAL_INSTALL_REVIEW_NAV, { char: " " }, approval.parts); // deselect part-0
 
-    const route = routeApprovalDigit(approval, 1, state.selection, GENERIC_DECISION_BY_DIGIT);
+    const route = routeApprovalDigit(approval, 1, state.selection);
 
     expect(route).toEqual({
       via: "resolveInstallReview",
@@ -286,7 +278,7 @@ describe("routeApprovalDigit — where a keypress-decision goes", () => {
 
   it("routes decline to a genuine cancel", () => {
     const approval = installReviewApproval([part(0)]);
-    const route = routeApprovalDigit(approval, 4, undefined, GENERIC_DECISION_BY_DIGIT);
+    const route = routeApprovalDigit(approval, 4, undefined);
     expect(route).toEqual({
       via: "resolveInstallReview",
       approvalId: "install-1",
@@ -296,19 +288,42 @@ describe("routeApprovalDigit — where a keypress-decision goes", () => {
 
   it("is inert for a unit-install-review digit this review has no meaning for", () => {
     const approval = installReviewApproval([part(0)]);
-    expect(routeApprovalDigit(approval, 2, undefined, GENERIC_DECISION_BY_DIGIT)).toEqual({
+    expect(routeApprovalDigit(approval, 2, undefined)).toEqual({
       via: "none",
     });
   });
 
-  it("falls back to the generic once/session/version/deny path for every other approval kind", () => {
+  it("resolves the decision the overlay numbered with that digit for every other approval kind", () => {
     const capability = capabilityApproval();
-    const route = routeApprovalDigit(capability, 1, undefined, GENERIC_DECISION_BY_DIGIT);
-    expect(route).toEqual({ via: "resolve", approvalId: "runtime-capability", decision: "once" });
+    expect(routeApprovalDigit(capability, 1, undefined)).toEqual({
+      via: "resolve",
+      approvalId: "runtime-capability",
+      decision: "once",
+    });
+    expect(routeApprovalDigit(capability, 4, undefined)).toEqual({
+      via: "resolve",
+      approvalId: "runtime-capability",
+      decision: "deny",
+    });
+  });
+
+  it("never resolves a decision the approval does not allow", () => {
+    const critical: PendingApproval = {
+      ...capabilityApproval(),
+      cardType: "confirm.critical",
+      allowedDecisions: ["once", "deny"],
+    } as PendingApproval;
+    expect(routeApprovalDigit(critical, 2, undefined)).toEqual({
+      via: "resolve",
+      approvalId: "runtime-capability",
+      decision: "deny",
+    });
+    expect(routeApprovalDigit(critical, 3, undefined)).toEqual({ via: "none" });
+    expect(routeApprovalDigit(critical, 0, undefined)).toEqual({ via: "none" });
   });
 
   it("resolves nothing when there is no focused approval", () => {
-    expect(routeApprovalDigit(undefined, 1, undefined, GENERIC_DECISION_BY_DIGIT)).toEqual({
+    expect(routeApprovalDigit(undefined, 1, undefined)).toEqual({
       via: "none",
     });
   });

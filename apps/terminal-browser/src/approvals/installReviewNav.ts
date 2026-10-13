@@ -12,6 +12,7 @@ import {
   type InstallSelection,
 } from "./ApprovalsOverlay.js";
 import type { NavKey } from "../input/tokenizer.js";
+import { approvalDecisionOptions } from "./approvalDecisions.js";
 
 export type PendingUnitInstallReviewApproval = Extract<
   PendingApproval,
@@ -178,7 +179,7 @@ export function shouldHandleInstallReviewNav(
   return target?.kind === "unit-install-review" && isInstallReviewNavKey(nav);
 }
 
-/** Where a digit keypress on the focused approval goes: the only valid resolution for a `unit-install-review` is `resolveInstallReview` (§8) — the generic once/session/version/deny path is used for every other kind. */
+/** Where a digit keypress on the focused approval goes: the only valid resolution for a `unit-install-review` is `resolveInstallReview` (§8); every other kind resolves the decision its overlay numbered with that digit (`approvalDecisionOptions`). */
 export type ApprovalDigitRoute =
   | { via: "resolveInstallReview"; approvalId: string; resolution: TemplateInstallResolution }
   | { via: "resolve"; approvalId: string; decision: ApprovalDecisionId }
@@ -187,8 +188,7 @@ export type ApprovalDigitRoute =
 export function routeApprovalDigit(
   target: PendingApproval | undefined,
   digit: number,
-  selection: InstallSelection | undefined,
-  genericDecisionByDigit: Record<number, ApprovalDecisionId>
+  selection: InstallSelection | undefined
 ): ApprovalDigitRoute {
   if (!target) return { via: "none" };
   if (target.kind === "unit-install-review") {
@@ -197,6 +197,8 @@ export function routeApprovalDigit(
       ? { via: "resolveInstallReview", approvalId: target.approvalId, resolution }
       : { via: "none" };
   }
-  const decision = genericDecisionByDigit[digit];
-  return decision ? { via: "resolve", approvalId: target.approvalId, decision } : { via: "none" };
+  const option = digit >= 1 ? approvalDecisionOptions(target)[digit - 1] : undefined;
+  return option
+    ? { via: "resolve", approvalId: target.approvalId, decision: option.decision }
+    : { via: "none" };
 }

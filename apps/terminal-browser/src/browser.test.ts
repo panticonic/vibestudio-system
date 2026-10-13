@@ -68,6 +68,7 @@ const SOURCE_TREE = {
 /** The shown workspace as this device's session: the shell extension, the source tree, approvals. */
 class FakeWorkspace {
   approvals: PendingApproval[] = [];
+  /** `approvalId:decision` per resolve call. */
   readonly resolved: string[] = [];
   private approvalStream: ReadableStreamDefaultController<Uint8Array> | null = null;
 
@@ -102,7 +103,7 @@ class FakeWorkspace {
         case "shellApproval.listPending":
           return this.approvals;
         case "shellApproval.resolve":
-          this.resolved.push(String(args[0]));
+          this.resolved.push(`${String(args[0])}:${String(args[1])}`);
           this.approvals = this.approvals.filter((a) => a.approvalId !== args[0]);
           return undefined;
       }
@@ -372,6 +373,20 @@ describe("terminal browser", () => {
     expect(app.shell.attachCalls.at(-1)!.options).toEqual({ size: { cols: 100, rows: 18 } });
   });
 
+  it("lists a detached session under Resume by the title its program last set", async () => {
+    const app = start();
+    const pty = await startEcho(app);
+    app.shell.emit(pty, "\x1b]2;Five-Word Greeting\x07");
+    await until(() => app.tty.tabs().includes("1:🔊 Five-Word Greeting"), "OSC 2 title");
+    app.tty.type(`${PREFIX}d`);
+    await until(() => app.tty.text().includes("Resume"), "listed for resume");
+    const lines = app.tty.text().split("\n");
+    const row = lines.findIndex((line) => line.includes("🔊 Five-Word Greeting"));
+    expect(row).not.toBe(-1);
+    // The app's own title stays in the row's detail.
+    expect(lines[row + 1]).toContain("Echo · running");
+  });
+
   it("shows program titles, badges background attention and passes OSC 52 to the clipboard", async () => {
     const app = start();
     const echo = await startEcho(app);
@@ -481,8 +496,54 @@ describe("terminal browser", () => {
     await until(() => app.tty.text().includes("Approvals (1)"), "approvals overlay");
     expect(app.tty.text()).toContain("requested by Echo (this tab)");
     app.tty.type("1");
-    await until(() => app.workspace.resolved.includes("a1"), "decision");
+    await until(() => app.workspace.resolved.includes("a1:once"), "decision");
     await until(() => !app.tty.text().includes("Approvals (1)"), "overlay closes when queue empties");
+  });
+
+  it("attributes an approval raised by an agent the tab's app started, and numbers only its allowed decisions", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.workspace.approvals = [
+      {
+        kind: "capability",
+        approvalId: "a2",
+        callerId: "do:agents/chat:ChatAgent:1",
+        callerKind: "do",
+        repoPath: "agents/chat",
+        effectiveVersion: "ev",
+        requestedAt: 1,
+        capability: "native.shell.execute",
+        title: "Run a command",
+        cardType: "confirm.critical",
+        allowedDecisions: ["once", "deny"],
+        requester: {
+          id: "do:agents/chat:ChatAgent:1",
+          kind: "do",
+          category: "agent",
+          title: "Chat",
+          repoPath: "agents/chat",
+          effectiveVersion: "ev",
+          stableIdentityKey: "agents/chat@ev",
+          ephemeralInstanceKey: "do:agents/chat:ChatAgent:1",
+          breadcrumbs: [
+            { id: entry.principalId!, kind: "app", category: "workspace-app", label: "Echo" },
+            { id: "do:agents/chat:ChatAgent:1", kind: "do", category: "agent", label: "Chat" },
+          ],
+        },
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approvals (1)"), "approvals overlay");
+    expect(app.tty.text()).toContain("requested by Echo (this tab)");
+    expect(app.tty.text()).toContain("[1] Confirm  [2] Cancel ");
+    expect(app.tty.text()).not.toContain("[3]");
+    app.tty.type("\x1b");
+    await until(() => app.tty.tabs().includes("!"), "badge on the tab");
+    app.tty.type(`${PREFIX}a`);
+    await until(() => app.tty.text().includes("Approvals (1)"), "approvals again");
+    app.tty.type("2");
+    await until(() => app.workspace.resolved.includes("a2:deny"), "denied");
   });
 
   it("returns to the launcher when an overlay closes with nothing open", async () => {

@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
 import { Scrollable } from "../ui/Scrollable.js";
+import { approvalDecisionOptions } from "./approvalDecisions.js";
 import {
   getApprovalCallerPresentation,
   getInstallReviewActionCopy,
@@ -140,7 +141,9 @@ export function ApprovalsOverlay({
       <GenericDetail approval={current} />
     )
   ) : null;
-  const hint = current ? approvalHint(current, focusedRowKey !== undefined) : "";
+  const hint = current
+    ? approvalHint(current, focusedRowKey !== undefined)
+    : { decisions: "", keys: "" };
 
   if (height === undefined) {
     return (
@@ -160,7 +163,8 @@ export function ApprovalsOverlay({
             {current ? (
               <Box flexDirection="column" marginTop={1}>
                 {detail}
-                <Text>{hint}</Text>
+                <Text>{hint.decisions}</Text>
+                <Text>{hint.keys}</Text>
               </Box>
             ) : null}
           </>
@@ -169,7 +173,7 @@ export function ApprovalsOverlay({
     );
   }
 
-  // Bounded layout: border (2) + title (1) + queue window + gap (1) + detail + hint (1).
+  // Bounded layout: border (2) + title (1) + queue window + gap (1) + detail + hint (2).
   const inner = Math.max(4, height - 2);
   const queueRows = Math.min(pending.length, Math.max(1, Math.floor((inner - 3) / 3)));
   const first = Math.min(
@@ -179,7 +183,7 @@ export function ApprovalsOverlay({
   const window = pending.slice(first, first + queueRows);
   const above = first;
   const below = pending.length - first - window.length;
-  const detailRows = Math.max(1, inner - 1 - queueRows - 1 - 1);
+  const detailRows = Math.max(1, inner - 1 - queueRows - 1 - 2);
   return (
     <Box
       flexDirection="column"
@@ -206,7 +210,8 @@ export function ApprovalsOverlay({
           <Scrollable height={detailRows} scroll={detailScroll} onContentHeight={onDetailHeight}>
             {detail}
           </Scrollable>
-          <Text wrap="truncate-end">{`${hint} · PgUp/PgDn scroll`}</Text>
+          <Text wrap="truncate-end">{hint.decisions}</Text>
+          <Text wrap="truncate-end">{`${hint.keys} · PgUp/PgDn scroll`}</Text>
         </>
       )}
     </Box>
@@ -227,16 +232,28 @@ function GenericDetail({ approval }: { approval: PendingApproval }): React.React
 }
 
 /**
- * The keys this approval answers to, shown on screen because an unlabelled
+ * The keys this approval answers to — its decisions on one line, the
+ * navigation keys on the next so long decision words never push them off —
+ * shown on screen because an unlabelled
  * binding is not one a terminal user can discover (§7.6.7's keyboard-complete
- * standard). A `unit-install-review` gets its own row: the accept/decline
+ * standard). Every other kind numbers exactly the decisions it accepts
+ * (`approvalDecisionOptions`), in the words the desktop card uses, and the
+ * digit resolves that same option. A `unit-install-review` gets its own row: the accept/decline
  * words are `getInstallReviewActionCopy`'s (never invented here), and the
  * part/row keys change their own hint once a part is expanded — mirroring
  * `installReviewNav.ts`'s two focus levels.
  */
-function approvalHint(approval: PendingApproval, rowExpanded: boolean): string {
+function approvalHint(
+  approval: PendingApproval,
+  rowExpanded: boolean
+): { decisions: string; keys: string } {
   if (approval.kind !== "unit-install-review") {
-    return "[1] once  [2] session  [3] version  [4] deny  · ↑/↓ select · Esc dismiss";
+    return {
+      decisions: approvalDecisionOptions(approval)
+        .map((option, index) => `[${index + 1}] ${option.label}`)
+        .join("  "),
+      keys: "↑/↓ select · Esc dismiss",
+    };
   }
   const actions = getInstallReviewActionCopy(approval);
   const decisions = [`[1] ${actions.accept.label}`];
@@ -244,7 +261,7 @@ function approvalHint(approval: PendingApproval, rowExpanded: boolean): string {
   const focus = rowExpanded
     ? "←/→ permission  ⎵ toggle permission  ⇥ close part"
     : "←/→ part  ⎵ toggle part  ⇥ open part";
-  return `${decisions.join("  ")}  · ${focus}  · ↑/↓ select · Esc dismiss`;
+  return { decisions: decisions.join("  "), keys: `${focus}  · ↑/↓ select · Esc dismiss` };
 }
 
 /**
