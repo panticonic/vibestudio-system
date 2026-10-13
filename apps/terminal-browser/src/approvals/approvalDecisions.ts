@@ -20,13 +20,16 @@ export interface ApprovalDecisionOption {
  * notifications use; a browser site permission takes the host's own decision
  * set for its capabilities. The input-requiring kinds (a form, a secret, a
  * device code) can only be answered where that input can be entered, so a
- * terminal can only decline them. A `unit-install-review` resolves through
- * `resolveInstallReview` instead and has no options here.
+ * terminal can only decline them. A `unit-install-review` and a `task.rules`
+ * card resolve through `resolveInstallReview` / `resolveTaskRules` instead
+ * (the generic resolve refuses them) and have no options here.
  */
 export function approvalDecisionOptions(approval: PendingApproval): ApprovalDecisionOption[] {
   switch (approval.kind) {
     case "capability":
     case "credential":
+      // A chat-rules card is answered with the rows selected, not a decision id.
+      if (approval.kind === "capability" && approval.cardType === "task.rules") return [];
       return getStandardApprovalDecisionActions(approval).map(({ decision, label }) => ({
         decision,
         label,

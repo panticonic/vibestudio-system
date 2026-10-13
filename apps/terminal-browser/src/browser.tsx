@@ -18,6 +18,14 @@ import {
   shouldHandleInstallReviewNav,
   type InstallReviewNavState,
 } from "./approvals/installReviewNav.js";
+import {
+  applyTaskRulesNav,
+  effectiveTaskRuleSelection,
+  INITIAL_TASK_RULES_NAV,
+  isTaskRulesApproval,
+  shouldHandleTaskRulesNav,
+  type TaskRulesNavState,
+} from "./approvals/taskRulesNav.js";
 import { Compositor } from "./compositor/compositor.js";
 import { InkLayer } from "./compositor/inkLayer.js";
 import type { CursorState, Rect, Screen } from "./compositor/screen.js";
@@ -91,6 +99,7 @@ type Overlay =
       scroll: number;
       contentHeight: number;
       nav: InstallReviewNavState;
+      taskRules: TaskRulesNavState;
       origin?: string;
     }
   | { kind: "help"; scroll: number; contentHeight: number }
@@ -906,6 +915,12 @@ export class TerminalBrowser {
 
   private installReviewProps(overlay: Extract<Overlay, { kind: "approvals" }>) {
     const current = this.approvals[overlay.selected];
+    if (isTaskRulesApproval(current)) {
+      return {
+        taskRuleSelection: effectiveTaskRuleSelection(current, overlay.taskRules),
+        taskRuleFocus: overlay.taskRules.rowIndex,
+      };
+    }
     if (current?.kind !== "unit-install-review") return {};
     const rowKey = focusedRowKeyOf(overlay.nav, current.parts);
     return {
@@ -1339,6 +1354,7 @@ export class TerminalBrowser {
       overlay.selected = Math.min(Math.max(0, next), Math.max(0, this.approvals.length - 1));
       overlay.scroll = 0;
       overlay.nav = INITIAL_INSTALL_REVIEW_NAV;
+      overlay.taskRules = INITIAL_TASK_RULES_NAV;
     } else if (nav === "pageup" || nav === "pagedown") {
       const next = overlay.scroll + (nav === "pageup" ? -detailRows : detailRows);
       overlay.scroll = clampScroll(next, overlay.contentHeight, detailRows);
@@ -1348,11 +1364,18 @@ export class TerminalBrowser {
       overlay.scroll = clampScroll(Number.MAX_SAFE_INTEGER, overlay.contentHeight, detailRows);
     } else if (shouldHandleInstallReviewNav(target, nav)) {
       overlay.nav = applyInstallReviewNav(overlay.nav, nav, target.parts);
+    } else if (shouldHandleTaskRulesNav(target, nav)) {
+      overlay.taskRules = applyTaskRulesNav(overlay.taskRules, nav, target);
     } else if (nav && typeof nav === "object" && "digit" in nav) {
-      const route = routeApprovalDigit(target, nav.digit, overlay.nav.selection);
+      const route = routeApprovalDigit(target, nav.digit, overlay.nav.selection, overlay.taskRules);
       if (route.via === "resolve") {
         void this.approvalsClient
           .resolve(route.approvalId, route.decision)
+          .then(() => this.refreshApprovals())
+          .catch((error: unknown) => this.reportApprovalFailure(error));
+      } else if (route.via === "resolveTaskRules") {
+        void this.approvalsClient
+          .resolveTaskRules(route.approvalId, route.resolution)
           .then(() => this.refreshApprovals())
           .catch((error: unknown) => this.reportApprovalFailure(error));
       } else if (route.via === "resolveInstallReview") {
@@ -1471,6 +1494,7 @@ export class TerminalBrowser {
       scroll: 0,
       contentHeight: 0,
       nav: INITIAL_INSTALL_REVIEW_NAV,
+      taskRules: INITIAL_TASK_RULES_NAV,
       ...(origin ? { origin } : {}),
     };
   }

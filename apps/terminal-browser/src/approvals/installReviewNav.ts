@@ -13,6 +13,12 @@ import {
 } from "./ApprovalsOverlay.js";
 import type { NavKey } from "../input/tokenizer.js";
 import { approvalDecisionOptions } from "./approvalDecisions.js";
+import {
+  isTaskRulesApproval,
+  resolveTaskRulesDigit,
+  type TaskRulesNavState,
+  type TaskRulesResolution,
+} from "./taskRulesNav.js";
 
 export type PendingUnitInstallReviewApproval = Extract<
   PendingApproval,
@@ -182,15 +188,23 @@ export function shouldHandleInstallReviewNav(
 /** Where a digit keypress on the focused approval goes: the only valid resolution for a `unit-install-review` is `resolveInstallReview` (§8); every other kind resolves the decision its overlay numbered with that digit (`approvalDecisionOptions`). */
 export type ApprovalDigitRoute =
   | { via: "resolveInstallReview"; approvalId: string; resolution: TemplateInstallResolution }
+  | { via: "resolveTaskRules"; approvalId: string; resolution: TaskRulesResolution }
   | { via: "resolve"; approvalId: string; decision: ApprovalDecisionId }
   | { via: "none" };
 
 export function routeApprovalDigit(
   target: PendingApproval | undefined,
   digit: number,
-  selection: InstallSelection | undefined
+  selection: InstallSelection | undefined,
+  taskRules: TaskRulesNavState
 ): ApprovalDigitRoute {
   if (!target) return { via: "none" };
+  if (isTaskRulesApproval(target)) {
+    const resolution = resolveTaskRulesDigit(digit, target, taskRules);
+    return resolution
+      ? { via: "resolveTaskRules", approvalId: target.approvalId, resolution }
+      : { via: "none" };
+  }
   if (target.kind === "unit-install-review") {
     const resolution = resolveInstallReviewDigit(digit, target, selection);
     return resolution
