@@ -122,7 +122,7 @@ in `meta/vibestudio.yml` names the app the CLI opens.
 A terminal client app is trusted chrome, not something people run inside it.
 The programs people start in the terminal browser are terminal apps (panels
 hosted by terminals, at `terminal-apps/<name>`): untrusted Node programs in
-workspace PTYs. See [the terminal-apps skill](../terminal-apps/SKILL.md).
+workspace PTYs. See the Base `terminal-apps` skill (`skills/terminal-apps/SKILL.md`).
 
 The server emits `apps:available` with `launchMode: "client-module"`.
 
