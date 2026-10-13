@@ -1141,16 +1141,14 @@ export async function activate(ctx: Ctx) {
     };
   }
 
-  /** Credentials stay in the trusted DO execution plane. Class names do not
-   * grant authority; outbound access requires the host's sealed runtime-use
-   * capability and the provider's current endpoint/key attestation. */
-  function assertLoopbackAuthCaller(): void {
+  /** Runtime credentials stay in the trusted host execution plane. The host
+   * re-attests the exact loaded model on every outbound request; public
+   * extension invocations never receive the endpoint or bearer secret. */
+  function assertRuntimeAttestationCaller(): void {
     const invocation = ctx.invocation?.current();
-    if (!invocation) return; // Direct trusted host calls have no userland invocation.
-    const caller = invocation.chainCaller ?? invocation.caller;
-    if (caller.callerKind !== "do") {
+    if (invocation?.caller.callerKind !== "server") {
       throw new Error(
-        `getLoopbackAuth: refused for caller kind "${caller.callerKind}"`,
+        `attestRuntime: refused for caller kind "${invocation?.caller.callerKind ?? "none"}"`,
       );
     }
   }
@@ -1234,16 +1232,21 @@ export async function activate(ctx: Ctx) {
       );
     },
 
-    async getLoopbackAuth(): Promise<{ apiKey: string; origins: string[] }> {
-      assertLoopbackAuthCaller();
-      await awaitInvocation(ensureBootstrap());
-      const apiKey = await awaitInvocation(supervisor.apiKey());
-      const origins = Object.values(
-        await awaitInvocation(supervisor.status()),
-      ).flatMap((server) =>
-        server.state === "running" ? [`http://127.0.0.1:${server.port}`] : [],
-      );
-      return { apiKey, origins };
+    async attestRuntime(
+      modelId: string,
+    ): Promise<{ baseUrl: string; apiKey: string }> {
+      assertRuntimeAttestationCaller();
+      const slug = bareSlug(modelId);
+      const kind: ServerKind =
+        slug === FALLBACK_MODEL.slug ? "utility" : "main";
+      const server = (await awaitInvocation(supervisor.status()))[kind];
+      if (server.state !== "running" || !server.loadedModels.includes(slug)) {
+        throw new Error(`Local model ${slug} is not currently loaded`);
+      }
+      return {
+        baseUrl: `http://127.0.0.1:${server.port}/v1`,
+        apiKey: await awaitInvocation(supervisor.apiKey()),
+      };
     },
 
     async getHardwareProfile(refresh?: boolean): Promise<HardwareProfile> {

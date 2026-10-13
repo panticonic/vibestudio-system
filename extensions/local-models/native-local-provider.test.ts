@@ -93,20 +93,16 @@ describe("native local provider admission", () => {
         async call(...invocation: Parameters<RpcWireCaller["call"]>) {
           const [_target, method, args, options] = invocation;
           options?.signal?.throwIfAborted();
-          expect(method).toBe("extensions.invoke");
-          expect(args[0]).toBe("@workspace-extensions/local-models");
-          invoked.push(String(args[1]));
-          const value =
-            args[1] === "ensureLoaded"
-              ? { baseUrl: "http://127.0.0.1:32123/v1" }
-              : args[1] === "getLoopbackAuth"
-                ? {
-                    apiKey: "component-loopback-key",
-                    origins: ["http://127.0.0.1:32123"],
-                  }
-                : undefined;
-          if (!value) throw new Error("Unexpected local method");
-          return value;
+          expect(method).toBe("localModelRuntime.prepareNativeModel");
+          expect(args).toEqual([
+            {
+              providerId: "local",
+              modelId: FALLBACK_MODEL.slug,
+              endpoint: "http://127.0.0.1:0/v1",
+            },
+          ]);
+          invoked.push(method);
+          return { baseUrl: "http://127.0.0.1:32123/v1" };
         },
         stream: () => {
           throw new Error("Component has no RPC stream");
@@ -127,7 +123,7 @@ describe("native local provider admission", () => {
           registry,
           publishWake: async () => {},
           modelRequests: createProtectedModelProvider({
-            rpcForRequest: () => ({rpc,cleanupRpc:rpc}),
+            rpcForRequest: () => ({ rpc, cleanupRpc: rpc }),
             waitForAuthority: async () => {
               throw new Error("Unexpected component approval");
             },
@@ -135,9 +131,9 @@ describe("native local provider admission", () => {
               expect(String(input)).toBe(
                 "http://127.0.0.1:32123/v1/chat/completions",
               );
-              expect(new Headers(init?.headers).get("authorization")).toBe(
-                "Bearer component-loopback-key",
-              );
+              expect(
+                new Headers(init?.headers).get("authorization"),
+              ).toBeNull();
               requests++;
               const delta =
                 requests === 1
@@ -212,12 +208,10 @@ describe("native local provider admission", () => {
         expect(invoked).toEqual(
           toolsCapable
             ? [
-                "ensureLoaded",
-                "getLoopbackAuth",
-                "ensureLoaded",
-                "getLoopbackAuth",
+                "localModelRuntime.prepareNativeModel",
+                "localModelRuntime.prepareNativeModel",
               ]
-            : ["ensureLoaded", "getLoopbackAuth"],
+            : ["localModelRuntime.prepareNativeModel"],
         );
       } finally {
         await session.close(BACKGROUND_CONTEXT);

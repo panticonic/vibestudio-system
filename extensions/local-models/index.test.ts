@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +23,13 @@ interface TestDownloadRequest {
   slug?: string;
   hfRepo: string;
   file: string;
+}
+
+interface TestServerState {
+  state: string;
+  port: number;
+  loadedModels?: string[];
+  uptimeMs?: number;
 }
 
 const modelLibraryMock = vi.hoisted(() => {
@@ -171,9 +178,11 @@ const supervisorMock = vi.hoisted(() => {
       gpuLayers: 0,
     })),
     dispose: vi.fn<() => Promise<void>>(async () => {}),
-    status: vi.fn(() => ({
-      utility: { state: "stopped" as string, port: 8080 },
-      main: { state: "stopped" as string, port: 8081 },
+    status: vi.fn<
+      () => { utility: TestServerState; main: TestServerState }
+    >(() => ({
+      utility: { state: "stopped", port: 8080 },
+      main: { state: "stopped", port: 8081 },
     })),
     reset(): void {
       state.ensureLoaded.mockClear();
@@ -256,6 +265,34 @@ vi.mock("./benchmark.js", () => ({
 }));
 
 describe("local-models extension", () => {
+  it("exposes only read-only model discovery to website causal chains", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+    ) as {
+      vibestudio: {
+        extension: {
+          methodAuthority: Record<
+            string,
+            { website: { kind: string; rationale?: string; reason?: string } }
+          >;
+        };
+      };
+    };
+    const methods = manifest.vibestudio.extension.methodAuthority;
+    expect(methods["listModels"]?.website).toEqual({
+      kind: "eligible",
+      rationale:
+        "Returns read-only model availability metadata; it neither starts processes nor returns loopback credentials.",
+    });
+    expect(methods["ensureLoaded"]?.website.kind).toBe("closed");
+    expect(methods["attestRuntime"]?.website.kind).toBe("closed");
+    expect(
+      Object.entries(methods)
+        .filter(([, authority]) => authority.website.kind === "eligible")
+        .map(([method]) => method),
+    ).toEqual(["listModels"]);
+  });
+
   it("joins an admitted benchmark body after disposal cancels its actual fetch scope", async () => {
     const owned: Array<{ dispose(): void | Promise<void> }> = [];
     let finish!: () => void;
@@ -545,9 +582,11 @@ describe("local-models extension", () => {
     );
 
     engineMock.fail = false;
-    await expect(api.getLoopbackAuth()).resolves.toEqual({
-      apiKey: "test-key",
-      origins: [],
+    const recovered = fallbackRecord();
+    modelLibraryMock.library.ensureFallback.mockResolvedValueOnce(recovered);
+    modelLibraryMock.library.get.mockResolvedValue(recovered);
+    await expect(api.ensureLoaded(FALLBACK_MODEL.ref)).resolves.toEqual({
+      baseUrl: "http://127.0.0.1:8080/v1",
     });
     expect(engineMock.ensureInstalled.mock.calls.length).toBeGreaterThanOrEqual(
       3,
@@ -562,8 +601,8 @@ describe("local-models extension", () => {
     ]);
   });
 
-  it.each(["panel", "app", "worker", "user"])(
-    "refuses loopback credentials to %s callers",
+  it.each(["panel", "app", "worker", "do", "extension", "user"])(
+    "refuses runtime attestations to %s callers",
     async (callerKind) => {
       const { activate } = await import("./index.js");
       const api = await activate({
@@ -575,7 +614,7 @@ describe("local-models extension", () => {
           }),
         },
       } as never);
-      await expect(api.getLoopbackAuth()).rejects.toThrow(
+      await expect(api.attestRuntime(FALLBACK_MODEL.ref)).rejects.toThrow(
         "refused for caller kind",
       );
     },
@@ -588,29 +627,50 @@ describe("local-models extension", () => {
       emit: vi.fn(),
       invocation: {
         current: () => ({
-          caller: {
-            callerKind: "do",
-            callerId: "do:workers/custom:Processor:test",
-          },
+          caller: { callerKind: "server", callerId: "main" },
         }),
       },
     } as never);
     supervisorMock.status.mockReturnValue({
-      utility: { state: "running", port: 8123 },
+      utility: {
+        state: "running",
+        port: 8123,
+        loadedModels: [FALLBACK_MODEL.slug],
+        uptimeMs: 10,
+      },
       main: { state: "starting", port: 8124 },
     });
-    await expect(api.getLoopbackAuth()).resolves.toEqual({
+    await expect(api.attestRuntime(FALLBACK_MODEL.ref)).resolves.toEqual({
       apiKey: "test-key",
-      origins: ["http://127.0.0.1:8123"],
+      baseUrl: "http://127.0.0.1:8123/v1",
     });
     supervisorMock.status.mockReturnValue({
       utility: { state: "stopped", port: 8123 },
-      main: { state: "running", port: 8125 },
+      main: {
+        state: "running",
+        port: 8125,
+        loadedModels: ["another-model"],
+        uptimeMs: 20,
+      },
     });
-    await expect(api.getLoopbackAuth()).resolves.toEqual({
+    await expect(api.attestRuntime("local:another-model")).resolves.toEqual({
       apiKey: "test-key",
-      origins: ["http://127.0.0.1:8125"],
+      baseUrl: "http://127.0.0.1:8125/v1",
     });
+    await expect(api.attestRuntime("local:stale-model")).rejects.toThrow(
+      "is not currently loaded",
+    );
+  });
+
+  it("refuses runtime attestation without an authenticated host invocation", async () => {
+    const { activate } = await import("./index.js");
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+    });
+    await expect(api.attestRuntime(FALLBACK_MODEL.ref)).rejects.toThrow(
+      'caller kind "none"',
+    );
   });
 
   it("awaits installation while exposing progress before it becomes usable", async () => {

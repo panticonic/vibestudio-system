@@ -411,7 +411,16 @@ describe("projectTranscript", () => {
         effectiveVersion: "state:author", className: "Agent", objectKey: "author", executionDigest: "a".repeat(64),
       },
       task: { conversationId: 1, taskId: 3, kind: "pi.model", version: 1 },
-      operation: { kind: "model", purpose: "generation", attempt: 1, cutoff: 2, requestDigest: "b".repeat(64) },
+      operation: {
+        kind: "model",
+        purpose: "generation",
+        attempt: 1,
+        cutoff: 2,
+        providerId: "openai-codex",
+        modelId: "gpt-6-luna",
+        endpoint: null,
+        requestDigest: "b".repeat(64),
+      },
     };
     const state = stateWith([], {
       invocations: [{

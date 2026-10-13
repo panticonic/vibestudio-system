@@ -25,6 +25,14 @@ function stubCtx() {
         console.log(msg, data !== undefined ? JSON.stringify(data) : ""),
     },
     emit: () => {},
+    invocation: {
+      current: () => ({
+        requestId: "local-model-live-e2e",
+        extensionName: "@workspace-extensions/local-models",
+        method: "attestRuntime",
+        caller: { callerKind: "server" as const, callerId: "main" },
+      }),
+    },
   };
 }
 
@@ -42,8 +50,8 @@ describe.runIf(RUN)("local-models live e2e", () => {
 
       // First ensureLoaded is the demand that downloads the GGUF (design §11.2
       // scenario 1) and warms the utility server — the long pole on a cold box.
-      const { baseUrl } = await api.ensureLoaded(FALLBACK_MODEL.slug);
-      const { apiKey } = await api.getLoopbackAuth();
+      await api.ensureLoaded(FALLBACK_MODEL.slug);
+      const { baseUrl, apiKey } = await api.attestRuntime(FALLBACK_MODEL.slug);
 
       const status = await api.status();
       expect(
