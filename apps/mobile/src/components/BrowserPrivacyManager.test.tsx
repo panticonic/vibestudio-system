@@ -1,5 +1,5 @@
 import { Alert } from "react-native";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import type { ShellClient } from "../services/shellClient";
 import { BrowserPrivacyManager } from "./BrowserPrivacyManager";
 
@@ -88,7 +88,8 @@ describe("BrowserPrivacyManager", () => {
 
     fireEvent.press(view.getAllByText("Delete")[0]!);
 
-    await waitFor(() => expect(client.deletePassword).toHaveBeenCalledWith(1));
+    await view.findByText("Saved password deleted.");
+    expect(client.deletePassword).toHaveBeenCalledWith(1);
     expect(client.listPasswordSummariesPage).toHaveBeenCalledTimes(2);
     expect(view.getByText("Saved password deleted.")).toBeTruthy();
   });
@@ -105,11 +106,12 @@ describe("BrowserPrivacyManager", () => {
     fireEvent.changeText(view.getByLabelText("Value"), "person@example.com");
     fireEvent.press(view.getByText("Add value"));
 
-    await waitFor(() => expect(client.addFormFillValue).toHaveBeenCalledWith({
+    await view.findByText("Form-fill value saved.");
+    expect(client.addFormFillValue).toHaveBeenCalledWith({
       fieldName: "email",
       type: "email",
       value: "person@example.com",
-    }));
+    });
     expect(view.getByText("Form-fill value saved.")).toBeTruthy();
   });
 
@@ -144,16 +146,27 @@ describe("BrowserPrivacyManager", () => {
     fireEvent.press(view.getAllByText("Edit")[0]!);
     fireEvent.changeText(view.getByLabelText("Value"), "new@example.com");
     fireEvent.changeText(view.getByLabelText("Label (optional)"), "");
+    let finishRefresh!: (page: { items: typeof row[]; total: number }) => void;
+    listFormFillValuesPage.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRefresh = resolve;
+    }));
     fireEvent.press(view.getByText("Save changes"));
-    await waitFor(() => expect(client.updateFormFillValue).toHaveBeenCalledWith(7, {
+    await waitFor(() => expect(listFormFillValuesPage).toHaveBeenCalledTimes(3));
+    expect(view.queryByText("Form-fill value updated.")).toBeNull();
+    expect(view.getAllByRole("button", { name: "Delete" })[0]!.props.accessibilityState.disabled).toBe(true);
+    await act(async () => finishRefresh({ items: [row], total: 2 }));
+    await view.findByText("Form-fill value updated.");
+    expect(client.updateFormFillValue).toHaveBeenCalledWith(7, {
       value: "new@example.com",
       displayLabel: "",
-    }));
+    });
 
     fireEvent.press(view.getAllByText("Delete")[0]!);
-    await waitFor(() => expect(client.deleteFormFillValue).toHaveBeenCalledWith(7));
+    await view.findByText("Form-fill value deleted.");
+    expect(client.deleteFormFillValue).toHaveBeenCalledWith(7);
     fireEvent.press(view.getByText("Clear all"));
-    await waitFor(() => expect(client.clearFormFillValues).toHaveBeenCalledTimes(1));
+    await view.findByText("All form-fill values cleared.");
+    expect(client.clearFormFillValues).toHaveBeenCalledTimes(1);
   });
 
   it("paginates cookie origins and confirms session-wide mutations", async () => {
@@ -174,9 +187,11 @@ describe("BrowserPrivacyManager", () => {
     expect(listCookieOriginsPage).toHaveBeenNthCalledWith(2, 1, 25);
 
     fireEvent.press(view.getByText("End session"));
-    await waitFor(() => expect(client.endBrowserSession).toHaveBeenCalledTimes(1));
+    await view.findByText("Browser session ended.");
+    expect(client.endBrowserSession).toHaveBeenCalledTimes(1);
     fireEvent.press(view.getByText("Clear all cookies"));
-    await waitFor(() => expect(client.clearAllCookies).toHaveBeenCalledTimes(1));
+    await view.findByText("All browser cookies cleared.");
+    expect(client.clearAllCookies).toHaveBeenCalledTimes(1);
   });
 
   it("renders service failures as an accessible error", async () => {

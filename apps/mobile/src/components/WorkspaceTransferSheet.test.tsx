@@ -81,21 +81,24 @@ it.each([false, true])(
     expect(execute).not.toHaveBeenCalled();
     expect(view.getByText(/Alice, Bob/)).toBeTruthy();
     fireEvent.press(view.getByText("Copy to review branch"));
-    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-    expect(reviewWithAgent).not.toHaveBeenCalled();
     if (fails) {
       await waitFor(() =>
         expect(view.getByText(/Some selected files may already/)).toBeTruthy(),
       );
       expect(view.queryByText("Copy to review branch")).toBeNull();
       expect(view.getByText("Make a fresh review")).toBeTruthy();
+    } else {
+      await view.findByText("Copied into a review branch");
     }
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(reviewWithAgent).not.toHaveBeenCalled();
     fireEvent.press(
       view.getByText(
         fails ? "Check review branch with agent" : "Review with agent",
       ),
     );
-    await waitFor(() => expect(reviewWithAgent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(reviewWithAgent).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalled();
   },
 );
