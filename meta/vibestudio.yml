@@ -16,7 +16,7 @@ hostTargets:
       - extensions/react-native
   terminal:
     app: apps/remote-cli
-minimumAppVersion: 0.1.84
+minimumAppVersion: 0.1.105
 services:
   - name: phone.provisioning
     source: workers/phone-provisioning

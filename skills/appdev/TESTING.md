@@ -137,6 +137,9 @@ Watch for regressions in:
 - shell app identity: app principal vs shell host authority
 - layout model: host chrome vs panel content
 - event delivery: local IPC subscriber and server replay
+- reconnect recovery while the transport is already reporting `connected`:
+  long-lived RPC observers must resubscribe from `rpc.onRecovery`, since a
+  status transition alone does not report every completed server generation
 - mobile bootstrap: no credentials yet vs already paired
 - remote startup: revoked device credential recovery
 - platform-specific RN artifacts

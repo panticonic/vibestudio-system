@@ -67,6 +67,18 @@ async function connect(appId: string, logSink: LogSink) {
     selfId: appId,
     callerKind: "app",
     transport,
+    onRecovery: (handler) => {
+      const stopResubscribe = transport.onRecovery("resubscribe", () =>
+        handler("resubscribe"),
+      );
+      const stopColdRecover = transport.onRecovery("cold-recover", () =>
+        handler("cold-recover"),
+      );
+      return () => {
+        stopResubscribe();
+        stopColdRecover();
+      };
+    },
   });
 
   transport.onStatusChange?.((status) => {

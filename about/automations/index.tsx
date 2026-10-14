@@ -1093,6 +1093,14 @@ function AutomationsPage() {
 
   useEffect(() => {
     const controller = new AbortController();
+    const stopRecovery = rpc.onRecovery(() => {
+      // A reconnect may complete without leaving `connected`. Retire the
+      // current long poll and invalidate its snapshot before opening a fresh
+      // observation against the recovered server generation.
+      overviewRequest.current += 1;
+      controller.abort();
+      setObservationAttempt((attempt) => attempt + 1);
+    });
     void (async () => {
       try {
         // Establish the owner's version before reading the initial snapshot.
@@ -1122,7 +1130,10 @@ function AutomationsPage() {
         }
       }
     })();
-    return () => controller.abort();
+    return () => {
+      stopRecovery();
+      controller.abort();
+    };
   }, [load, observationAttempt]);
 
   const action = useCallback(

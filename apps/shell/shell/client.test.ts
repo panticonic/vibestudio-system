@@ -372,11 +372,14 @@ it("recovers only the addressed workspace and retires its recovery listeners on 
   const project = await module.createWorkspaceShellClient("project");
   const systemReplay = vi.fn(),
     projectReplay = vi.fn();
+  const projectRecovery = vi.fn();
+  state.clients[1]!.onRecovery(projectRecovery);
   state.recoveries[0]!.registerResubscribeHandler("test", systemReplay);
   state.recoveries[1]!.registerResubscribeHandler("test", projectReplay);
   await Promise.all(
     [...handlers.get("resubscribe")!].map((handler) => handler("project")),
   );
+  expect(projectRecovery).toHaveBeenCalledOnce();
   expect(projectReplay).toHaveBeenCalledOnce();
   expect(systemReplay).not.toHaveBeenCalled();
   project.close();
