@@ -41,11 +41,11 @@ vi.mock("../shell/useShellEvent", async () => {
   };
 });
 import {
-  ProblemReportingSection,
   useReportingSetup,
   ReportingFirstUse,
   useReportingReady,
 } from "./ProblemReporting";
+import { ProblemReportingSection } from "./ProblemReportingSection";
 import type { ShellWorkspaceClient } from "../shell/workspaceClient";
 const decision = {
   state: "undecided",

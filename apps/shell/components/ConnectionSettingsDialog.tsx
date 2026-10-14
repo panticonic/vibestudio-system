@@ -51,7 +51,7 @@ const WorkspaceConnectionsSection = deferredFeature(async () => ({
   default: (await import("./WorkspaceConnectionsSection")).WorkspaceConnectionsSection,
 }));
 const ProblemReportingSection = deferredFeature(async () => ({
-  default: (await import("./ProblemReporting")).ProblemReportingSection,
+  default: (await import("./ProblemReportingSection")).ProblemReportingSection,
 }));
 
 type LiveConnection = {
