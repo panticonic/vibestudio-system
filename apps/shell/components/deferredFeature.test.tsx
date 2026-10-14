@@ -5,6 +5,20 @@ import { describe, expect, it, vi } from "vitest";
 import { deferredFeature } from "./deferredFeature";
 
 describe("operation-owned feature loading", () => {
+  it("preserves optional defaulted component props across the lazy boundary", async () => {
+    const Feature = deferredFeature(async () => ({
+      default: ({ heading = true }: { heading?: boolean } = {}) => (
+        <div>{heading ? "Heading shown" : "Heading hidden"}</div>
+      ),
+    }));
+    render(
+      <Theme>
+        <Feature heading={false} />
+      </Theme>
+    );
+    expect(await screen.findByText("Heading hidden")).toBeTruthy();
+  });
+
   it("does not import a closed operation and loads its real component when opened", async () => {
     const load = vi.fn(async () => ({
       default: ({ label }: { label: string }) => <div>{label}</div>,
@@ -33,7 +47,7 @@ describe("operation-owned feature loading", () => {
         </Theme>
       );
       expect(await screen.findByText(failure.message)).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: "Retry", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
       expect(await screen.findByText("Recovered feature")).toBeTruthy();
       expect(load).toHaveBeenCalledTimes(2);
     } finally {

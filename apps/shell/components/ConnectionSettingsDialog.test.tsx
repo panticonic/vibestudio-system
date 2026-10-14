@@ -78,7 +78,7 @@ describe("ConnectionSettingsDialog", () => {
     if (!apply) throw new Error("Pairing-link listener is not mounted");
     act(() => apply({
       endpointId: "ab".repeat(32),
-      relays: ["https://relay.example.test"],
+      relays: ["https://relay.example.test/"],
       code: "A".repeat(22),
       v: 5,
     }));
