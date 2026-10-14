@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { describe, expect, it, vi } from "vitest";
+import { incomingPairLink } from "../shell/client";
 
 vi.mock("../shell/client", () => ({
   app: {
@@ -65,6 +66,25 @@ vi.mock("./WorkspaceConnectionsSection", () => ({
 const { ConnectionSettingsDialog } = await import("./ConnectionSettingsDialog");
 
 describe("ConnectionSettingsDialog", () => {
+  it("keeps pairing-link admission mounted while optional settings content is closed", () => {
+    const onSectionChange = vi.fn();
+    render(
+      <Theme>
+        <ConnectionSettingsDialog section={null} onSectionChange={onSectionChange} />
+      </Theme>,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const apply = vi.mocked(incomingPairLink.onLink).mock.lastCall?.[0];
+    if (!apply) throw new Error("Pairing-link listener is not mounted");
+    act(() => apply({
+      endpointId: "ab".repeat(32),
+      relays: ["https://relay.example.test"],
+      code: "A".repeat(22),
+      v: 5,
+    }));
+    expect(onSectionChange).toHaveBeenCalledWith("connection");
+  });
+
   it("keeps replacement pairing out of the active connection's happy path", async () => {
     render(
       <Theme>
@@ -125,7 +145,7 @@ describe("ConnectionSettingsDialog", () => {
     });
     expect(onSectionChange).toHaveBeenCalledWith("devices");
     rerender(renderDialog("devices"));
-    expect(screen.getByText("Device access settings")).toBeTruthy();
+    expect(await screen.findByText("Device access settings")).toBeTruthy();
     expect(
       screen.queryByText(
         /Currently connected to your server \(device device-1\)/i,
@@ -133,18 +153,18 @@ describe("ConnectionSettingsDialog", () => {
     ).toBeNull();
 
     rerender(renderDialog("workspaces"));
-    expect(screen.getByText("Workspace connection settings")).toBeTruthy();
+    expect(await screen.findByText("Workspace connection settings")).toBeTruthy();
 
     rerender(renderDialog("profile"));
-    expect(screen.getByText("Account profile settings")).toBeTruthy();
+    expect(await screen.findByText("Account profile settings")).toBeTruthy();
     rerender(renderDialog("appearance"));
-    expect(screen.getByText("Appearance settings")).toBeTruthy();
+    expect(await screen.findByText("Appearance settings")).toBeTruthy();
     rerender(renderDialog("apps"));
-    expect(screen.getByText("Workspace app settings")).toBeTruthy();
+    expect(await screen.findByText("Workspace app settings")).toBeTruthy();
     rerender(renderDialog("hosts"));
-    expect(screen.getByText("Host app settings")).toBeTruthy();
+    expect(await screen.findByText("Host app settings")).toBeTruthy();
     rerender(renderDialog("templates"));
-    expect(screen.getByText("Template settings")).toBeTruthy();
+    expect(await screen.findByText("Template settings")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
     expect(onSectionChange).toHaveBeenCalledWith(null);
   });
