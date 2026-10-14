@@ -1407,9 +1407,18 @@ export class ShellClient {
     this.serverEndpointId = config.serverEndpointId.toLowerCase();
     this.onReadinessChange = config.onReadinessChange;
     this.serverUrl = MOBILE_SERVER_LOOPBACK_ORIGIN;
+    this.recovery = createRecoveryCoordinator();
     // Remote RPC uses the stored Iroh endpoint identity and device credential.
     this.transport = new MobileRpcClient({
-      connectWorkspace: config.connectWorkspace,
+      connectWorkspace: config.connectWorkspace
+        ? (onRecovery) =>
+            config.connectWorkspace!(async (kind) => {
+              onRecovery(kind);
+              await this.recovery.run(kind);
+              smokePhase("workspace-recovery-complete", { kind });
+              this.emitRecoveryComplete(kind);
+            })
+        : undefined,
     });
     this.browserImportProvider = config.appSourceClient
       ? null
@@ -1433,17 +1442,6 @@ export class ShellClient {
     if (config.onStatusChange) {
       this.statusUnsub = this.transport.onStatusChange(config.onStatusChange);
     }
-    this.recovery = createRecoveryCoordinator();
-    this.transport.onRecovery("resubscribe", async () => {
-      await this.recovery.run("resubscribe");
-      smokePhase("workspace-recovery-complete", { kind: "resubscribe" });
-      this.emitRecoveryComplete("resubscribe");
-    });
-    this.transport.onRecovery("cold-recover", async () => {
-      await this.recovery.run("cold-recover");
-      smokePhase("workspace-recovery-complete", { kind: "cold-recover" });
-      this.emitRecoveryComplete("cold-recover");
-    });
     this.panels = new MobilePanels({
       serverUrl: MOBILE_SERVER_LOOPBACK_ORIGIN,
       transport: this.transport,

@@ -7,7 +7,10 @@ import {
 } from "@vibestudio/rpc";
 import { createPortal } from "react-dom";
 import { approvalPresentationKey } from "@vibestudio/shared/approvalPresentation";
-import { useApprovalPresentation } from "./ApprovalPresentationContext";
+import {
+  useApprovalPresentation,
+  type WindowInstallResult,
+} from "./ApprovalPresentationContext";
 import {
   useShellWorkspaceClient,
   useWorkspaceVisible,
@@ -41,8 +44,8 @@ import type {
   PendingApproval,
 } from "@vibestudio/shared/approvals";
 import { getApprovalCopy } from "@vibestudio/shared/approvalCopy";
-import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
 import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
+import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
 import {
   createApprovalStateController,
   type ApprovalStateController,
@@ -147,26 +150,14 @@ export function ConsentApprovalBar({
   /**
    * What came of the last install review (§7.2, "Result").
    *
-   * It has to be held here rather than in the review, because the review is
-   * gone by the time there is anything to say: accepting removes the approval
-   * from the queue and unmounts the card that asked. This state is what lets
-   * `News added` / `Open News →` exist at all, and it is deliberately outside
-   * the queue — it never delays, hides, or replaces the next approval.
+   * The window keeps one outcome after its review leaves the queue. This
+   * coordinator presents its own result and retains its workspace actions;
+   * a result never delays or replaces the next approval.
    */
-  const [installResult, setInstallResult] =
-    useState<InstallReviewResolution | null>(null);
-  const transientWorkspaceReady =
-    installResult?.mode === "adopt-root" &&
-    installResult.decision === "accepted" &&
-    installResult.landing !== undefined &&
-    installResult.landing.failed.length === 0;
-  const installResultHasFailure =
-    (installResult?.landing?.failed.length ?? 0) > 0;
-  const installResultAutoDismissMs = installResultHasFailure
-    ? null
-    : transientWorkspaceReady
-      ? 5_000
-      : 8_000;
+  const { recordInstallResult, dismissInstallResult } = presentation;
+  const installResults = presentation.installResults.filter(
+    (result) => rpcDestinationKey(result.owner) === ownerKey,
+  );
 
   const [attentionSeq, setAttentionSeq] = useState(0);
   const currentApprovalIdRef = useRef<string | null>(null);
@@ -186,18 +177,6 @@ export function ConsentApprovalBar({
   const { navigateToId } = useNavigationActions();
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
   const themeConfig = useAtomValue(themeConfigAtom);
-
-  // Results are transient confirmations. Failures are the exception: they name
-  // work that needs attention and remain until explicitly dismissed.
-  useEffect(() => {
-    if (!installResult || installResultAutoDismissMs === null) return;
-    const timer = window.setTimeout(() => {
-      setInstallResult((current) =>
-        current === installResult ? null : current,
-      );
-    }, installResultAutoDismissMs);
-    return () => window.clearTimeout(timer);
-  }, [installResult, installResultAutoDismissMs]);
 
   useEffect(() => {
     if (owner.kind !== "workspace") return;
@@ -591,7 +570,6 @@ export function ConsentApprovalBar({
   const resolveInstallReview = (resolution: TemplateInstallResolution) => {
     if (current?.kind !== "unit-install-review") return;
     const approval = current;
-    setInstallResult(null);
     // Persist the explicit reporting edit before answering; a failed sharing
     // write leaves the audit available to retry. Answering is then the end of
     // the review, not the beginning of a loading
@@ -612,7 +590,7 @@ export function ConsentApprovalBar({
         approval.approvalId,
         resolution,
       );
-      setInstallResult(outcome);
+      if (outcome) recordInstallResult(owner, outcome);
     });
   };
   const resolveTaskRules = (
@@ -763,10 +741,14 @@ export function ConsentApprovalBar({
    */
   const openEntryPoint = (
     entryPoint: NonNullable<InstallReviewResolution["entryPoint"]>,
+    result: WindowInstallResult,
   ) => {
     void panel
       .createPanel(entryPoint.repoPath, { title: entryPoint.title })
-      .then(() => setInstallResult(null))
+      .then(() => {
+        if ((result.resolution.landing?.failed.length ?? 0) === 0)
+          dismissInstallResult(result);
+      })
       .catch((err: unknown) => {
         console.error("[ConsentApprovalBar] open entry point failed:", err);
       });
@@ -955,23 +937,38 @@ export function ConsentApprovalBar({
    * open. Results for later installs keep their link until followed or
    * dismissed.
    */
-  const resultNotice = installResult ? (
-    <div
-      data-shell-top-chrome="install-review-result"
-      className="install-review-result"
-    >
-      <InstallReviewOutcomeNotice
-        outcome={{ source: "resolved", resolution: installResult }}
-        compact
-        {...(!transientWorkspaceReady &&
-        owner.kind === "workspace" &&
-        installResult.entryPoint?.kind === "panel"
-          ? { onOpenEntryPoint: openEntryPoint }
-          : {})}
-        onDismiss={() => setInstallResult(null)}
-      />
-    </div>
-  ) : null;
+  const resultNotice = installResults.map((result) => {
+    const installResult = result.resolution;
+    const transientWorkspaceReady =
+      installResult.mode === "adopt-root" &&
+      installResult.decision === "accepted" &&
+      installResult.landing !== undefined &&
+      installResult.landing.failed.length === 0;
+    return (
+      <div
+        key={installResult.approvalId}
+        data-shell-top-chrome="install-review-result"
+        className="install-review-result"
+      >
+        <InstallReviewOutcomeNotice
+          outcome={{ source: "resolved", resolution: installResult }}
+          compact
+          {...(!transientWorkspaceReady &&
+          owner.kind === "workspace" &&
+          installResult.entryPoint?.kind === "panel"
+            ? {
+                onOpenEntryPoint: (
+                  entryPoint: NonNullable<
+                    InstallReviewResolution["entryPoint"]
+                  >,
+                ) => openEntryPoint(entryPoint, result),
+              }
+            : {})}
+          onDismiss={() => dismissInstallResult(result)}
+        />
+      </div>
+    );
+  });
 
   const present = (body: ReactNode) =>
     presentation.host

@@ -142,21 +142,6 @@ function createOwnerRpc(destination: RpcDestination) {
   let closed = false;
   const releases = new Set<() => void>();
   const recoveryCoordinator = createRecoveryCoordinator();
-  for (const kind of ["resubscribe", "cold-recover"] as const) {
-    const release = g.__vibestudioTransport?.onRecovery?.(
-      kind,
-      (workspaceId) => {
-        if (
-          !closed &&
-          destination.kind === "workspace" &&
-          destination.workspaceId === workspaceId
-        )
-          return recoveryCoordinator.run(kind);
-        return undefined;
-      },
-    );
-    if (release) releases.add(release);
-  }
   const statuses = new Set<
     (status: import("@vibestudio/rpc").RpcConnectionStatus) => void
   >();
@@ -165,6 +150,32 @@ function createOwnerRpc(destination: RpcDestination) {
     callerKind: "app",
     workspaceId: assertPresent(g.__vibestudioTransport).identity.workspaceId,
     authorityAcquisition: "wait",
+    onRecovery: (handler) => {
+      const stops = (["resubscribe", "cold-recover"] as const)
+        .map((kind) =>
+          g.__vibestudioTransport?.onRecovery?.(kind, (workspaceId) => {
+            if (
+              closed ||
+              destination.kind !== "workspace" ||
+              destination.workspaceId !== workspaceId
+            )
+              return;
+            // The RPC core settles its own recovery policy and synchronously
+            // publishes to client observers before workspace-owned resync work
+            // starts. Keep one native listener as the ordering boundary.
+            handler(kind);
+            return recoveryCoordinator.run(kind);
+          }),
+        )
+        .filter((stop): stop is () => void => Boolean(stop));
+      for (const stop of stops) releases.add(stop);
+      return () => {
+        for (const stop of stops) {
+          releases.delete(stop);
+          stop();
+        }
+      };
+    },
     transport: {
       ...(transport.stream
         ? {

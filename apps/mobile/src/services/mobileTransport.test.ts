@@ -548,7 +548,7 @@ describe("MobileRpcClient Iroh transport", () => {
     expect(client.status).toBe("disconnected");
   });
 
-  it("forwards Iroh recovery notifications to registered listeners", async () => {
+  it("forwards both Iroh recovery kinds through the RpcClient observer shape", async () => {
     let emitRecovery:
       | ((kind: RecoveryKind) => void | Promise<void>)
       | undefined;
@@ -559,20 +559,19 @@ describe("MobileRpcClient Iroh transport", () => {
       },
     );
     const client = new MobileRpcClient({});
-    const coldRecover = jest.fn();
-    const resubscribe = jest.fn();
-    client.onRecovery("cold-recover", coldRecover);
-    client.onRecovery("resubscribe", resubscribe);
+    const observed = jest.fn();
+    client.onRecovery((kind) => observed(kind));
 
     await client.connectAndWait();
+    expect(client.status).toBe("connected");
     await emitRecovery?.("cold-recover");
     await emitRecovery?.("resubscribe");
 
-    expect(coldRecover).toHaveBeenCalledTimes(1);
-    expect(resubscribe).toHaveBeenCalledTimes(1);
+    expect(observed.mock.calls).toEqual([["cold-recover"], ["resubscribe"]]);
+    expect(client.status).toBe("connected");
   });
 
-  it("joins recovery listeners and returns their original failure to the Iroh owner", async () => {
+  it("isolates synchronous recovery observer failures without blocking the Iroh owner", async () => {
     let recover!: (kind: RecoveryKind) => void | Promise<void>;
     mockReconnectMobileSession.mockImplementation(
       async (_stored, _mode, onRecovery) => {
@@ -581,30 +580,33 @@ describe("MobileRpcClient Iroh transport", () => {
       },
     );
     const client = new MobileRpcClient({});
-    let finish!: () => void;
-    const pending = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
     const failure = new Error("Subscription replay failed");
-    client.onRecovery("resubscribe", async () => {
+    const asyncFailure = new Error("Async observer failed");
+    const log = jest.spyOn(console, "error").mockImplementation(() => {});
+    const completed = jest.fn();
+    client.onRecovery((kind) => {
+      if (kind !== "resubscribe") return;
       throw failure;
     });
-    client.onRecovery("resubscribe", () => pending);
+    client.onRecovery((kind) => {
+      if (kind === "resubscribe") completed();
+    });
+    client.onRecovery(async (kind) => {
+      if (kind === "resubscribe") throw asyncFailure;
+    });
     await client.connectAndWait();
-    const replay = Promise.resolve(recover("resubscribe"));
-    let settled = false;
-    void replay.then(
-      () => {
-        settled = true;
-      },
-      () => {
-        settled = true;
-      },
-    );
+    expect(recover("resubscribe")).toBeUndefined();
     await Promise.resolve();
-    expect(settled).toBe(false);
-    finish();
-    await expect(replay).rejects.toBe(failure);
+    expect(completed).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(
+      "[MobileRpcClient] Recovery observer failed:",
+      failure,
+    );
+    expect(log).toHaveBeenCalledWith(
+      "[MobileRpcClient] Async recovery observer failed:",
+      asyncFailure,
+    );
+    log.mockRestore();
     await client.close();
   });
 });
@@ -663,7 +665,9 @@ describe("MobileRpcClient session ownership", () => {
     client.onStatusChange(status);
     client.onReconnectProgress(progress);
     client.on("owned-event", event);
-    client.onRecovery("resubscribe", recovery);
+    client.onRecovery((kind) => {
+      if (kind === "resubscribe") recovery(kind);
+    });
     await client.connectAndWait();
     statuses[0]!("connecting");
     expect(status).toHaveBeenLastCalledWith("connecting");
@@ -973,7 +977,9 @@ it("ignores recovery before adoption and from a failed initial attempt during th
     initialConnectionRetry: { delayMs: 0, maxMs: 2000 },
   });
   const recovered = jest.fn();
-  client.onRecovery("resubscribe", recovered);
+  client.onRecovery((kind) => {
+    if (kind === "resubscribe") recovered(kind);
+  });
   try {
     await client.connectAndWait();
     expect(factory).toHaveBeenCalledTimes(2);

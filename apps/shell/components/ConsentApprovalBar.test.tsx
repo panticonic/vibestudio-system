@@ -17,6 +17,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1721,6 +1722,124 @@ describe("ConsentApprovalBar coordinator", () => {
       vi.useRealTimers();
     }
   });
+
+  it.each([false, true])(
+    "coalesces startup confirmations while retaining System failures (%s)",
+    async (systemFailed) => {
+      function Owner({ id }: { id: string }) {
+        const client = useShellWorkspaceClient();
+        const source = useMemo(
+          () => ({
+            owner: { kind: "workspace" as const, workspaceId: id },
+            events: client.events,
+            shellApproval: {
+              ...client.shellApproval,
+              listPending: async () => [hostAppStartupApproval(id)],
+              resolveInstallReview: async (): Promise<
+                Awaited<
+                  ReturnType<typeof client.shellApproval.resolveInstallReview>
+                >
+              > => ({
+                ...workspaceReadyOutcome,
+                approvalId: id,
+                decision: "accepted",
+                heading:
+                  id === "system" && systemFailed
+                    ? "System setup needs attention"
+                    : workspaceReadyOutcome.heading,
+                landing:
+                  id === "system" && systemFailed
+                    ? {
+                        landed: [],
+                        failed: [
+                          {
+                            identityKey: "system-app",
+                            title: "System app",
+                            reason: "Build failed",
+                          },
+                        ],
+                        workspaceUnchanged: true,
+                      }
+                    : {
+                        landed: [...workspaceReadyOutcome.landing.landed],
+                        failed: [],
+                        workspaceUnchanged: false,
+                      },
+              }),
+            },
+          }),
+          [client, id],
+        );
+        return <ConsentApprovalBar source={source} />;
+      }
+      function Window() {
+        const presentation = useApprovalPresentationController(
+          useShellWorkspaceClient(),
+        );
+        useEffect(() => {
+          presentation.setHost(document.body);
+        }, [presentation.setHost]);
+        return (
+          <ApprovalPresentationContext.Provider value={presentation}>
+            <Owner id="system" />
+            <Owner id="personal" />
+          </ApprovalPresentationContext.Provider>
+        );
+      }
+      render(
+        <Theme>
+          <Window />
+        </Theme>,
+      );
+      await waitFor(() =>
+        expect(fullSurface.props?.approval?.approvalId).toBe("system"),
+      );
+      await act(async () =>
+        fullSurface.props?.emit?.({
+          type: "resolve-install-review",
+          approvalId: "system",
+          resolution: { decision: "install", allowNow: [] },
+        }),
+      );
+      await screen.findByText(
+        systemFailed
+          ? "System setup needs attention"
+          : "Your workspace is ready",
+      );
+      await waitFor(() =>
+        expect(fullSurface.props?.approval?.approvalId).toBe("personal"),
+      );
+      await act(async () =>
+        fullSurface.props?.emit?.({
+          type: "resolve-install-review",
+          approvalId: "personal",
+          resolution: { decision: "install", allowNow: [] },
+        }),
+      );
+      expect(screen.getAllByText("Your workspace is ready")).toHaveLength(1);
+      const readyNotice = screen
+        .getByText("Your workspace is ready")
+        .closest("[data-shell-top-chrome]")!;
+      fireEvent.click(
+        within(readyNotice as HTMLElement).getByRole("button", {
+          name: "Dismiss",
+        }),
+      );
+      expect(screen.queryByText("Your workspace is ready")).toBeNull();
+      if (systemFailed) {
+        const failureNotice = screen
+          .getByText("System setup needs attention")
+          .closest("[data-shell-top-chrome]")!;
+        expect(screen.getByText("Build failed")).toBeTruthy();
+        fireEvent.click(
+          within(failureNotice as HTMLElement).getByRole("button", {
+            name: "Dismiss",
+          }),
+        );
+        expect(screen.queryByText("System setup needs attention")).toBeNull();
+      }
+    },
+  );
 
   it("briefly confirms a ready workspace without offering an internal entry point", async () => {
     try {

@@ -554,10 +554,8 @@ export async function registerForPushNotifications(
     },
   );
   cleanupFunctions.push(() => appStateSub.remove());
-  // Drain queued offline decisions / reconcile on ANY recovery. onReconnect
-  // only fires for "resubscribe"; a server reboot or dirty session recovers
-  // via "cold-recover", which must also trigger a drain (matching how
-  // ShellClient registers both kinds for its panel tree).
+  // Drain queued offline decisions / reconcile after either recovered session
+  // kind. The logical RPC observer receives both from one recovery signal.
   const reconcileOnRecovery = () => {
     void messaging
       .getToken()
@@ -582,12 +580,7 @@ export async function registerForPushNotifications(
       );
     });
   };
-  cleanupFunctions.push(
-    shellClient.transport.onRecovery("resubscribe", reconcileOnRecovery),
-  );
-  cleanupFunctions.push(
-    shellClient.transport.onRecovery("cold-recover", reconcileOnRecovery),
-  );
+  cleanupFunctions.push(shellClient.transport.onRecovery(() => reconcileOnRecovery()));
   await consumeStoredDeepLink(shellClient, callbacks);
   await reconcilePushNotifications(shellClient, notifee);
   return cleanupPushNotificationSubscriptions;

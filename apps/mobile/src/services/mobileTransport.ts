@@ -99,7 +99,14 @@ export function createMobileRpcClient(
 
 export class MobileRpcClient implements Pick<
   RpcClient,
-  "selfId" | "expose" | "call" | "emit" | "on" | "stream" | "streamReadable"
+  | "selfId"
+  | "expose"
+  | "call"
+  | "emit"
+  | "on"
+  | "stream"
+  | "streamReadable"
+  | "onRecovery"
 > {
   private readonly config: MobileRpcClientConfig;
   private connection: IrohConnection | null = null;
@@ -123,10 +130,7 @@ export class MobileRpcClient implements Pick<
   private readonly reconnectProgressListeners = new Set<
     (progress: ReconnectProgress) => void
   >();
-  private readonly recoveryListeners = new Map<
-    RecoveryKind,
-    Set<() => void | Promise<void>>
-  >();
+  private readonly recoveryListeners = new Set<(kind: RecoveryKind) => void>();
   private readonly eventSubscriptions = new Map<
     string,
     Set<(event: RpcEventContext) => void>
@@ -369,23 +373,9 @@ export class MobileRpcClient implements Pick<
     };
   }
 
-  onReconnect(listener: () => void): () => void {
-    return this.onRecovery("resubscribe", listener);
-  }
-
-  onRecovery(
-    kind: RecoveryKind,
-    listener: () => void | Promise<void>,
-  ): () => void {
-    let listeners = this.recoveryListeners.get(kind);
-    if (!listeners) {
-      listeners = new Set();
-      this.recoveryListeners.set(kind, listeners);
-    }
-    listeners.add(listener);
-    return () => {
-      listeners?.delete(listener);
-    };
+  onRecovery(listener: (kind: RecoveryKind) => void): () => void {
+    this.recoveryListeners.add(listener);
+    return () => this.recoveryListeners.delete(listener);
   }
 
   private ensureConnectionLifetime(): object {
@@ -429,8 +419,8 @@ export class MobileRpcClient implements Pick<
       this.connectionToken === token &&
       connection !== undefined &&
       this.connection === connection;
-    const recover = async (kind: RecoveryKind): Promise<void> => {
-      if (current()) await this.emitRecovery(kind);
+    const recover = (kind: RecoveryKind): void => {
+      if (current()) this.emitRecovery(kind);
     };
     try {
       connection = this.config.connectWorkspace
@@ -731,14 +721,27 @@ export class MobileRpcClient implements Pick<
    * changed) / the session was dirty — so ShellClient's cold-recover listener
    * actually fires instead of only ever running the lighter resubscribe.
    */
-  private async emitRecovery(kind: RecoveryKind): Promise<void> {
-    const results = await Promise.allSettled(
-      [...(this.recoveryListeners.get(kind) ?? [])].map(async (listener) =>
-        listener(),
-      ),
-    );
-    const failure = results.find((result) => result.status === "rejected");
-    if (failure?.status === "rejected") throw failure.reason;
+  private emitRecovery(kind: RecoveryKind): void {
+    for (const listener of [...this.recoveryListeners]) {
+      try {
+        const result = (listener as (recoveryKind: RecoveryKind) => unknown)(kind);
+        if (
+          result !== null &&
+          (typeof result === "object" || typeof result === "function") &&
+          "then" in result &&
+          typeof result.then === "function"
+        ) {
+          void Promise.resolve(result).catch((error: unknown) => {
+            console.error(
+              "[MobileRpcClient] Async recovery observer failed:",
+              error,
+            );
+          });
+        }
+      } catch (error) {
+        console.error("[MobileRpcClient] Recovery observer failed:", error);
+      }
+    }
   }
 }
 

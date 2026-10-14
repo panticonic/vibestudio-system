@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { Theme } from "@radix-ui/themes";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const fixture = vi.hoisted(() => ({
   observeChanges: vi.fn(),
   overview: vi.fn(),
+  recoveryListeners: new Set<(kind: "resubscribe" | "cold-recover") => void>(),
 }));
 
 vi.mock("@workspace/runtime", () => ({
@@ -17,7 +18,14 @@ vi.mock("@workspace/runtime", () => ({
   },
   openPanel: vi.fn(),
   panel: { stateArgs: { get: () => ({}) } },
-  rpc: { call: vi.fn() },
+  rpc: {
+    call: vi.fn(),
+    status: () => "connected",
+    onRecovery: (listener: (kind: "resubscribe" | "cold-recover") => void) => {
+      fixture.recoveryListeners.add(listener);
+      return () => fixture.recoveryListeners.delete(listener);
+    },
+  },
 }));
 
 vi.mock("@workspace/agentic-chat", () => ({
@@ -49,6 +57,7 @@ describe("Automations panel observation lifecycle", () => {
   beforeEach(() => {
     fixture.observeChanges.mockReset();
     fixture.overview.mockReset();
+    fixture.recoveryListeners.clear();
     let observationAttempt = 0;
     fixture.observeChanges.mockImplementation(({ signal }: { signal: AbortSignal }) => {
       observationAttempt += 1;
@@ -104,6 +113,32 @@ describe("Automations panel observation lifecycle", () => {
     expect(fixture.observeChanges).toHaveBeenNthCalledWith(2, { afterVersion: "version-1", signal: expect.any(AbortSignal) });
     expect(fixture.observeChanges).toHaveBeenNthCalledWith(3, { afterVersion: "version-2", signal: expect.any(AbortSignal) });
     mounted.unmount();
+  });
+
+  it("reopens the long-lived observation after recovery while status stays connected", async () => {
+    let observation = 0;
+    fixture.observeChanges.mockImplementation(({ afterVersion, signal }: { afterVersion?: string; signal: AbortSignal }) => {
+      observation += 1;
+      if (afterVersion === undefined) {
+        return Promise.resolve({ version: `version-${observation}` });
+      }
+      return new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    render(<AutomationsPanelRoot />);
+
+    await waitFor(() => expect(fixture.overview).toHaveBeenCalledOnce());
+    await waitFor(() => expect(observation).toBe(2));
+    expect(fixture.recoveryListeners.size).toBe(1);
+
+    act(() => {
+      for (const listener of fixture.recoveryListeners) listener("resubscribe");
+    });
+
+    await waitFor(() => expect(fixture.overview).toHaveBeenCalledTimes(2));
+    expect(observation).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("retires only the active observation when the panel is unmounted", async () => {

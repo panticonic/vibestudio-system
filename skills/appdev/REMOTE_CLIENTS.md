@@ -154,6 +154,14 @@ Remote-client UX should handle:
 - no built terminal client app (`hostTargets.terminal.app` missing or not ready)
 - terminal client app principal grant refused, or the terminal connection lost
 
+An authenticated transport can remain `connected` while the server replaces
+its session generation. Long-lived RPC observers should listen with
+`rpc.onRecovery(handler)`: `resubscribe` means the server retained session
+state, while `cold-recover` means callers must rebuild observations from an
+authoritative snapshot. The RPC client settles its own pending-call and
+exposure policy before notifying these observers. Recovery handlers should
+start their own abort/join/reopen work without blocking transport recovery.
+
 The recovery surface must stay usable even when the workspace app cannot
 load.
 

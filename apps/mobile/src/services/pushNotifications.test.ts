@@ -49,7 +49,7 @@ const mockListeners = {
   tokenRefresh: undefined as ((token: string) => void) | undefined,
   message: undefined as ((message: unknown) => void) | undefined,
   foreground: undefined as ((event: unknown) => void) | undefined,
-  recovery: new Map<RecoveryKind, () => void>(),
+  recovery: new Set<(kind: RecoveryKind) => void>(),
   appState: undefined as ((state: string) => void) | undefined,
 };
 
@@ -139,9 +139,9 @@ function createShellClient(
         return undefined;
       },
     ),
-    onRecovery: jest.fn((kind: RecoveryKind, callback: () => void) => {
-      mockListeners.recovery.set(kind, callback);
-      return jest.fn();
+    onRecovery: jest.fn((callback: (kind: RecoveryKind) => void) => {
+      mockListeners.recovery.add(callback);
+      return () => mockListeners.recovery.delete(callback);
     }),
   };
   return {
@@ -471,10 +471,8 @@ describe("pushNotifications", () => {
       const shellClient = createShellClient();
       await registerForPushNotifications(shellClient as never);
 
-      // Both recovery kinds must be wired -- onReconnect only covers
-      // "resubscribe", but a server reboot recovers via "cold-recover".
-      expect(mockListeners.recovery.has(kind)).toBe(true);
-      mockListeners.recovery.get(kind)?.();
+      expect(mockListeners.recovery.size).toBe(1);
+      for (const listener of mockListeners.recovery) listener(kind);
 
       await waitFor(() =>
         expect(
