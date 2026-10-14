@@ -1,5 +1,6 @@
 import { userFacingError } from "../../utils/userFacingError";
 import { useShellWorkspaceClient } from "../workspaceContext";
+import { measureShellPhase } from "../startupPerformance";
 import { useEffect, useMemo, useState } from "react";
 import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { type ShellAccountProfile } from "../client.js";
@@ -43,7 +44,9 @@ export function useCurrentAccountProfile(): CurrentAccountProfileState {
     let cancelled = false;
     const refresh = async () => {
       try {
-        const profile = await account.getProfile();
+        const profile = await measureShellPhase(
+          "account-profile", "account", () => account.getProfile(),
+        );
         if (!profile) throw new Error("The connected session has no active workspace account");
         if (!cancelled) setState({ profile, settled: true, error: null });
       } catch (error) {

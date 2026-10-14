@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import {
+  useShellWorkspaceClient,
+  useWorkspaceNavigationHost,
+} from "../shell/workspaceContext";
+import { measureShellPhase } from "../shell/startupPerformance";
 import { useShellEvent } from "../shell/useShellEvent";
 import { usePanelTree, useRootPanels } from "../shell/hooks/PanelTreeContext";
 import {
@@ -61,6 +65,7 @@ export function usePanelLayout(
   viewportHeight: number
 ): UsePanelLayoutResult {
   const { panel: panelService, workspace } = useShellWorkspaceClient();
+  const scope = useWorkspaceNavigationHost()?.workspaceId ?? "system";
   const { panelMap, parentMap, initialized, refreshing } = usePanelTree();
   const { panels: rootPanels, loading: rootLoading } = useRootPanels();
 
@@ -176,7 +181,9 @@ export function usePanelLayout(
       const existingIds = new Set(latestMapsRef.current.panelMap.keys());
       let next: PanelLayout | null = null;
       try {
-        const blob = await panelService.getPanelLayout();
+        const blob = await measureShellPhase("layout-read", scope, () =>
+          panelService.getPanelLayout(),
+        );
         next = validateRestoredLayout(blob, existingIds);
       } catch {
         next = null;
@@ -184,7 +191,9 @@ export function usePanelLayout(
       if (!next) {
         let seedId: string | null = rootPanelsRef.current[0]?.id ?? null;
         try {
-          const focusedId = await panelService.getFocusedPanelId();
+          const focusedId = await measureShellPhase(
+            "layout-focused-panel", scope, () => panelService.getFocusedPanelId(),
+          );
           if (focusedId && existingIds.has(focusedId)) seedId = focusedId;
         } catch {
           // fall back to first root
@@ -208,7 +217,7 @@ export function usePanelLayout(
     return () => {
       cancelled = true;
     };
-  }, [restored, rootLoading, initialized, schedulePersist, panelService]);
+  }, [restored, rootLoading, initialized, schedulePersist, panelService, scope]);
 
   // The placement model's invariant is that a restored layout is empty iff the
   // workspace has no roots. Query-first discovery may lag presentation or

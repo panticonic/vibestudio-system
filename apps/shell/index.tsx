@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Provider as JotaiProvider } from "jotai";
+import { measureShellPhase } from "./shell/startupPerformance";
 import "@radix-ui/themes/styles.css";
 import "@workspace/ui/foundation.css";
 import "@workspace/ui/themes/vibestudio.css";
@@ -63,7 +64,9 @@ async function initializeApp(): Promise<void> {
       return;
     }
 
-    const { App } = await import("./components/App");
+    const { App } = await measureShellPhase("app-module", "window", () =>
+      import("./components/App"),
+    );
     root.render(
       <StrictMode>
         <JotaiProvider>
