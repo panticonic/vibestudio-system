@@ -89,7 +89,9 @@ function wireTurnEvent(
 }
 
 function fakeChannelClient(events: unknown[] = []) {
-  return {
+  let closed = false;
+  const retireIterators = new Set<() => void>();
+  const client = {
     channelId: "channel-1",
     clientId: "user:me",
     firstEnvelopeSeq: undefined as number | undefined,
@@ -100,27 +102,73 @@ function fakeChannelClient(events: unknown[] = []) {
       snapshots: [],
       ready: { hasMoreBefore: false },
     })),
-    events: vi.fn((options?: { includeSignals?: boolean }) => ({
-      [Symbol.asyncIterator]: () => {
-        let index = 0;
-        const visible = events.filter(
-          (event) =>
-            options?.includeSignals || !(event as { signal?: boolean }).signal,
-        );
-        return {
-          next: () =>
-            index < visible.length
-              ? Promise.resolve({ value: visible[index++], done: false })
-              : // Then park: a live channel stays open rather than ending.
-                new Promise<IteratorResult<unknown>>(() => {}),
-        };
-      },
-    })),
+    events: vi.fn(
+      (options?: { includeSignals?: boolean; signal?: AbortSignal }) => ({
+        [Symbol.asyncIterator]: () => {
+          let index = 0;
+          let replayCompleted = false;
+          let retired = false;
+          let pending: ((result: IteratorResult<unknown>) => void) | null =
+            null;
+          const retire = () => {
+            retired = true;
+            retireIterators.delete(retire);
+            options?.signal?.removeEventListener("abort", retire);
+            pending?.({ value: undefined, done: true });
+            pending = null;
+          };
+          retireIterators.add(retire);
+          options?.signal?.addEventListener("abort", retire, { once: true });
+          const visible = events.filter(
+            (event) =>
+              options?.includeSignals ||
+              !(event as { signal?: boolean }).signal,
+          );
+          return {
+            next: (): Promise<IteratorResult<unknown>> => {
+              if (retired || closed || options?.signal?.aborted) {
+                retire();
+                return Promise.resolve({ value: undefined, done: true });
+              }
+              if (index < visible.length)
+                return Promise.resolve({
+                  value: visible[index++],
+                  done: false,
+                });
+              if (!replayCompleted) {
+                replayCompleted = true;
+                return Promise.resolve({
+                  done: false,
+                  value: {
+                    type: "replay-complete",
+                    delivery: "control",
+                    generation: 1,
+                    firstEnvelopeSeq: client.firstEnvelopeSeq,
+                    hasMoreBefore: client.hasMoreBefore ?? false,
+                  },
+                });
+              }
+              // A live subscription parks only until its owning lifetime ends.
+              return new Promise((resolve) => {
+                pending = resolve;
+              });
+            },
+            return: async (): Promise<IteratorResult<unknown>> => {
+              retire();
+              return { value: undefined, done: true };
+            },
+          };
+        },
+      }),
+    ),
     ready: () => Promise.resolve(),
     // A joined channel client: the shared transcript feed reads readiness here.
     connected: true,
     onReady: () => () => {},
-    close: vi.fn(() => Promise.resolve()),
+    close: vi.fn(async () => {
+      closed = true;
+      for (const retire of [...retireIterators]) retire();
+    }),
     send: vi.fn(() => Promise.resolve()),
     recordReadReceipt: vi.fn(() => Promise.resolve()),
     getParticipants: vi.fn(async () => [
@@ -137,6 +185,7 @@ function fakeChannelClient(events: unknown[] = []) {
       ): { result: Promise<unknown> } => ({ result: Promise.resolve() }),
     ),
   };
+  return client;
 }
 
 function channelClientEmittingOnSend(eventsOnSend: unknown[]) {
@@ -197,7 +246,16 @@ function transportFor(
   events: unknown[] = [],
 ) {
   const client = fakeChannelClient(events);
-  const connectToChannel = vi.fn(() => client as never);
+  let connections = 0;
+  // Rebinding acquires a new subscription, never revives the closed client.
+  const connectToChannel = vi.fn(() => {
+    const subscription =
+      connections++ === 0 ? client : fakeChannelClient(events);
+    // The remote agent survives subscription replacement; model changes are
+    // server state, not state belonging to the closed response stream.
+    subscription.callMethod = client.callMethod;
+    return subscription as never;
+  });
   const transport: QuickfireTransport = {
     loadModelCatalog: vi.fn(async () => ({ providers: [], models: [] })),
     sessionFor: vi.fn(async () => session),
@@ -271,11 +329,23 @@ describe("useQuickfireSessionCore", () => {
           invocationType: "system",
           nativeSource: {
             owner: {
-              runtimeId: "agent-1", authoritySessionId: "lifetime:author", contextId: "context:author",
-              incarnation: "storage:author", channelId: "channel-1", source: "workers/agent",
-              effectiveVersion: "state:author", className: "Agent", objectKey: "author", executionDigest: "a".repeat(64),
+              runtimeId: "agent-1",
+              authoritySessionId: "lifetime:author",
+              contextId: "context:author",
+              incarnation: "storage:author",
+              channelId: "channel-1",
+              source: "workers/agent",
+              effectiveVersion: "state:author",
+              className: "Agent",
+              objectKey: "author",
+              executionDigest: "a".repeat(64),
             },
-            task: { conversationId: 1, taskId: 2, kind: "pi.model", version: 1 },
+            task: {
+              conversationId: 1,
+              taskId: 2,
+              kind: "pi.model",
+              version: 1,
+            },
             operation: {
               kind: "model",
               purpose: "generation",
@@ -332,7 +402,9 @@ describe("useQuickfireSessionCore", () => {
       ),
     );
     expect(result.current.view.streaming).toBe(true);
-    expect(result.current.view.transcript.some((entry) => entry.kind === "tool")).toBe(false);
+    expect(
+      result.current.view.transcript.some((entry) => entry.kind === "tool"),
+    ).toBe(false);
   });
 
   it("stops the agent from channel presence even without trajectory roster events", async () => {
@@ -797,20 +869,31 @@ describe("useQuickfireSessionCore send queue", () => {
     const { transport, client } = transportFor(fresh, {
       sessionFor: vi.fn(async (slotId: string) => {
         if (slotId === "slot-a") {
-          await new Promise<void>((resolve) => { releaseBinding = resolve; });
+          await new Promise<void>((resolve) => {
+            releaseBinding = resolve;
+          });
         }
         return fresh;
       }),
     });
     const { result, rerender } = renderHook(
-      ({ slotId }: { slotId: string }) => useQuickfireSessionCore(slotId, transport),
+      ({ slotId }: { slotId: string }) =>
+        useQuickfireSessionCore(slotId, transport),
       { initialProps: { slotId: "slot-a" } },
     );
-    await waitFor(() => expect(transport.sessionFor).toHaveBeenCalledWith("slot-a", { fresh: false }));
-    await act(async () => { await result.current.send("only for panel A"); });
+    await waitFor(() =>
+      expect(transport.sessionFor).toHaveBeenCalledWith("slot-a", {
+        fresh: false,
+      }),
+    );
+    await act(async () => {
+      await result.current.send("only for panel A");
+    });
     rerender({ slotId: "slot-b" });
     await waitFor(() => expect(result.current.view.connecting).toBe(false));
-    await act(async () => { releaseBinding(); });
+    await act(async () => {
+      releaseBinding();
+    });
     expect(client.send).not.toHaveBeenCalled();
   });
 });

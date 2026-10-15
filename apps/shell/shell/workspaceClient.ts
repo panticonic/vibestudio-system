@@ -1,7 +1,6 @@
 import { mainRpcMethod } from "@vibestudio/service-schemas/mainRpc";
-import { channelRpcMethods } from "@workspace-workers/pubsub-channel/contract";
+import { channelClientRpcMethods } from "@workspace/pubsub/rpc-contract";
 import { modelSettingsRpcMethods } from "@workspace/model-catalog/rpc-contract";
-import { quickfireRpcMethods } from "@workspace-workers/quickfire-service/contract";
 import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import { createDurableObjectServiceClient } from "@vibestudio/service-schemas/clients/durableObjectServiceClient";
 import { createGadServiceClient } from "@vibestudio/service-schemas/clients/gadServiceClient";
@@ -41,7 +40,10 @@ import {
   remoteCredMethods,
   type RemoteCredCurrent as RemoteCredCurrentContract,
 } from "@vibestudio/service-schemas/remoteCred";
-import { QUICKFIRE_SERVICE_PROTOCOL } from "@workspace/quickfire-core/service";
+import {
+  QUICKFIRE_SERVICE_PROTOCOL,
+  quickfireRpcMethods,
+} from "@workspace/quickfire-core/service";
 import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
 import { shellPresenceMethods } from "@vibestudio/service-schemas/shellPresence";
@@ -1044,7 +1046,7 @@ export function createShellWorkspaceClient(
   ): Promise<ShellChannelInvite> {
     const config = await rpc.call(
       invite.channelTargetId,
-      channelRpcMethods["getConfig"],
+      channelClientRpcMethods["getConfig"],
       [],
     );
     return {
@@ -1133,8 +1135,8 @@ export function createShellWorkspaceClient(
       channelTargetId: string,
     ): Promise<{ contextId: string; title: string | null }> {
       const [config, contextId] = await Promise.all([
-        rpc.call(channelTargetId, channelRpcMethods["getConfig"], []),
-        rpc.call(channelTargetId, channelRpcMethods["getContextId"], []),
+        rpc.call(channelTargetId, channelClientRpcMethods["getConfig"], []),
+        rpc.call(channelTargetId, channelClientRpcMethods["getContextId"], []),
       ]);
       if (!contextId) {
         throw new Error(
@@ -1208,8 +1210,8 @@ export function createShellWorkspaceClient(
       }
 
       const [config, contextId] = await Promise.all([
-        rpc.call(channelTargetId, channelRpcMethods["getConfig"], []),
-        rpc.call(channelTargetId, channelRpcMethods["getContextId"], []),
+        rpc.call(channelTargetId, channelClientRpcMethods["getConfig"], []),
+        rpc.call(channelTargetId, channelClientRpcMethods["getContextId"], []),
       ]);
       if (!contextId) {
         throw new Error(
