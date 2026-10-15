@@ -17,6 +17,27 @@ export interface TabView {
   status: "attaching" | "live" | "ended" | "problem";
 }
 
+/** One shared geometry for painting and hit testing; focused tabs never overflow off-screen. */
+export function tabWindow(
+  count: number,
+  focused: number,
+  width: number
+): { first: number; count: number; share: number; inset: number } {
+  const capacity = Math.max(1, Math.floor((width - 4) / 8));
+  const visible = Math.min(count, capacity);
+  const first = Math.min(
+    Math.max(0, focused - Math.floor(visible / 2)),
+    Math.max(0, count - visible)
+  );
+  const inset = count > visible ? 2 : 0;
+  return {
+    first,
+    count: visible,
+    share: Math.max(1, Math.floor((width - inset * 2) / Math.max(1, visible))),
+    inset,
+  };
+}
+
 export function TabStrip({
   tabs,
   width,
@@ -36,24 +57,35 @@ export function TabStrip({
     );
   }
   // Give every tab an equal share, at least enough for "N:" and a few letters.
-  const share = Math.max(8, Math.floor((width - 1) / tabs.length));
+  const { first, count, share, inset } = tabWindow(
+    tabs.length,
+    tabs.findIndex((tab) => tab.focused),
+    width
+  );
   return (
     <Box width={width} height={1}>
-      {tabs.map((tab, index) => {
+      {inset ? (
+        <Box width={inset}>
+          <Text>{first > 0 ? "‹ " : "  "}</Text>
+        </Box>
+      ) : null}
+      {tabs.slice(first, first + count).map((tab, offset) => {
+        const index = first + offset;
         const marker = tab.status === "problem" ? "!" : tab.status === "attaching" ? "…" : "";
         const label = `${index + 1}:${tab.icon ? `${tab.icon} ` : ""}${tab.title}${marker}`;
         const room = Math.max(1, share - (tab.badge ? 3 : 1));
-        const text = label.length > room ? `${label.slice(0, Math.max(1, room - 1))}…` : label;
         return (
           <Box key={index} width={share} flexShrink={0}>
-            <Text
-              inverse={tab.focused}
-              bold={tab.focused}
-              dimColor={tab.status === "ended"}
-              wrap="truncate-end"
-            >
-              {` ${text}`}
-            </Text>
+            <Box width={room} flexShrink={0}>
+              <Text
+                inverse={tab.focused}
+                bold={tab.focused}
+                dimColor={tab.status === "ended"}
+                wrap="truncate-end"
+              >
+                {` ${label}`}
+              </Text>
+            </Box>
             {tab.badge ? (
               <Text color="yellow" bold>
                 {` ${tab.badge}`}
@@ -62,6 +94,11 @@ export function TabStrip({
           </Box>
         );
       })}
+      {inset ? (
+        <Box width={inset}>
+          <Text>{first + count < tabs.length ? " ›" : "  "}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -107,7 +144,10 @@ export function StatusBar({
             text: `reconnecting (${view.connection.cause ?? "connection interrupted"})`,
             color: "yellow",
           }
-        : { text: `disconnected (${view.connection.cause ?? "server gone"})`, color: "red" };
+        : {
+            text: `disconnected (${view.connection.cause ?? "server gone"})`,
+            color: "red",
+          };
   const right = view.hint ?? `${view.prefixLabel} ? help`;
   return (
     <Box width={width} height={1} justifyContent="space-between">
@@ -321,7 +361,7 @@ export function HelpOverlay(props: {
         <Text bold>Copy mode ({`${p} [`})</Text>
         <Text wrap="wrap">
           {
-            "  ↑↓←→ / hjkl move · PgUp/PgDn page · g/G top/bottom · v or Space start selecting · y or Enter copy to your clipboard (OSC 52) · q or Esc leave"
+            "  ↑↓←→ / hjkl move · PgUp/PgDn page · g/G top/bottom · / search · n/N next/previous match · v or Space select · y or Enter copy (OSC 52) · q or Ctrl-G leave"
           }
         </Text>
         <Box height={1} />
@@ -337,6 +377,17 @@ export function HelpOverlay(props: {
           {`  Every tab is a program running in the workspace. Detaching (${p} d) or quitting (${p} q) leaves it running: resume it from the launcher (${p} c) on this or another device. Ending it (${p} x) stops it for good.`}
         </Text>
         <Box height={1} />
+        <Text bold>Approvals and protected input</Text>
+        <Text wrap="wrap">
+          ↑↓ chooses a request; removing it never transfers your consent to another. Digits choose
+          offered decisions. Forms use Tab/Shift-Tab fields, Enter next/submit, ←→ choices and
+          Ctrl-D decline. Ctrl-G dismisses without deciding; entered secrets are cleared and never
+          forwarded to a tab.
+        </Text>
+        <Box height={1} />
+        <Text bold>Logs, files and exports</Text>
+        <Text wrap="wrap">{`${p} l opens the log; / filters entries, Enter inspects full text, c copies and e exports. The palette (${p} k) offers terminal-output export and session-context upload/download. File gestures ask for exact paths and explicit confirmation, keeping the original target if you switch tabs. Uploads replace the selected workspace destination; downloads and text exports never overwrite local files. Uploaded workspace paths can be used with /attach in chat.`}</Text>
+        <Box height={1} />
         <Text bold>Terminal apps</Text>
         <Text wrap="wrap">
           {
@@ -344,7 +395,10 @@ export function HelpOverlay(props: {
           }
         </Text>
       </Scrollable>
-      <Text dimColor>↑↓/PgUp/PgDn scroll · Esc close</Text>
+      <Text dimColor>
+        Ctrl-G always cancels browser UI; Escape also works on enhanced-keyboard terminals.
+        ↑↓/PgUp/PgDn scroll
+      </Text>
     </Box>
   );
 }
@@ -396,7 +450,8 @@ export function LogsOverlay(props: {
         )}
       </Box>
       <Text dimColor>
-        {props.scroll > 0 ? `${props.scroll} lines up · ` : ""}↑↓/PgUp/PgDn scroll · Esc close
+        {props.scroll > 0 ? `${props.scroll} lines up · ` : ""}↑↓/PgUp/PgDn scroll · / search ·
+        Enter full detail · c copy · e export · Ctrl-G close
       </Text>
     </Box>
   );
@@ -410,6 +465,7 @@ export function SettingsOverlay(props: {
   width: number;
   height: number;
   error?: string | null;
+  loading?: boolean;
 }): React.ReactElement {
   const current = SETTING_ROWS[props.selected];
   return (
@@ -424,7 +480,11 @@ export function SettingsOverlay(props: {
       <Text bold color="cyan">
         Settings
       </Text>
-      <Text dimColor>Saved for you on the server, so they follow you to other devices.</Text>
+      <Text dimColor>
+        {props.loading
+          ? "Loading your saved settings before editing…"
+          : "Saved for you on the server, so they follow you to other devices."}
+      </Text>
       <Box height={1} />
       {SETTING_ROWS.map((row, index) => (
         <Box key={row.key} justifyContent="space-between">

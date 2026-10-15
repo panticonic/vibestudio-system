@@ -19,8 +19,8 @@ export interface ApprovalDecisionOption {
  * `allowedDecisions` through the same projection the desktop card and push
  * notifications use; a browser site permission takes the host's own decision
  * set for its capabilities. The input-requiring kinds (a form, a secret, a
- * device code) can only be answered where that input can be entered, so a
- * terminal can only decline them. A `unit-install-review` and a `task.rules`
+ * device code) submit through their typed protected-input methods rather than
+ * generic decisions; generic resolve can decline them. A `unit-install-review` and a `task.rules`
  * card resolve through `resolveInstallReview` / `resolveTaskRules` instead
  * (the generic resolve refuses them) and have no options here.
  */

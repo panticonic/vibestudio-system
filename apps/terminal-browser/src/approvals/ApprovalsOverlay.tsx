@@ -5,6 +5,11 @@ import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
 import { Scrollable } from "../ui/Scrollable.js";
 import { approvalDecisionOptions } from "./approvalDecisions.js";
 import {
+  isProtectedApproval,
+  ProtectedInputDetail,
+  type ProtectedInputState,
+} from "./protectedInput.js";
+import {
   isTaskRulesApproval,
   taskRuleRows,
   taskRulesDecisionLabels,
@@ -13,6 +18,7 @@ import {
 import {
   getApprovalCallerPresentation,
   getInstallReviewActionCopy,
+  getApprovalCopy,
 } from "@vibestudio/shared/approvalCopy";
 import { HOST_APPROVAL_COPY } from "@vibestudio/shared/hostApprovalCopy";
 import {
@@ -84,6 +90,7 @@ export interface ApprovalsOverlayProps {
   onDetailHeight?: (rows: number) => void;
   /** Why the overlay opened by itself, e.g. "Requested by Server Logs (this tab)". */
   origin?: string;
+  protectedInput?: ProtectedInputState;
 }
 
 function summarizeTitle(a: PendingApproval): string {
@@ -110,17 +117,6 @@ function terminalUnitIcon(icon: string | undefined, kind: string): string {
   return "⚙";
 }
 
-function genericDetail(a: PendingApproval): string {
-  switch (a.kind) {
-    case "capability":
-      return a.capability;
-    case "credential":
-      return getApprovalCallerPresentation(a).label;
-    default:
-      return a.effectiveVersion ?? "";
-  }
-}
-
 /**
  * Host-owned, un-spoofable approvals overlay over the global shell queue. It is
  * browser chrome: session output never reaches the cells it occupies, so a
@@ -139,10 +135,24 @@ export function ApprovalsOverlay({
   detailScroll = 0,
   onDetailHeight,
   origin,
+  protectedInput,
 }: ApprovalsOverlayProps): React.ReactElement {
   const current = pending[selectedIndex];
   const detail = current ? (
-    current.kind === "unit-install-review" ? (
+    isProtectedApproval(current) && protectedInput ? (
+      <ProtectedInputDetail approval={current} state={protectedInput} />
+    ) : current.kind === "device-code" ? (
+      <Box flexDirection="column">
+        <Text bold>{`Sign in to ${current.credentialLabel}`}</Text>
+        <Text>{`Code: ${current.userCode}`}</Text>
+        <Text>{current.verificationUri}</Text>
+        <Text>{`Provider: ${current.oauthTokenOrigin} · code expires ${new Date(current.expiresAt).toLocaleString()}`}</Text>
+        <Text>
+          Press o to open verification, c to copy the code. Waiting for the provider to complete
+          sign-in.
+        </Text>
+      </Box>
+    ) : current.kind === "unit-install-review" ? (
       <InstallReviewDetail
         approval={current}
         partIndex={partIndex ?? 0}
@@ -150,15 +160,13 @@ export function ApprovalsOverlay({
         focusedRowKey={focusedRowKey}
       />
     ) : isTaskRulesApproval(current) ? (
-      <TaskRulesDetail
-        approval={current}
-        selection={taskRuleSelection}
-        focus={taskRuleFocus}
-      />
+      <TaskRulesDetail approval={current} selection={taskRuleSelection} focus={taskRuleFocus} />
     ) : (
       <GenericDetail approval={current} />
     )
-  ) : null;
+  ) : (
+    <Text color="yellow">The selected request ended. Use ↑↓ to choose another request.</Text>
+  );
   const hint = current
     ? approvalHint(current, focusedRowKey !== undefined)
     : { decisions: "", keys: "" };
@@ -279,13 +287,15 @@ function TaskRulesDetail({
 
 function GenericDetail({ approval }: { approval: PendingApproval }): React.ReactElement {
   const caller = getApprovalCallerPresentation(approval);
+  const copy = getApprovalCopy(approval);
   return (
     <Box flexDirection="column">
       <Text bold wrap="wrap">
-        {approval.kind === "capability" ? approval.title : summarizeTitle(approval)}
+        {copy.title}
       </Text>
       <Text dimColor wrap="wrap">{`Requested by ${caller.label}`}</Text>
-      <ApprovalMarkdown source={genericDetail(approval)} />
+      <ApprovalMarkdown source={copy.summary} />
+      {copy.warning ? <Text color="yellow">{copy.warning}</Text> : null}
     </Box>
   );
 }
@@ -306,6 +316,11 @@ function approvalHint(
   approval: PendingApproval,
   rowExpanded: boolean
 ): { decisions: string; keys: string } {
+  if (isProtectedApproval(approval))
+    return {
+      decisions: "Enter advances to Submit · Ctrl-D decline",
+      keys: "Tab/Shift-Tab fields · ←/→ choices · ↑/↓ request · Ctrl-G dismiss",
+    };
   if (isTaskRulesApproval(approval)) {
     const labels = taskRulesDecisionLabels(approval);
     return {
@@ -330,7 +345,10 @@ function approvalHint(
   const focus = rowExpanded
     ? "←/→ permission  ⎵ toggle permission  ⇥ close part"
     : "←/→ part  ⎵ toggle part  ⇥ open part";
-  return { decisions: decisions.join("  "), keys: `${focus}  · ↑/↓ select · Esc dismiss` };
+  return {
+    decisions: decisions.join("  "),
+    keys: `${focus}  · ↑/↓ select · Esc dismiss`,
+  };
 }
 
 /**
@@ -375,7 +393,12 @@ function InstallReviewDetail({
           {INSTALL_REVIEW_COPY.summary.unchangedParts(approval.unchangedPartCount)}
         </Text>
       ) : null}
-      <Text>{selectionStatusLine({ parts: approval.parts, allowNow: acceptance.allowNow })}</Text>
+      <Text>
+        {selectionStatusLine({
+          parts: approval.parts,
+          allowNow: acceptance.allowNow,
+        })}
+      </Text>
     </Box>
   );
 }

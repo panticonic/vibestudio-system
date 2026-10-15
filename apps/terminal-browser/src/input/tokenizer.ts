@@ -2,8 +2,9 @@
  * Splits raw terminal input into events: keys (with their exact bytes, so
  * session input passes through unchanged), bracketed pastes and SGR mouse
  * reports. Stateful across chunks: a paste or an escape sequence may arrive
- * split over several reads. A lone ESC at the end of a read is the Escape key
- * (terminals deliver an escape sequence in one write), so no timer is needed.
+ * split over several reads. Legacy ESC is intrinsically ambiguous and stays
+ * pending; CSI-u disambiguates Escape. Ctrl-G explicitly cancels browser UI
+ * and clears a pending legacy Escape without a timing guess.
  */
 
 export interface KeyEvent {
@@ -12,6 +13,10 @@ export interface KeyEvent {
   name: string;
   /** The exact bytes the terminal sent, as a string. */
   seq: string;
+  /** Enhanced keyboard events are encoded for the hosted program's own mode. */
+  protocol?: "csi-u";
+  codepoint?: number;
+  modifiers?: number;
 }
 
 export interface PasteEvent {
@@ -147,11 +152,20 @@ export class InputTokenizer {
       }
       // Escape sequences.
       if (i + 1 >= text.length) {
+        this.pending = text.slice(i);
+        return events;
+      }
+      const next = text[i + 1]!;
+      if (next === "\x1b") {
         events.push({ kind: "key", name: "escape", seq: "\x1b" });
         i += 1;
         continue;
       }
-      const next = text[i + 1]!;
+      if (next === "\x07") {
+        events.push({ kind: "key", name: "C-g", seq: "\x1b\x07" });
+        i += 2;
+        continue;
+      }
       if (next === "[") {
         const match = /^\x1b\[([<?]?)([\d;:]*)([\x20-\x2f]*)([\x40-\x7e])/.exec(text.slice(i));
         if (!match) {
@@ -176,9 +190,30 @@ export class InputTokenizer {
           continue;
         }
         const parts = params!.split(";");
-        if (final === "~") {
+        if (final === "u") {
+          if (marker === "?") continue; // response to our keyboard-status query
+          const point = Number(parts[0]?.split(":")[0]);
+          const modifiers = Number(parts[1]?.split(":")[0] ?? "1");
+          if (!Number.isInteger(point) || point < 0 || point > 0x10ffff) continue;
+          const base =
+            point <= 0x1f || point === 0x7f ? controlName(point) : String.fromCodePoint(point);
+          const name =
+            modifiers === 5 && point === 32 ? "C-space" : modifierPrefix(String(modifiers)) + base;
+          events.push({
+            kind: "key",
+            name,
+            seq,
+            protocol: "csi-u",
+            codepoint: point,
+            modifiers,
+          });
+        } else if (final === "~") {
           const base = TILDE_NAMES[parts[0] ?? ""] ?? `csi-${params}~`;
-          events.push({ kind: "key", name: modifierPrefix(parts[1]) + base, seq });
+          events.push({
+            kind: "key",
+            name: modifierPrefix(parts[1]) + base,
+            seq,
+          });
         } else if (CSI_FINAL_NAMES[final!]) {
           events.push({
             kind: "key",
@@ -186,7 +221,11 @@ export class InputTokenizer {
             seq,
           });
         } else {
-          events.push({ kind: "key", name: `csi-${marker}${params}${final}`, seq });
+          events.push({
+            kind: "key",
+            name: `csi-${marker}${params}${final}`,
+            seq,
+          });
         }
         continue;
       }
@@ -197,7 +236,11 @@ export class InputTokenizer {
         }
         const final = text[i + 2]!;
         const seq = text.slice(i, i + 3);
-        events.push({ kind: "key", name: CSI_FINAL_NAMES[final] ?? `ss3-${final}`, seq });
+        events.push({
+          kind: "key",
+          name: CSI_FINAL_NAMES[final] ?? `ss3-${final}`,
+          seq,
+        });
         i += 3;
         continue;
       }

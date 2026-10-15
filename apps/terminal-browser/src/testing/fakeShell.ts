@@ -25,8 +25,32 @@ interface FakePty {
 }
 
 export class FakeShell implements ShellClient {
+  scoped(signal: AbortSignal): ShellClient {
+    return {
+      attach: async (...args) => {
+        signal.throwIfAborted();
+        return this.attach(...args);
+      },
+      acknowledge: async (...args) => {
+        signal.throwIfAborted();
+        return this.acknowledge(...args);
+      },
+      write: async (...args) => {
+        signal.throwIfAborted();
+        return this.write(...args);
+      },
+      resize: async (...args) => {
+        signal.throwIfAborted();
+        return this.resize(...args);
+      },
+      scoped: (next) => this.scoped(AbortSignal.any([signal, next])),
+    };
+  }
   readonly ptys = new Map<string, FakePty>();
-  readonly attachCalls: Array<{ id: string; options: PtyAttachOptions | undefined }> = [];
+  readonly attachCalls: Array<{
+    id: string;
+    options: PtyAttachOptions | undefined;
+  }> = [];
   readonly acknowledged: number[] = [];
   private next = 0;
   private attachments = 0;
@@ -46,7 +70,10 @@ export class FakeShell implements ShellClient {
 
   pty(id: string): FakePty {
     const pty = this.ptys.get(id);
-    if (!pty) throw Object.assign(new Error(`No shell session ${id}`), { code: "ENOENT" });
+    if (!pty)
+      throw Object.assign(new Error(`No shell session ${id}`), {
+        code: "ENOENT",
+      });
     return pty;
   }
 
@@ -111,7 +138,11 @@ export class FakeShell implements ShellClient {
       rows: pty.rows,
     });
     if (pty.output.byteLength > from) {
-      send(controller, { kind: "data", at: from, bytes: pty.output.slice(from) });
+      send(controller, {
+        kind: "data",
+        at: from,
+        bytes: pty.output.slice(from),
+      });
     }
     if (pty.alive) pty.streams.add(controller);
     else {
@@ -171,6 +202,7 @@ export class FakeTerminalSessions implements TerminalSessions, TerminalSettingsS
   ): TerminalSessionEntry {
     const entry: TerminalSessionEntry = {
       sessionId: `term-${++this.next}`,
+      contextId: `context-${this.next}`,
       kind: "shell",
       shellSessionId: this.shell.create(),
       running: true,
@@ -211,7 +243,10 @@ export class FakeTerminalSessions implements TerminalSessions, TerminalSettingsS
       kind: request.source ? "app" : "shell",
       title: app?.title ?? "Shell",
       ...(request.source
-        ? { source: request.source, principalId: `code:${request.source}:${this.next + 1}` }
+        ? {
+            source: request.source,
+            principalId: `code:${request.source}:${this.next + 1}`,
+          }
         : {}),
       ...(app?.icon ? { icon: app.icon } : {}),
     });

@@ -5,7 +5,6 @@ export const PREFIX_KEYS = [
   { id: "C-space", label: "Ctrl-Space" },
   { id: "C-a", label: "Ctrl-A" },
   { id: "C-b", label: "Ctrl-B" },
-  { id: "C-g", label: "Ctrl-G" },
   { id: "C-]", label: "Ctrl-]" },
   { id: "C-\\", label: "Ctrl-\\" },
 ] as const;
@@ -29,6 +28,7 @@ export type Command =
   | { kind: "prev-tab" }
   | { kind: "last-tab" }
   | { kind: "copy-mode" }
+  | { kind: "search" }
   | { kind: "links" }
   | { kind: "approvals" }
   | { kind: "logs" }
@@ -39,6 +39,7 @@ export type Command =
   | { kind: "reattach" }
   | { kind: "workspace" }
   | { kind: "quit" }
+  | { kind: "cancel" }
   | { kind: "send-prefix" };
 
 export interface Binding {
@@ -55,14 +56,39 @@ export const PREFIX_BINDINGS: readonly Binding[] = [
     command: { kind: "palette" },
     description: "Command palette: apps, sessions, actions",
   },
-  { key: "c", command: { kind: "launcher" }, description: "Start an app or a shell, or resume a session" },
-  { key: "1-9", command: { kind: "tab", index: 0 }, description: "Go to tab 1-9" },
+  {
+    key: "c",
+    command: { kind: "launcher" },
+    description: "Start an app or a shell, or resume a session",
+  },
+  {
+    key: "1-9",
+    command: { kind: "tab", index: 0 },
+    description: "Go to tab 1-9",
+  },
   { key: "n", command: { kind: "next-tab" }, description: "Next tab" },
   { key: "p", command: { kind: "prev-tab" }, description: "Previous tab" },
   { key: "Tab", command: { kind: "last-tab" }, description: "Last used tab" },
-  { key: "[", command: { kind: "copy-mode" }, description: "Scroll back and copy text" },
-  { key: "o", command: { kind: "links" }, description: "Links in this tab (open one in your browser)" },
-  { key: "a", command: { kind: "approvals" }, description: "Approvals waiting for you" },
+  {
+    key: "[",
+    command: { kind: "copy-mode" },
+    description: "Scroll back and copy text",
+  },
+  {
+    key: "/",
+    command: { kind: "search" },
+    description: "Search retained terminal rows (literal, case-sensitive)",
+  },
+  {
+    key: "o",
+    command: { kind: "links" },
+    description: "Links in this tab (open one in your browser)",
+  },
+  {
+    key: "a",
+    command: { kind: "approvals" },
+    description: "Approvals waiting for you",
+  },
   { key: "l", command: { kind: "logs" }, description: "Browser log" },
   { key: "s", command: { kind: "settings" }, description: "Settings" },
   {
@@ -70,11 +96,27 @@ export const PREFIX_BINDINGS: readonly Binding[] = [
     command: { kind: "detach" },
     description: "Detach: close this tab, the program keeps running",
   },
-  { key: "x", command: { kind: "close" }, description: "End this session for good (stops the program)" },
-  { key: "r", command: { kind: "reattach" }, description: "Reattach this tab (restarts an app that ended)" },
+  {
+    key: "x",
+    command: { kind: "close" },
+    description: "End this session for good (stops the program)",
+  },
+  {
+    key: "r",
+    command: { kind: "reattach" },
+    description: "Reattach this tab (restarts an app that ended)",
+  },
   { key: "w", command: { kind: "workspace" }, description: "Switch workspace" },
-  { key: "?", command: { kind: "help" }, description: "Help: every key binding" },
-  { key: "q", command: { kind: "quit" }, description: "Quit (programs keep running; resume them later)" },
+  {
+    key: "?",
+    command: { kind: "help" },
+    description: "Help: every key binding",
+  },
+  {
+    key: "q",
+    command: { kind: "quit" },
+    description: "Quit (programs keep running; resume them later)",
+  },
 ];
 
 /** How the person opens approvals with this prefix, e.g. "Ctrl-Space a" (apps mention it). */
@@ -141,6 +183,10 @@ export class KeyRouter {
       }
       this.armed = false;
       out.push({ kind: "prefix", pending: false });
+      if (event.name === "C-g") {
+        out.push({ kind: "command", command: { kind: "cancel" } });
+        continue;
+      }
       if (event.name === "escape" || event.name === "C-c") continue;
       const command = commandForKey(event.name, this.prefix);
       out.push(command ? { kind: "command", command } : { kind: "unbound", key: event.name });
@@ -153,7 +199,6 @@ const PREFIX_BYTES: Record<PrefixKeyId, string> = {
   "C-space": "\x00",
   "C-a": "\x01",
   "C-b": "\x02",
-  "C-g": "\x07",
   "C-]": "\x1d",
   "C-\\": "\x1c",
 };

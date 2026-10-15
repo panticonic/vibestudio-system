@@ -50,14 +50,16 @@ export function emojiIcon(icon: string | undefined): string | undefined {
  * built or removed, or the workspace finished starting), so the launcher's
  * list follows the workspace instead of a snapshot taken at startup.
  */
-export function onTerminalAppsChanged(rpc: RpcClient, listener: () => void): () => void {
+export function onTerminalAppsChanged(rpc: RpcClient, listener: () => void): () => Promise<void> {
   const events = new EventsClient(rpc);
   const stop = events.on("workspace:units-changed", () => listener());
-  void events
+  const admission = events
     .subscribe("workspace:units-changed")
-    .catch((error: unknown) => console.warn("[terminal-browser] app updates are unavailable:", error));
+    .catch((error: unknown) =>
+      console.warn("[terminal-browser] app updates are unavailable:", error)
+    );
   return () => {
     stop();
-    void events.unsubscribe("workspace:units-changed").catch(() => {});
+    return admission.then(() => events.unsubscribe("workspace:units-changed"));
   };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fuzzyFilter, fuzzyMatch } from "./fuzzy.js";
-import { KeyRouter, prefixBytes } from "./keymap.js";
+import { KeyRouter, prefixBytes, isPrefixKeyId } from "./keymap.js";
+import { parseSettings } from "../settings.js";
 import { InputTokenizer, navKeyOf, type InputEvent, type KeyEvent } from "./tokenizer.js";
 
 const names = (events: InputEvent[]) => events.map((e) => (e.kind === "key" ? e.name : e.kind));
@@ -25,8 +26,34 @@ describe("InputTokenizer", () => {
     expect(events[1]!.seq).toBe("\x1b[A");
   });
 
-  it("treats a lone ESC at the end of a read as Escape, without waiting", () => {
-    expect(names(new InputTokenizer().push("\x1b"))).toEqual(["escape"]);
+  it("holds ambiguous legacy ESC and resolves it only through authoritative input", () => {
+    const tokenizer = new InputTokenizer();
+    expect(tokenizer.push("\x1b")).toEqual([]);
+    expect(names(tokenizer.push("[A"))).toEqual(["up"]);
+    expect(tokenizer.push("\x1b")).toEqual([]);
+    expect(names(tokenizer.push("\x07x"))).toEqual(["C-g", "x"]);
+  });
+  it("preserves the session's raw bytes when explicit Ctrl-G resolves a pending legacy ESC", () => {
+    const tokenizer = new InputTokenizer();
+    expect(tokenizer.push("\x1b")).toEqual([]);
+    expect(tokenizer.push("\x07")).toEqual([{ kind: "key", name: "C-g", seq: "\x1b\x07" }]);
+    expect(names(tokenizer.push("x"))).toEqual(["x"]);
+  });
+
+  it("decodes enhanced Escape and control keys without a timing heuristic", () => {
+    const tokenizer = new InputTokenizer();
+    expect(names(tokenizer.push("\x1b[27u\x1b[99;5u\x1b[32;5u\x1b[?1u"))).toEqual([
+      "escape",
+      "C-c",
+      "C-space",
+    ]);
+  });
+
+  it("does not split an initial ESC away from a fragmented paste", () => {
+    const tokenizer = new InputTokenizer();
+    expect(tokenizer.push("\x1b")).toEqual([]);
+    expect(tokenizer.push("[200~1\x00q")).toEqual([]);
+    expect(tokenizer.push("\x1b[201~")).toEqual([{ kind: "paste", text: "1\x00q" }]);
   });
 
   it("reassembles escape sequences split across reads", () => {
@@ -49,7 +76,13 @@ describe("InputTokenizer", () => {
     const [press, wheel, release] = new InputTokenizer().push(
       "\x1b[<0;5;3M\x1b[<64;1;1M\x1b[<0;5;3m"
     );
-    expect(press).toMatchObject({ kind: "mouse", action: "press", x: 4, y: 2, button: 0 });
+    expect(press).toMatchObject({
+      kind: "mouse",
+      action: "press",
+      x: 4,
+      y: 2,
+      button: 0,
+    });
     expect(wheel).toMatchObject({ kind: "mouse", action: "wheel-up" });
     expect(release).toMatchObject({ kind: "mouse", action: "release" });
   });
@@ -72,6 +105,16 @@ describe("InputTokenizer", () => {
 
 describe("KeyRouter", () => {
   const route = (router: KeyRouter, text: string) => router.route(new InputTokenizer().push(text));
+  it("reserves Ctrl-G for browser cancellation, including prefix-armed fragmented ESC", () => {
+    expect(isPrefixKeyId("C-g")).toBe(false);
+    expect(parseSettings({ prefixKey: "C-g" }).prefixKey).toBe("C-space");
+    const router = new KeyRouter("C-space");
+    const tokenizer = new InputTokenizer();
+    router.route(tokenizer.push("\x00\x1b"));
+    expect(router.route(tokenizer.push("\x07"))).toEqual([{ kind: "prefix", pending: false }, { kind: "command", command: { kind: "cancel" } }]);
+    expect(router.pending).toBe(false);
+    expect(router.route(tokenizer.push("x"))).toEqual([{ kind: "input", event: { kind: "key", name: "x", seq: "x" } }]);
+  });
 
   it("passes every key but the prefix through to the focused target", () => {
     const router = new KeyRouter("C-space");
@@ -105,11 +148,14 @@ describe("KeyRouter", () => {
       command: { kind: "send-prefix" },
     });
     expect(prefixBytes("C-a")).toBe("\x01");
-    expect(route(router, "\x01\x1b")).toEqual([
+    expect(route(router, "\x01\x1b[27u")).toEqual([
       { kind: "prefix", pending: true },
       { kind: "prefix", pending: false },
     ]);
-    expect(route(router, "\x01Z")).toContainEqual({ kind: "unbound", key: "Z" });
+    expect(route(router, "\x01Z")).toContainEqual({
+      kind: "unbound",
+      key: "Z",
+    });
     expect(router.pending).toBe(false);
   });
 
@@ -123,7 +169,10 @@ describe("KeyRouter", () => {
     const router = new KeyRouter("C-space");
     router.setPrefix("C-b");
     expect(route(router, "\x00")[0]).toMatchObject({ kind: "input" });
-    expect(route(router, "\x02?")).toContainEqual({ kind: "command", command: { kind: "help" } });
+    expect(route(router, "\x02?")).toContainEqual({
+      kind: "command",
+      command: { kind: "help" },
+    });
   });
 });
 

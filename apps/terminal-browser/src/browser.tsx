@@ -1,5 +1,6 @@
 import React from "react";
-import { Text } from "ink";
+import { withRpcAbortSignal, isRpcAbortedBy } from "@vibestudio/rpc";
+import { Box, Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { DurableObservation } from "@vibestudio/shell-core/durableObservation";
 import type {
@@ -11,6 +12,13 @@ import type {
 import { createApprovalsClient, type ApprovalsClient } from "./approvals/approvalsClient.js";
 import { ApprovalsOverlay } from "./approvals/ApprovalsOverlay.js";
 import { approvalRequestedBy } from "./approvals/approvalRequester.js";
+import { installReviewOutcomeLines } from "./approvals/installReviewOutcome.js";
+import {
+  editProtectedInput,
+  isProtectedApproval,
+  newProtectedInput,
+  type ProtectedInputState,
+} from "./approvals/protectedInput.js";
 import {
   applyInstallReviewNav,
   focusedRowKeyOf,
@@ -75,15 +83,18 @@ import {
   SettingsOverlay,
   StatusBar,
   TabStrip,
+  tabWindow,
   type ListItem,
   type LogLine,
   type StatusView,
   type TabView,
 } from "./ui/chrome.js";
 import { clampScroll } from "./ui/Scrollable.js";
+import { Scrollable } from "./ui/Scrollable.js";
 
 const MIN_COLUMNS = 40;
-const MIN_ROWS = 8;
+// Eight body rows keep an approval's title, queue, detail and decision hints visible.
+const MIN_ROWS = 10;
 const MAX_LOG_LINES = 1000;
 
 interface ListState {
@@ -94,17 +105,41 @@ interface ListState {
 type Overlay =
   | ({ kind: "palette" } & ListState)
   | ({ kind: "launcher" } & ListState)
+  | ({ kind: "search"; sessionId: string } & ListState)
+  | ({ kind: "log-search" } & ListState)
   | {
       kind: "approvals";
-      selected: number;
+      approvalId: string | null;
       scroll: number;
       contentHeight: number;
       nav: InstallReviewNavState;
       taskRules: TaskRulesNavState;
+      protectedInput: ProtectedInputState;
       origin?: string;
     }
   | { kind: "help"; scroll: number; contentHeight: number }
   | { kind: "logs"; scroll: number }
+  | {
+      kind: "detail";
+      title: string;
+      text: string;
+      scroll: number;
+      contentHeight: number;
+    }
+  | ({
+      kind: "file";
+      title: string;
+      labels: string[];
+      submitLabel: string;
+      paths: string[];
+      stage: number;
+      pending: boolean;
+      error: string | null;
+      scroll: number;
+      contentHeight: number;
+      controller: AbortController;
+      submit: (paths: string[], signal: AbortSignal) => Promise<string>;
+    } & ListState)
   | { kind: "settings"; selected: number; error: string | null }
   | ({
       kind: "workspaces";
@@ -152,6 +187,12 @@ export interface TerminalBrowserServices {
  */
 export class TerminalBrowser {
   private readonly terminal: TerminalOwnership;
+  private readonly lifetime = new AbortController();
+  private readonly ownedTasks = new Set<Promise<unknown>>();
+  private readonly retirementFailures: unknown[] = [];
+  private settingsRevision = 0;
+  private settingsLoaded = false;
+  private settingsWrites: Promise<void> = Promise.resolve();
   private readonly tokenizer = new InputTokenizer();
   private readonly router: KeyRouter;
   private readonly services: TerminalBrowserServices;
@@ -187,6 +228,7 @@ export class TerminalBrowser {
   private overlay: Overlay | null = null;
   private launcher: ListState = { query: "", selected: 0 };
   private copy: CopyState | null = null;
+  private lastSearch = "";
   private notice: string | null = null;
   private readonly logs: LogLine[] = [];
   private connection: TerminalServerConnectionState;
@@ -198,24 +240,29 @@ export class TerminalBrowser {
     resolve: (exit: TerminalBrowserExit) => void;
     reject: (error: unknown) => void;
   };
-  private readonly cleanups: Array<() => void> = [];
+  private readonly cleanups: Array<() => void | Promise<void>> = [];
   private console: CapturedConsole | null = null;
 
   constructor(
     private readonly host: TerminalBrowserHost,
     services?: TerminalBrowserServices
   ) {
-    this.terminal = new TerminalOwnership({ stdin: host.stdin, stdout: host.stdout });
+    this.terminal = new TerminalOwnership({
+      stdin: host.stdin,
+      stdout: host.stdout,
+    });
     this.router = new KeyRouter(this.settings.prefixKey);
     // Settings live in System (the browser's app principal); the workspace it
     // shows owns the apps, the person's sessions and their approvals, reached
     // as this device's session there.
     this.services = services ?? {
-      sessions: createTerminalSessions(host.workspaceRpc),
-      settings: createTerminalSessions(host.rpc),
+      sessions: createTerminalSessions(withRpcAbortSignal(host.workspaceRpc, this.lifetime.signal)),
+      settings: createTerminalSessions(withRpcAbortSignal(host.rpc, this.lifetime.signal)),
     };
-    this.shell = shellClient(host.workspaceRpc);
-    this.approvalsClient = createApprovalsClient(host.workspaceRpc);
+    this.shell = shellClient(withRpcAbortSignal(host.workspaceRpc, this.lifetime.signal));
+    this.approvalsClient = createApprovalsClient(
+      withRpcAbortSignal(host.workspaceRpc, this.lifetime.signal)
+    );
     this.connection = host.connectionState();
     const layout = this.layout();
     const onLayerFrame = () => this.compositor.invalidate();
@@ -249,8 +296,9 @@ export class TerminalBrowser {
       this.console = captureConsole((level, message) => this.log(level, message));
       this.terminal.acquire({ mouse: this.settings.mouse });
       this.listen();
+      if (this.finished) return done;
       this.renderChrome();
-      void this.load();
+      void this.own(this.load()).catch((error) => this.fail(error));
     } catch (error) {
       this.fail(error);
     }
@@ -261,13 +309,24 @@ export class TerminalBrowser {
 
   private listen(): void {
     const { stdin, stdout } = this.host;
+    const cancel = () => this.finish({ kind: "quit" }, this.host.signal.reason);
+    this.host.signal.addEventListener("abort", cancel, { once: true });
+    this.cleanups.push(() => this.host.signal.removeEventListener("abort", cancel));
+    if (this.host.signal.aborted) {
+      cancel();
+      return;
+    }
     const onData = (chunk: Buffer | string) => this.guard(() => this.onInput(chunk));
     stdin.on("data", onData);
-    this.cleanups.push(() => stdin.off("data", onData));
+    this.cleanups.push(() => {
+      stdin.off("data", onData);
+    });
 
     const onResize = () => this.guard(() => this.onResize());
     stdout.on("resize", onResize);
-    this.cleanups.push(() => stdout.off("resize", onResize));
+    this.cleanups.push(() => {
+      stdout.off("resize", onResize);
+    });
 
     this.cleanups.push(
       this.host.onConnectionState((state) => this.guard(() => this.onConnectionState(state)))
@@ -282,10 +341,14 @@ export class TerminalBrowser {
       });
     for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"] as const) {
       process.on(signal, onSignal);
-      this.cleanups.push(() => process.off(signal, onSignal));
+      this.cleanups.push(() => {
+        process.off(signal, onSignal);
+      });
     }
     process.on("SIGCONT", onContinue);
-    this.cleanups.push(() => process.off("SIGCONT", onContinue));
+    this.cleanups.push(() => {
+      process.off("SIGCONT", onContinue);
+    });
 
     const approvalObservation = this.approvalsClient.observe(
       (pending) => this.guard(() => this.applyApprovals(pending)),
@@ -294,30 +357,43 @@ export class TerminalBrowser {
     this.approvalObservation = approvalObservation;
     this.cleanups.push(() => {
       if (this.approvalObservation === approvalObservation) this.approvalObservation = null;
-      void approvalObservation
-        .stop()
-        .catch((error: unknown) =>
-          this.log("warn", `Approval queue retirement failed: ${describeError(error)}`)
-        );
+      return approvalObservation.stop(this.lifetime.signal.reason);
     });
     this.cleanups.push(
       this.services.sessions.onChange((entries) => this.guard(() => this.applyEntries(entries)))
     );
     this.cleanups.push(
-      onTerminalAppsChanged(this.host.workspaceRpc, () => this.guard(() => void this.refreshApps()))
+      onTerminalAppsChanged(withRpcAbortSignal(this.host.workspaceRpc, this.lifetime.signal), () =>
+        this.guard(() => void this.own(this.refreshApps()))
+      )
     );
   }
 
   private async load(): Promise<void> {
-    const settings = this.services.settings.getSettings().then(
-      (raw) => this.applySettings(parseSettings(raw), false),
-      (error: unknown) =>
-        this.log("warn", `Settings could not be loaded; using defaults: ${describeError(error)}`)
-    );
+    const revision = this.settingsRevision;
+    const settings = this.services.settings
+      .getSettings()
+      .then(
+        (raw) => {
+          if (revision === this.settingsRevision && !this.finished)
+            this.applySettings(parseSettings(raw), false);
+          if (raw["prefixKey"] === "C-g" && !this.finished)
+            this.setNotice(
+              "Ctrl-G is reserved for browser cancellation; your prefix is now Ctrl-Space. Choose another in Settings."
+            );
+        },
+        (error: unknown) => {
+          if (this.cancelled(error)) return;
+          this.log("warn", `Settings could not be loaded; using defaults: ${describeError(error)}`);
+        }
+      )
+      .finally(() => {
+        this.settingsLoaded = true;
+        this.changed();
+      });
     const sessions = this.refreshSessions();
     const apps = this.refreshApps();
-    void this.refreshApprovals();
-    await Promise.all([settings, sessions, apps]);
+    await Promise.all([settings, sessions, apps, this.refreshApprovals()]);
     if (this.finished || this.sessions.length > 0) return;
     // Resume where the person left off: the most recently active running session.
     const latest = this.entries?.find((entry) => entry.running && entry.shellSessionId);
@@ -337,23 +413,74 @@ export class TerminalBrowser {
   private finish(exit: TerminalBrowserExit, error?: unknown): void {
     if (this.finished) return;
     this.finished = true;
-    for (const cleanup of this.cleanups.splice(0).reverse()) {
-      try {
-        cleanup();
-      } catch {
-        // keep tearing down
-      }
-    }
-    for (const session of this.sessions) session.dispose();
-    this.sessions = [];
+    this.lifetime.abort(error ?? new Error("Terminal browser closed"));
     this.compositor.stop();
-    this.tabsLayer.dispose();
-    this.statusLayer.dispose();
-    this.overlayLayer.dispose();
-    this.terminal.release();
-    this.console?.restore();
-    if (error !== undefined) this.settle.reject(error);
-    else this.settle.resolve(exit);
+    const tasks = [
+      ...this.cleanups
+        .splice(0)
+        .reverse()
+        .map((cleanup) => Promise.resolve().then(cleanup)),
+      ...this.sessions.map((session) => session.dispose()),
+      ...this.ownedTasks,
+      this.tabsLayer.settled(),
+      this.statusLayer.settled(),
+      this.overlayLayer.settled(),
+    ];
+    this.sessions = [];
+    void (async () => {
+      const results = await Promise.allSettled(tasks);
+      const failures = [
+        ...(error === undefined ? [] : [error]),
+        ...this.retirementFailures,
+        ...results.flatMap((result) =>
+          result.status === "rejected" &&
+          !isRpcAbortedBy(result.reason, this.lifetime.signal.reason)
+            ? [result.reason]
+            : []
+        ),
+      ];
+      for (const retire of [
+        () => this.tabsLayer.dispose(),
+        () => this.statusLayer.dispose(),
+        () => this.overlayLayer.dispose(),
+        () => this.terminal.release(),
+        () => this.console?.restore(),
+      ]) {
+        try {
+          retire();
+        } catch (cause) {
+          failures.push(cause);
+        }
+      }
+      const unique = [...new Set(failures)];
+      if (unique.length)
+        this.settle.reject(
+          unique.length === 1
+            ? unique[0]
+            : new AggregateError(unique, "Terminal browser retirement failed")
+        );
+      else this.settle.resolve(exit);
+    })();
+  }
+
+  private own<T>(task: Promise<T>): Promise<T> {
+    this.ownedTasks.add(task);
+    void task.then(
+      () => this.ownedTasks.delete(task),
+      (error) => {
+        this.ownedTasks.delete(task);
+        if (!isRpcAbortedBy(error, this.lifetime.signal.reason))
+          this.retirementFailures.push(error);
+      }
+    );
+    return task;
+  }
+
+  /** Only this owner's exact cancellation is normal; failed joins retain their cause. */
+  private cancelled(error: unknown): boolean {
+    if (!this.lifetime.signal.aborted) return false;
+    if (isRpcAbortedBy(error, this.lifetime.signal.reason)) return true;
+    throw error;
   }
 
   private fail(error: unknown): void {
@@ -381,13 +508,14 @@ export class TerminalBrowser {
       this.log("info", "Reconnected to the server");
       // The attachments did not survive the outage: resume each after the last byte it got.
       for (const session of this.sessions) {
-        if (session.status.kind === "disconnected" || session.status.kind === "error") {
-          void session.attach(this.sessions[this.focusedIndex] === session, false);
+        if (session.entry.running && session.entry.shellSessionId) {
+          void this.own(session.attach(this.sessions[this.focusedIndex] === session, false));
         }
       }
-      void this.refreshApprovals();
-      void this.refreshSessions();
+      void this.own(this.refreshApprovals());
+      void this.own(this.refreshSessions());
     } else if (state.phase === "reconnecting") {
+      for (const session of this.sessions) void this.own(session.detach());
       this.log("warn", `Connection interrupted: ${state.cause}`);
     }
     this.changed();
@@ -395,6 +523,7 @@ export class TerminalBrowser {
 
   private onResize(): void {
     const layout = this.layout();
+    this.router.setPrefix(this.settings.prefixKey);
     for (const session of this.sessions) session.resize(this.sessionSize(layout));
     this.tabsLayer.resize({ columns: layout.columns, rows: 1 });
     this.statusLayer.resize({ columns: layout.columns, rows: 1 });
@@ -413,6 +542,7 @@ export class TerminalBrowser {
       if (generation === this.entriesGeneration) this.applyEntries(entries);
       this.sessionsProblem = null;
     } catch (error) {
+      if (this.cancelled(error)) return;
       this.sessionsProblem = describeError(error);
       this.entries = this.entries ?? [];
       this.log("warn", `Sessions could not be listed: ${this.sessionsProblem}`);
@@ -438,7 +568,7 @@ export class TerminalBrowser {
       }
       this.listedTabs.add(session);
       if (session.updateEntry(entry) && entry.shellSessionId) {
-        void session.attach(session === this.focusedSession(), true);
+        void this.own(session.attach(session === this.focusedSession(), true));
       }
     }
     this.changed();
@@ -452,9 +582,12 @@ export class TerminalBrowser {
 
   private async refreshApps(): Promise<void> {
     try {
-      this.apps = await listTerminalApps(this.host.workspaceRpc);
+      this.apps = await listTerminalApps(
+        withRpcAbortSignal(this.host.workspaceRpc, this.lifetime.signal)
+      );
       this.appsProblem = null;
     } catch (error) {
+      if (this.cancelled(error)) return;
       this.appsProblem = describeError(error);
       this.apps = this.apps ?? [];
       this.log("error", `Could not list terminal apps: ${this.appsProblem}`);
@@ -466,6 +599,7 @@ export class TerminalBrowser {
     try {
       await this.approvalObservation?.refresh();
     } catch (error) {
+      if (this.cancelled(error)) return;
       this.log("warn", `Approvals could not be refreshed: ${describeError(error)}`);
     }
   }
@@ -480,8 +614,18 @@ export class TerminalBrowser {
     if (this.overlay?.kind === "approvals") {
       const overlay = this.overlay;
       // The queue was worked through: get out of the way. (Opened empty: stay, it says so.)
-      if (emptied) this.overlay = null;
-      else overlay.selected = Math.max(0, Math.min(overlay.selected, pending.length - 1));
+      if (emptied) {
+        overlay.protectedInput = newProtectedInput();
+        this.overlay = null;
+      } else if (!pending.some((approval) => approval.approvalId === overlay.approvalId)) {
+        // Removal never transfers consent to a different request. Selecting a
+        // replacement belongs to explicit navigation, not queue reordering.
+        overlay.approvalId = null;
+        overlay.scroll = 0;
+        overlay.nav = INITIAL_INSTALL_REVIEW_NAV;
+        overlay.taskRules = INITIAL_TASK_RULES_NAV;
+        overlay.protectedInput = newProtectedInput();
+      }
     } else if (focused && this.settings.autoOpenApprovals && !this.isModalOpen()) {
       const index = pending.findIndex(
         (approval) =>
@@ -508,7 +652,10 @@ export class TerminalBrowser {
     };
   }
 
-  private sessionSize(layout = this.layout()): { columns: number; rows: number } {
+  private sessionSize(layout = this.layout()): {
+    columns: number;
+    rows: number;
+  } {
     return { columns: layout.body.width, rows: layout.body.height };
   }
 
@@ -539,7 +686,11 @@ export class TerminalBrowser {
     const cursor = session.grid.cursor();
     if (!cursor.visible || cursor.x >= layout.body.width || cursor.y >= layout.body.height)
       return hidden;
-    return { x: layout.body.x + cursor.x, y: layout.body.y + cursor.y, visible: true };
+    return {
+      x: layout.body.x + cursor.x,
+      y: layout.body.y + cursor.y,
+      visible: true,
+    };
   }
 
   /** Schedule one chrome render for this event-loop turn. */
@@ -570,7 +721,10 @@ export class TerminalBrowser {
     this.overlayVisible = overlay !== null;
     if (overlay) {
       this.overlayRect = overlay.rect;
-      this.overlayLayer.resize({ columns: overlay.rect.width, rows: overlay.rect.height });
+      this.overlayLayer.resize({
+        columns: overlay.rect.width,
+        rows: overlay.rect.height,
+      });
       this.overlayLayer.update(overlay.element);
     }
     this.compositor.invalidate();
@@ -588,8 +742,9 @@ export class TerminalBrowser {
         ...(icon ? { icon } : {}),
         focused: index === this.focusedIndex,
         badge: approvals ? "!" : session.attention ? "●" : null,
-        status:
-          kind === "live" || kind === "attaching"
+        status: session.entry.failure
+          ? "problem"
+          : kind === "live" || kind === "attaching"
             ? kind
             : kind === "exited"
               ? "ended"
@@ -615,7 +770,7 @@ export class TerminalBrowser {
       prefixLabel: prefix,
       prefixPending: this.router.pending,
       ...(hint ? { hint } : {}),
-      notice: this.notice,
+      notice: this.notice ?? this.focusedSession()?.entry.failure ?? null,
     };
   }
 
@@ -641,10 +796,7 @@ export class TerminalBrowser {
       const width = Math.min(76, body.width - 4);
       // Border and title, plus every line as it wraps inside the border and padding.
       const textWidth = Math.max(1, width - 4);
-      const wrapped = message.lines.reduce(
-        (rows, line) => rows + wrappedRows(line, textWidth),
-        0
-      );
+      const wrapped = message.lines.reduce((rows, line) => rows + wrappedRows(line, textWidth), 0);
       const height = Math.min(wrapped + 3, body.height);
       // An ended program's last output stays readable above the note.
       const rect =
@@ -656,9 +808,127 @@ export class TerminalBrowser {
               height,
             }
           : this.centered(layout, width, height);
-      return { rect, element: <MessageBox {...message} width={rect.width} height={rect.height} /> };
+      return {
+        rect,
+        element: <MessageBox {...message} width={rect.width} height={rect.height} />,
+      };
     }
     switch (overlay.kind) {
+      case "log-search": {
+        const rect = body;
+        const logs = this.logs.filter((line) =>
+          line.message.toLocaleLowerCase().includes(overlay.query.toLocaleLowerCase())
+        );
+        overlay.selected = Math.min(overlay.selected, Math.max(0, logs.length - 1));
+        return {
+          rect,
+          element: (
+            <ListOverlay
+              title="Inspect browser log entries"
+              query={overlay.query}
+              placeholder="filter messages"
+              items={logs.map((line, index) => ({
+                key: String(index),
+                label: `${line.level.toUpperCase()} ${line.message}`,
+                detail: new Date(line.time).toISOString(),
+              }))}
+              selected={overlay.selected}
+              width={rect.width}
+              height={rect.height}
+              empty={<Text dimColor>No matching log entries.</Text>}
+              footer="↑↓ entry · Enter full detail · Ctrl-G close"
+            />
+          ),
+        };
+      }
+      case "file": {
+        const rect = this.centered(layout, Math.min(90, body.width), Math.min(12, body.height));
+        return {
+          rect,
+          element: (
+            <Box height={rect.height} flexDirection="column" borderStyle="round" paddingX={1}>
+              <Text bold>{overlay.title}</Text>
+              <Scrollable
+                height={Math.max(1, rect.height - 4)}
+                scroll={overlay.scroll}
+                onContentHeight={(height) => {
+                  overlay.contentHeight = height;
+                }}
+              >
+                <Text>
+                  {[
+                    ...overlay.paths.map((path, index) => `${overlay.labels[index]}: ${path}`),
+                    ...(overlay.stage < overlay.labels.length
+                      ? [`${overlay.labels[overlay.stage]}: ${overlay.query}`]
+                      : [overlay.submitLabel]),
+                    overlay.pending
+                      ? "Working… Ctrl-G cancels and joins this operation."
+                      : "Local output files are never overwritten.",
+                    ...(overlay.error ? [overlay.error] : []),
+                  ].join("\n")}
+                </Text>
+              </Scrollable>
+              <Text>
+                {overlay.pending
+                  ? "Ctrl-G cancel and join"
+                  : overlay.stage < overlay.labels.length
+                    ? "Enter next · Shift-Tab back · PgUp/PgDn scroll · Ctrl-G cancel"
+                    : `Enter: ${overlay.submitLabel} · Shift-Tab edit · Ctrl-G cancel`}
+              </Text>
+            </Box>
+          ),
+        };
+      }
+      case "detail": {
+        const rect = body;
+        return {
+          rect,
+          element: (
+            <Box borderStyle="round" paddingX={1} height={rect.height} flexDirection="column">
+              <Text bold>{overlay.title}</Text>
+              <Scrollable
+                height={Math.max(1, rect.height - 4)}
+                scroll={overlay.scroll}
+                onContentHeight={(height) => {
+                  overlay.contentHeight = height;
+                }}
+              >
+                <Text>{overlay.text}</Text>
+              </Scrollable>
+              <Text dimColor>↑↓/PgUp/PgDn scroll · c copy · e save to file · Ctrl-G close</Text>
+            </Box>
+          ),
+        };
+      }
+      case "search": {
+        const rect = this.centered(layout, Math.min(90, body.width), body.height);
+        const session = this.sessions.find((tab) => tab.sessionId === overlay.sessionId);
+        const matches = session?.grid.search(overlay.query) ?? [];
+        overlay.selected = Math.min(overlay.selected, Math.max(0, matches.length - 1));
+        return {
+          rect,
+          element: (
+            <ListOverlay
+              title={`Search scrollback · ${session?.title ?? "tab ended"}`}
+              query={overlay.query}
+              placeholder="literal, case-sensitive search"
+              items={matches.map((match, index) => ({
+                key: String(index),
+                label: `${match.start.y + 1}: ${match.text}`,
+              }))}
+              selected={overlay.selected}
+              width={rect.width}
+              height={rect.height}
+              empty={
+                <Text dimColor>
+                  {overlay.query ? "No matching retained rows." : "Type to search scrollback."}
+                </Text>
+              }
+              footer="↑↓ match · Enter inspect/select · Ctrl-G close · n/N repeat in copy mode"
+            />
+          ),
+        };
+      }
       case "palette": {
         const rect = {
           ...this.centered(layout, Math.min(80, body.width - 4), Math.min(22, body.height)),
@@ -721,8 +991,9 @@ export class TerminalBrowser {
           element: (
             <ApprovalsOverlay
               pending={this.approvals}
-              selectedIndex={overlay.selected}
+              selectedIndex={this.approvalIndex(overlay)}
               {...this.installReviewProps(overlay)}
+              protectedInput={overlay.protectedInput}
               height={body.height}
               detailScroll={overlay.scroll}
               onDetailHeight={(rows) => {
@@ -773,6 +1044,7 @@ export class TerminalBrowser {
               width={rect.width}
               height={rect.height}
               error={overlay.error}
+              loading={!this.settingsLoaded}
             />
           ),
         };
@@ -884,7 +1156,11 @@ export class TerminalBrowser {
     const restart = session.entry.kind === "app" ? "start it again" : "open a new shell";
     switch (session.status.kind) {
       case "attaching":
-        return { title: `Attaching to ${session.title}…`, lines: [], tone: "info" };
+        return {
+          title: `Attaching to ${session.title}…`,
+          lines: [],
+          tone: "info",
+        };
       case "exited":
         return {
           title: `${session.title} ${describeExit(session.status)}`,
@@ -920,12 +1196,22 @@ export class TerminalBrowser {
               tone: "warn",
             };
       case "live":
-        return { title: session.title, lines: [], tone: "info" };
+        return {
+          title: session.title,
+          lines: session.entry.failure
+            ? [
+                session.entry.failure,
+                "The known program remains running; its session observation failed.",
+                `${prefix} r refresh the attachment`,
+              ]
+            : ["Running and attached."],
+          tone: session.entry.failure ? "warn" : "info",
+        };
     }
   }
 
   private installReviewProps(overlay: Extract<Overlay, { kind: "approvals" }>) {
-    const current = this.approvals[overlay.selected];
+    const current = this.approvals[this.approvalIndex(overlay)];
     if (isTaskRulesApproval(current)) {
       return {
         taskRuleSelection: effectiveTaskRuleSelection(current, overlay.taskRules),
@@ -953,9 +1239,9 @@ export class TerminalBrowser {
         key: `resume:${entry.sessionId}`,
         section: "Resume",
         label: `${icon ? `${icon} ` : ""}${this.programTitles.get(entry.sessionId) ?? entry.title}`,
-        detail: `${this.kindLabel(entry)} · ${state} · active ${relativeTime(entry.lastActiveAt)}`,
+        detail: `${this.kindLabel(entry)} · ${state}${entry.failure ? ` · ${entry.failure}` : ""} · active ${relativeTime(entry.lastActiveAt)}`,
         hint: entry.running ? "running" : "restart",
-        run: () => void this.resume(entry),
+        run: () => void this.own(this.resume(entry)),
       });
     }
     if (this.sessionsProblem) {
@@ -976,7 +1262,7 @@ export class TerminalBrowser {
       label: "Shell",
       detail: `Your login shell in ${workspace}`,
       hint: "new",
-      run: () => void this.launch(null),
+      run: () => void this.own(this.launch(null)),
     });
     for (const app of this.apps ?? []) {
       entries.push({
@@ -985,7 +1271,7 @@ export class TerminalBrowser {
         label: `${app.icon ? `${app.icon} ` : ""}${app.title}`,
         detail: app.description ?? app.source,
         hint: "new",
-        run: () => void this.launch(app),
+        run: () => void this.own(this.launch(app)),
       });
     }
     if (this.appsProblem) {
@@ -1004,7 +1290,8 @@ export class TerminalBrowser {
         key: "start:none",
         section: "Start",
         label: `${workspace} has no terminal apps yet`,
-        detail: "Programs in terminal-apps/<name> appear here once built. Ask an agent to “make a terminal app that …”.",
+        detail:
+          "Programs in terminal-apps/<name> appear here once built. Ask an agent to “make a terminal app that …”.",
         hint: "help",
         run: () => {
           this.overlay = { kind: "help", scroll: 0, contentHeight: 0 };
@@ -1061,6 +1348,53 @@ export class TerminalBrowser {
       `${prefix} a`
     );
     if (focused) {
+      action("search", "Search terminal scrollback", () => this.openSearch(focused));
+      action("session-details", "Inspect full session status/error", () => {
+        const message = this.sessionMessage(focused);
+        this.openDetail(message.title, message.lines.join("\n"));
+      });
+      action("export-scrollback", "Save retained terminal output to a local file", () =>
+        this.saveTextPrompt(`Export ${focused.title}`, focused.grid.retainedText())
+      );
+      if (focused.entry.contextId) {
+        const contextId = focused.entry.contextId;
+        action("upload", "Upload a local file to this session context", () =>
+          this.filePrompt(
+            `Upload file · ${focused.title} · ${this.host.workspace.name}`,
+            ["Local source path", "Workspace destination path"],
+            "Upload and replace workspace destination",
+            async ([localPath, workspacePath], signal) => {
+              const result = await this.host.files.upload(
+                {
+                  contextId,
+                  localPath: localPath!,
+                  workspacePath: workspacePath!,
+                },
+                { signal }
+              );
+              return `Uploaded ${result.path} (${result.size} bytes). Use /attach ${result.path} in chat.`;
+            }
+          )
+        );
+        action("download", "Download a workspace file to this computer", () =>
+          this.filePrompt(
+            `Download file · ${focused.title} · ${this.host.workspace.name}`,
+            ["Workspace source path", "Local destination path"],
+            "Download to a new local file",
+            async ([workspacePath, localPath], signal) => {
+              const result = await this.host.files.download(
+                {
+                  contextId,
+                  workspacePath: workspacePath!,
+                  localPath: localPath!,
+                },
+                { signal }
+              );
+              return `Saved ${result.path} (${result.size} bytes)`;
+            }
+          )
+        );
+      }
       action(
         "copy",
         "Scroll back / copy text",
@@ -1088,6 +1422,9 @@ export class TerminalBrowser {
       action("close", `End ${focused.title}`, () => this.command({ kind: "close" }), `${prefix} x`);
     }
     action("logs", "Browser log", () => this.command({ kind: "logs" }), `${prefix} l`);
+    action("log-search", "Search and inspect browser log entries", () => {
+      this.overlay = { kind: "log-search", query: "", selected: 0 };
+    });
     action(
       "settings",
       "Settings (prefix key, approvals, bell, mouse)",
@@ -1165,9 +1502,32 @@ export class TerminalBrowser {
 
   private onInput(chunk: Buffer | string): void {
     const events = this.tokenizer.push(typeof chunk === "string" ? chunk : new Uint8Array(chunk));
+    if (this.layout().tooSmall) {
+      // Nothing hidden may accept input or consent. The explicit quit command
+      // remains available while the terminal cannot display a usable frame.
+      for (const routed of this.router.route(events)) {
+        if (
+          routed.kind === "command" &&
+          (routed.command.kind === "quit" || routed.command.kind === "cancel")
+        )
+          this.command(routed.command);
+        else if (
+          routed.kind === "input" &&
+          routed.event.kind === "key" &&
+          (routed.event.name === "C-g" || routed.event.name === "escape")
+        )
+          this.command({ kind: "cancel" });
+      }
+      return;
+    }
     let sessionData = "";
     const flush = () => {
-      if (sessionData) this.focusedSession()?.sendInput(sessionData);
+      if (sessionData) {
+        const session = this.focusedSession();
+        if (session && !session.isLive())
+          this.setNotice(`Input not sent: ${session.title} is ${session.status.kind}`);
+        else session?.sendInput(sessionData);
+      }
       sessionData = "";
     };
     for (const routed of this.router.route(events)) {
@@ -1198,7 +1558,8 @@ export class TerminalBrowser {
       }
       if (this.isModalOpen() || this.copy || !this.focusedSession()) {
         flush();
-        this.onUiInput(event);
+        if (event.kind === "key" && event.name === "C-g") this.command({ kind: "cancel" });
+        else this.onUiInput(event);
         continue;
       }
       sessionData += this.encodeForSession(event);
@@ -1215,6 +1576,19 @@ export class TerminalBrowser {
     const session = this.focusedSession()!;
     if (event.kind === "paste") {
       return session.grid.bracketedPaste() ? `\x1b[200~${event.text}\x1b[201~` : event.text;
+    }
+    if (event.protocol === "csi-u") {
+      if (session.grid.disambiguatedKeys()) return event.seq;
+      const point = event.codepoint!;
+      const modifiers = event.modifiers! - 1;
+      let bytes = String.fromCodePoint(point);
+      if (modifiers & 4) {
+        if (point === 32 || point === 64) bytes = "\x00";
+        else if ((point >= 65 && point <= 95) || (point >= 97 && point <= 122))
+          bytes = String.fromCharCode(point & 31);
+        else if (point === 63) bytes = "\x7f";
+      }
+      return (modifiers & 2 ? "\x1b" : "") + bytes;
     }
     // Mirror the program's cursor-key mode: the real terminal stays in normal mode.
     if (session.grid.applicationCursorKeys()) {
@@ -1234,14 +1608,20 @@ export class TerminalBrowser {
       event.x < layout.body.width;
     if (this.isModalOpen()) {
       if (event.action === "wheel-up" || event.action === "wheel-down") {
-        this.onUiInput({ kind: "key", name: event.action === "wheel-up" ? "up" : "down", seq: "" });
+        this.onUiInput({
+          kind: "key",
+          name: event.action === "wheel-up" ? "up" : "down",
+          seq: "",
+        });
       }
       return;
     }
     if (event.y === layout.tabs.y && event.action === "press" && this.sessions.length > 0) {
-      const share = Math.max(8, Math.floor((layout.columns - 1) / this.sessions.length));
-      const index = Math.floor(event.x / share);
-      if (index < this.sessions.length) this.focusTab(index);
+      const window = tabWindow(this.sessions.length, this.focusedIndex, layout.columns);
+      if (event.x < window.inset) this.focusTab(Math.max(0, window.first - 1));
+      else if (event.x >= window.inset + window.count * window.share)
+        this.focusTab(Math.min(this.sessions.length - 1, window.first + window.count));
+      else this.focusTab(window.first + Math.floor((event.x - window.inset) / window.share));
       return;
     }
     if (!session || !inBody) return;
@@ -1253,7 +1633,8 @@ export class TerminalBrowser {
     }
     if (event.action === "press" && event.code === 0) {
       // A click on a link the program drew (OSC 8) asks to open it.
-      const top = this.copy?.sessionId === session.sessionId ? this.copy.top : session.grid.liveTop();
+      const top =
+        this.copy?.sessionId === session.sessionId ? this.copy.top : session.grid.liveTop();
       const url = session.grid.linkAt(event.x - layout.body.x, top + event.y - layout.body.y);
       if (url) {
         this.copy = null;
@@ -1274,6 +1655,111 @@ export class TerminalBrowser {
       return;
     }
     switch (overlay.kind) {
+      case "log-search": {
+        const logs = this.logs.filter((line) =>
+          line.message.toLocaleLowerCase().includes(overlay.query.toLocaleLowerCase())
+        );
+        const result = editList(overlay, event, logs.length);
+        if (result === "cancel") this.overlay = null;
+        else if (result === "accept" && logs[overlay.selected]) {
+          const line = logs[overlay.selected]!;
+          this.openDetail(
+            `${line.level.toUpperCase()} · ${new Date(line.time).toISOString()}`,
+            line.message
+          );
+        }
+        break;
+      }
+      case "file": {
+        if (event.kind === "key" && event.name === "escape") {
+          overlay.controller.abort(new Error("File operation cancelled"));
+          this.overlay = null;
+          break;
+        }
+        if (overlay.pending) break;
+        if (event.kind === "key" && (event.name === "pageup" || event.name === "pagedown")) {
+          const height = Math.max(1, Math.min(12, this.layout().body.height) - 4);
+          overlay.scroll = clampScroll(
+            overlay.scroll + (event.name === "pageup" ? -height : height),
+            overlay.contentHeight,
+            height
+          );
+          break;
+        }
+        if (event.kind === "key" && event.name === "backtab" && overlay.stage > 0) {
+          if (overlay.stage < overlay.labels.length) overlay.paths[overlay.stage] = overlay.query;
+          overlay.stage--;
+          overlay.query = overlay.paths[overlay.stage] ?? "";
+          break;
+        }
+        const result =
+          overlay.stage < overlay.labels.length
+            ? editList(overlay, event, 0)
+            : event.kind === "key" && event.name === "enter"
+              ? "accept"
+              : null;
+        if (result === "accept") {
+          if (overlay.stage < overlay.labels.length && !overlay.query.trim()) {
+            overlay.error = "A path is required";
+            break;
+          }
+          if (overlay.stage < overlay.labels.length) {
+            overlay.paths[overlay.stage] = overlay.query;
+            overlay.stage++;
+            overlay.query = overlay.paths[overlay.stage] ?? "";
+            overlay.error = null;
+          } else {
+            overlay.pending = true;
+            const signal = AbortSignal.any([this.lifetime.signal, overlay.controller.signal]);
+            void this.own(
+              overlay.submit([...overlay.paths], signal).then(
+                (notice) => {
+                  if (this.overlay === overlay) this.overlay = null;
+                  this.setNotice(notice);
+                },
+                (error) => {
+                  if (signal.aborted && isRpcAbortedBy(error, signal.reason)) return;
+                  if (signal.aborted) throw error;
+                  overlay.pending = false;
+                  overlay.error = describeError(error);
+                  this.log("error", `${overlay.title}: ${overlay.error}`);
+                  this.changed();
+                }
+              )
+            );
+          }
+        }
+        break;
+      }
+      case "detail": {
+        if (event.kind === "key" && event.name === "c") this.copyToClipboard(overlay.text);
+        else if (event.kind === "key" && event.name === "e")
+          this.saveTextPrompt(overlay.title, overlay.text);
+        else {
+          const height = Math.max(1, this.layout().body.height - 4);
+          const scroll = scrollFor(event, overlay.scroll, height);
+          if (scroll === "close") this.overlay = null;
+          else if (scroll !== null)
+            overlay.scroll = clampScroll(scroll, overlay.contentHeight, height);
+        }
+        break;
+      }
+      case "search": {
+        const session = this.sessions.find((tab) => tab.sessionId === overlay.sessionId);
+        const matches = session?.grid.search(overlay.query) ?? [];
+        const result = editList(overlay, event, matches.length);
+        if (result === "cancel") this.overlay = null;
+        else if (result === "accept" && session && matches[overlay.selected]) {
+          this.lastSearch = overlay.query;
+          const match = matches[overlay.selected]!;
+          this.enterCopy(session);
+          this.copy!.cursor = { ...match.end };
+          this.copy!.anchor = { ...match.start };
+          this.copy!.top = Math.min(match.start.y, session.grid.liveTop());
+          this.overlay = null;
+        }
+        break;
+      }
       case "palette":
       case "launcher":
       case "workspaces":
@@ -1319,6 +1805,22 @@ export class TerminalBrowser {
         break;
       }
       case "logs": {
+        if (event.kind === "key" && event.name === "/") {
+          this.overlay = { kind: "log-search", query: "", selected: 0 };
+          break;
+        }
+        if (event.kind === "key" && event.name === "enter") {
+          this.openDetail("Full browser log", this.logText());
+          break;
+        }
+        if (event.kind === "key" && event.name === "e") {
+          this.saveTextPrompt("Export browser log", this.logText());
+          break;
+        }
+        if (event.kind === "key" && event.name === "c") {
+          this.copyToClipboard(this.logText());
+          break;
+        }
         const height = Math.max(1, this.layout().body.height - 4);
         const scroll = scrollFor(event, overlay.scroll, height, true);
         if (scroll === "close") this.overlay = null;
@@ -1333,7 +1835,7 @@ export class TerminalBrowser {
       case "confirm-close":
         if (event.kind === "key" && (event.name === "y" || event.name === "Y")) {
           this.overlay = null;
-          void this.closeSession(overlay.sessionId);
+          void this.own(this.closeSession(overlay.sessionId));
         } else if (event.kind === "key" && (event.name === "escape" || event.name === "n")) {
           this.overlay = null;
         }
@@ -1341,7 +1843,7 @@ export class TerminalBrowser {
       case "open-url":
         if (event.kind === "key" && event.name === "o" && isOpenableUrl(overlay.url)) {
           this.overlay = null;
-          void this.openUrl(overlay.url);
+          void this.own(this.openUrl(overlay.url));
         } else if (event.kind === "key" && (event.name === "escape" || event.name === "q")) {
           this.overlay = null;
         }
@@ -1354,18 +1856,79 @@ export class TerminalBrowser {
     overlay: Extract<Overlay, { kind: "approvals" }>,
     event: Exclude<InputEvent, MouseEvent>
   ): void {
+    const nav = event.kind === "key" ? navKeyOf(event) : null;
+    const selected = this.approvalIndex(overlay);
+    const target = this.approvals[selected];
+    if (isProtectedApproval(target) && event.kind === "key" && event.name === "C-d") {
+      overlay.protectedInput = newProtectedInput();
+      void this.own(
+        this.approvalsClient
+          .resolve(target.approvalId, "deny")
+          .then(() => this.refreshApprovals())
+          .catch((error) => this.reportApprovalFailure(error))
+      );
+      return;
+    }
+    if (
+      isProtectedApproval(target) &&
+      nav !== "up" &&
+      nav !== "down" &&
+      nav !== "pageup" &&
+      nav !== "pagedown" &&
+      nav !== "home" &&
+      nav !== "end"
+    ) {
+      const result = editProtectedInput(target, overlay.protectedInput, event);
+      if (result === "cancel") {
+        overlay.protectedInput = newProtectedInput();
+        this.overlay = null;
+      }
+      if (result === "submit") {
+        const state = overlay.protectedInput;
+        state.submitting = true;
+        const submit =
+          target.kind === "client-config"
+            ? this.approvalsClient.submitClientConfig
+            : target.kind === "credential-input"
+              ? this.approvalsClient.submitCredentialInput
+              : this.approvalsClient.submitSecretInput;
+        void this.own(
+          submit(target.approvalId, { ...state.values }).then(
+            () => {
+              state.values = {};
+              return this.refreshApprovals();
+            },
+            (error: unknown) => {
+              if (this.cancelled(error)) return;
+              state.submitting = false;
+              state.error = "Submission failed. Values remain here; retry or cancel.";
+              this.changed();
+            }
+          )
+        );
+      }
+      return;
+    }
     if (event.kind !== "key") return;
-    const nav = navKeyOf(event);
-    const target = this.approvals[overlay.selected];
+    if (target?.kind === "device-code" && event.name === "o") {
+      void this.own(this.openUrl(target.verificationUriComplete ?? target.verificationUri));
+      return;
+    }
+    if (target?.kind === "device-code" && event.name === "c") {
+      this.copyToClipboard(target.userCode);
+      return;
+    }
     const detailRows = Math.max(1, this.layout().body.height - 8);
     if (nav === "escape") {
       this.overlay = null;
     } else if (nav === "up" || nav === "down") {
-      const next = overlay.selected + (nav === "up" ? -1 : 1);
-      overlay.selected = Math.min(Math.max(0, next), Math.max(0, this.approvals.length - 1));
+      const next = selected < 0 ? 0 : selected + (nav === "up" ? -1 : 1);
+      overlay.approvalId =
+        this.approvals[Math.min(Math.max(0, next), this.approvals.length - 1)]?.approvalId ?? null;
       overlay.scroll = 0;
       overlay.nav = INITIAL_INSTALL_REVIEW_NAV;
       overlay.taskRules = INITIAL_TASK_RULES_NAV;
+      overlay.protectedInput = newProtectedInput();
     } else if (nav === "pageup" || nav === "pagedown") {
       const next = overlay.scroll + (nav === "pageup" ? -detailRows : detailRows);
       overlay.scroll = clampScroll(next, overlay.contentHeight, detailRows);
@@ -1380,29 +1943,43 @@ export class TerminalBrowser {
     } else if (nav && typeof nav === "object" && "digit" in nav) {
       const route = routeApprovalDigit(target, nav.digit, overlay.nav.selection, overlay.taskRules);
       if (route.via === "resolve") {
-        void this.approvalsClient
-          .resolve(route.approvalId, route.decision)
-          .then(() => this.refreshApprovals())
-          .catch((error: unknown) => this.reportApprovalFailure(error));
+        void this.own(
+          this.approvalsClient
+            .resolve(route.approvalId, route.decision)
+            .then(() => this.refreshApprovals())
+            .catch((error: unknown) => this.reportApprovalFailure(error))
+        );
       } else if (route.via === "resolveTaskRules") {
-        void this.approvalsClient
-          .resolveTaskRules(route.approvalId, route.resolution)
-          .then(() => this.refreshApprovals())
-          .catch((error: unknown) => this.reportApprovalFailure(error));
+        void this.own(
+          this.approvalsClient
+            .resolveTaskRules(route.approvalId, route.resolution)
+            .then(() => this.refreshApprovals())
+            .catch((error: unknown) => this.reportApprovalFailure(error))
+        );
       } else if (route.via === "resolveInstallReview") {
-        void this.approvalsClient
-          .resolveInstallReview(route.approvalId, route.resolution)
-          .then(() => this.refreshApprovals())
-          .catch((error: unknown) => this.reportApprovalFailure(error));
+        void this.own(
+          this.approvalsClient
+            .resolveInstallReview(route.approvalId, route.resolution)
+            .then((outcome) => {
+              const lines = installReviewOutcomeLines(outcome);
+              for (const line of lines)
+                this.log(outcome.landing?.failed.length ? "warn" : "info", line);
+              this.setNotice(`${outcome.heading} · ${this.prefix()} l for details`);
+              this.openDetail(outcome.heading, lines.join("\n"));
+              return this.refreshApprovals();
+            })
+            .catch((error: unknown) => this.reportApprovalFailure(error))
+        );
       }
     }
   }
 
   private reportApprovalFailure(error: unknown): void {
+    if (this.cancelled(error)) return;
     this.log("error", `Approval decision failed: ${describeError(error)}`);
     this.setNotice(`Your decision was not recorded (details: ${this.prefix()} l)`);
     // The queue may have moved on (decided elsewhere, withdrawn): show what is waiting now.
-    void this.refreshApprovals();
+    void this.own(this.refreshApprovals());
   }
 
   private onSettingsKey(
@@ -1421,6 +1998,10 @@ export class TerminalBrowser {
       nav === "enter" ||
       (nav && typeof nav === "object" && "char" in nav && nav.char === " ")
     ) {
+      if (!this.settingsLoaded) {
+        this.setNotice("Settings are still loading; your saved values must arrive before editing.");
+        return;
+      }
       const row = SETTING_ROWS[overlay.selected]!;
       const next = row.step(this.settings, nav === "left" ? -1 : 1);
       this.applySettings(next, true);
@@ -1432,13 +2013,20 @@ export class TerminalBrowser {
   private command(command: Command): void {
     const session = this.focusedSession();
     switch (command.kind) {
+      case "cancel":
+        if (this.overlay?.kind === "approvals") this.overlay.protectedInput = newProtectedInput();
+        if (this.overlay?.kind === "file")
+          this.overlay.controller.abort(new Error("File operation cancelled"));
+        this.overlay = null;
+        this.copy = null;
+        break;
       case "palette":
         this.overlay = { kind: "palette", query: "", selected: 0 };
         break;
       case "launcher":
         this.overlay = { kind: "launcher", query: "", selected: 0 };
-        void this.refreshApps();
-        void this.refreshSessions();
+        void this.own(this.refreshApps());
+        void this.own(this.refreshSessions());
         break;
       case "tab":
         if (command.index < this.sessions.length) this.focusTab(command.index);
@@ -1459,9 +2047,12 @@ export class TerminalBrowser {
       case "copy-mode":
         if (session) this.enterCopy(session);
         break;
+      case "search":
+        if (session) this.openSearch(session);
+        break;
       case "approvals":
         this.openApprovals(0);
-        void this.refreshApprovals();
+        void this.own(this.refreshApprovals());
         break;
       case "logs":
         this.overlay = { kind: "logs", scroll: 0 };
@@ -1476,10 +2067,14 @@ export class TerminalBrowser {
         if (session) this.detachTab(session);
         break;
       case "close":
-        if (session) this.overlay = { kind: "confirm-close", sessionId: session.sessionId };
+        if (session)
+          this.overlay = {
+            kind: "confirm-close",
+            sessionId: session.sessionId,
+          };
         break;
       case "reattach":
-        if (session) void this.reattach(session);
+        if (session) void this.own(this.reattach(session));
         break;
       case "links":
         if (session) this.openLinks(session);
@@ -1501,13 +2096,20 @@ export class TerminalBrowser {
     this.copy = null;
     this.overlay = {
       kind: "approvals",
-      selected: Math.min(selected, Math.max(0, this.approvals.length - 1)),
+      approvalId:
+        this.approvals[Math.min(selected, Math.max(0, this.approvals.length - 1))]?.approvalId ??
+        null,
       scroll: 0,
       contentHeight: 0,
       nav: INITIAL_INSTALL_REVIEW_NAV,
       taskRules: INITIAL_TASK_RULES_NAV,
+      protectedInput: newProtectedInput(),
       ...(origin ? { origin } : {}),
     };
+  }
+
+  private approvalIndex(overlay: Extract<Overlay, { kind: "approvals" }>): number {
+    return this.approvals.findIndex((approval) => approval.approvalId === overlay.approvalId);
   }
 
   private openWorkspaces(): void {
@@ -1519,15 +2121,18 @@ export class TerminalBrowser {
       selected: 0,
     };
     this.overlay = overlay;
-    void this.host.listWorkspaces().then(
-      (workspaces) => {
-        overlay.workspaces = workspaces;
-        this.changed();
-      },
-      (error: unknown) => {
-        overlay.error = describeError(error);
-        this.changed();
-      }
+    void this.own(
+      this.host.listWorkspaces().then(
+        (workspaces) => {
+          overlay.workspaces = workspaces;
+          this.changed();
+        },
+        (error: unknown) => {
+          if (this.cancelled(error)) return;
+          overlay.error = describeError(error);
+          this.changed();
+        }
+      )
     );
   }
 
@@ -1537,18 +2142,24 @@ export class TerminalBrowser {
     if (next.prefixKey !== previous.prefixKey) this.router.setPrefix(next.prefixKey);
     if (next.mouse !== previous.mouse) this.terminal.setMouse(next.mouse);
     if (persist) {
-      void this.services.settings.setSettings({ ...next }).then(
-        () => {
-          if (this.overlay?.kind === "settings") this.overlay.error = null;
-          this.changed();
-        },
-        (error: unknown) => {
-          if (this.overlay?.kind === "settings") {
-            this.overlay.error = `Not saved (applies until you quit): ${describeError(error)}`;
+      const revision = ++this.settingsRevision;
+      this.settingsWrites = this.settingsWrites
+        .then(() => this.services.settings.setSettings({ ...next }))
+        .then(
+          () => {
+            if (revision === this.settingsRevision && this.overlay?.kind === "settings")
+              this.overlay.error = null;
+            this.changed();
+          },
+          (error: unknown) => {
+            if (this.cancelled(error)) return;
+            if (revision === this.settingsRevision && this.overlay?.kind === "settings") {
+              this.overlay.error = `Not saved (applies until you quit): ${describeError(error)}`;
+            }
+            this.changed();
           }
-          this.changed();
-        }
-      );
+        );
+      void this.own(this.settingsWrites);
     }
     this.changed();
   }
@@ -1586,22 +2197,29 @@ export class TerminalBrowser {
     const existing = this.sessions.findIndex((session) => session.sessionId === entry.sessionId);
     if (existing !== -1) {
       const session = this.sessions[existing]!;
-      if (session.updateEntry(entry)) void session.attach(true, true);
+      const fresh = session.updateEntry(entry);
+      if (fresh || (!session.isLive() && session.status.kind !== "attaching"))
+        void this.own(session.attach(true, fresh));
       this.focusTab(existing);
       return session;
     }
-    const session = new ShellSessionTab(this.shell, entry, this.sessionSize(), this.sessionEvents());
+    const session = new ShellSessionTab(
+      this.shell,
+      entry,
+      this.sessionSize(),
+      this.sessionEvents()
+    );
     this.sessions.push(session);
     this.listedTabs.add(session);
     this.focusTab(this.sessions.length - 1);
-    void session.attach(true, true).then(() => this.changed());
+    void this.own(session.attach(true, true).then(() => this.changed()));
     this.changed();
     return session;
   }
 
   /** Resume a session from the launcher; one that is not running is started again. */
   private async resume(entry: TerminalSessionEntry): Promise<void> {
-    if (entry.running && entry.shellSessionId) {
+    if (entry.running && entry.shellSessionId && !entry.failure) {
       this.openTab(entry);
       return;
     }
@@ -1609,7 +2227,7 @@ export class TerminalBrowser {
   }
 
   private async relaunch(sessionId: string, title: string): Promise<void> {
-    this.setNotice(`Starting ${title} again…`);
+    this.setNotice(`Resuming ${title}…`);
     const size = this.sessionSize();
     try {
       const entry = await this.services.sessions.resume({
@@ -1647,6 +2265,7 @@ export class TerminalBrowser {
   }
 
   private reportLaunchFailure(title: string, error: unknown): void {
+    if (this.cancelled(error)) return;
     const message = `Could not start ${title}: ${describeError(error)}`;
     this.log("error", message);
     this.setNotice(`${message} (details: ${this.prefix()} l)`);
@@ -1654,7 +2273,12 @@ export class TerminalBrowser {
 
   /** `prefix r`: reattach; a session whose program ended is started again. */
   private async reattach(session: ShellSessionTab): Promise<void> {
-    if (session.status.kind === "exited" || !session.entry.shellSessionId) {
+    if (
+      session.entry.failure ||
+      !session.entry.running ||
+      session.status.kind === "exited" ||
+      !session.entry.shellSessionId
+    ) {
       await this.relaunch(session.sessionId, session.title);
       return;
     }
@@ -1691,9 +2315,10 @@ export class TerminalBrowser {
   private removeTab(session: ShellSessionTab): void {
     const index = this.sessions.indexOf(session);
     if (index === -1) return;
-    session.dispose();
+    void this.own(session.dispose());
     this.sessions.splice(index, 1);
-    if (session.title !== session.entry.title) this.programTitles.set(session.sessionId, session.title);
+    if (session.title !== session.entry.title)
+      this.programTitles.set(session.sessionId, session.title);
     else this.programTitles.delete(session.sessionId);
     if (this.overlay?.kind === "confirm-close" && this.overlay.sessionId === session.sessionId) {
       this.overlay = null;
@@ -1730,6 +2355,7 @@ export class TerminalBrowser {
     try {
       await this.services.sessions.close(sessionId);
     } catch (error) {
+      if (this.cancelled(error)) return;
       this.log("error", `Could not end ${session.title}: ${describeError(error)}`);
       this.setNotice(`Could not end ${session.title}: ${describeError(error)}`);
       return;
@@ -1755,14 +2381,25 @@ export class TerminalBrowser {
       return;
     }
     this.copy = null;
-    this.overlay = { kind: "links", tabTitle: session.title, urls, query: "", selected: 0 };
+    this.overlay = {
+      kind: "links",
+      tabTitle: session.title,
+      urls,
+      query: "",
+      selected: 0,
+    };
   }
 
   private async openUrl(url: string): Promise<void> {
+    if (!isOpenableUrl(url)) {
+      this.setNotice("Only http and https links can be opened.");
+      return;
+    }
     try {
       await this.host.openExternal(url);
       this.setNotice(`Opened ${new URL(url).host} in your browser`);
     } catch (error) {
+      if (this.cancelled(error)) return;
       this.log("error", `Could not open ${url}: ${describeError(error)}`);
       this.setNotice(`Could not open the link: ${describeError(error)}`);
     }
@@ -1775,13 +2412,25 @@ export class TerminalBrowser {
 
   // ── copy mode ──────────────────────────────────────────────────────────────
 
+  private openSearch(session: ShellSessionTab): void {
+    this.overlay = {
+      kind: "search",
+      sessionId: session.sessionId,
+      query: this.lastSearch,
+      selected: 0,
+    };
+  }
+
   private enterCopy(session: ShellSessionTab): void {
     const grid = session.grid;
     const cursor = grid.cursor();
     this.copy = {
       sessionId: session.sessionId,
       top: grid.liveTop(),
-      cursor: { x: Math.min(cursor.x, grid.columns - 1), y: grid.liveTop() + cursor.y },
+      cursor: {
+        x: Math.min(cursor.x, grid.columns - 1),
+        y: grid.liveTop() + cursor.y,
+      },
       anchor: null,
     };
   }
@@ -1811,6 +2460,32 @@ export class TerminalBrowser {
       copy.cursor.y = Math.min(Math.max(0, copy.cursor.y + dy), last);
     };
     switch (event.name) {
+      case "/":
+        this.openSearch(session);
+        break;
+      case "n":
+      case "N": {
+        const matches = grid.search(this.lastSearch);
+        const forward = event.name === "n";
+        const match = forward
+          ? (matches.find(
+              (match) =>
+                match.start.y > copy.cursor.y ||
+                (match.start.y === copy.cursor.y && match.start.x > copy.cursor.x)
+            ) ?? matches[0])
+          : ([...matches]
+              .reverse()
+              .find(
+                (match) =>
+                  match.end.y < copy.cursor.y ||
+                  (match.end.y === copy.cursor.y && match.end.x < copy.cursor.x)
+              ) ?? matches.at(-1));
+        if (match) {
+          copy.cursor = { ...match.end };
+          copy.anchor = { ...match.start };
+        } else this.setNotice("No matching retained rows");
+        break;
+      }
       case "up":
       case "k":
         move(0, -1);
@@ -1847,7 +2522,7 @@ export class TerminalBrowser {
         copy.cursor.x = 0;
         break;
       case "$":
-        copy.cursor.x = Math.max(0, grid.lineText(copy.cursor.y).length - 1);
+        copy.cursor.x = grid.lineEndColumn(copy.cursor.y);
         break;
       case "v":
       case " ":
@@ -1858,7 +2533,9 @@ export class TerminalBrowser {
         const text = selectedText(grid, copy);
         this.copyToClipboard(text);
         this.copy = null;
-        this.setNotice(`Copied ${characters(text)} to your clipboard (if your terminal allows OSC 52)`);
+        this.setNotice(
+          `Copied ${characters(text)} to your clipboard (if your terminal allows OSC 52)`
+        );
         return;
       }
       case "q":
@@ -1877,6 +2554,54 @@ export class TerminalBrowser {
   }
 
   // ── misc ───────────────────────────────────────────────────────────────────
+
+  private openDetail(title: string, text: string): void {
+    this.overlay = { kind: "detail", title, text, scroll: 0, contentHeight: 0 };
+  }
+
+  private logText(): string {
+    return this.logs
+      .map(
+        (line) => `${new Date(line.time).toISOString()} ${line.level.toUpperCase()} ${line.message}`
+      )
+      .join("\n");
+  }
+
+  private filePrompt(
+    title: string,
+    labels: string[],
+    submitLabel: string,
+    submit: (paths: string[], signal: AbortSignal) => Promise<string>
+  ): void {
+    this.overlay = {
+      kind: "file",
+      title,
+      labels,
+      submitLabel,
+      paths: [],
+      stage: 0,
+      query: "",
+      selected: 0,
+      pending: false,
+      error: null,
+      scroll: 0,
+      contentHeight: 0,
+      controller: new AbortController(),
+      submit,
+    };
+  }
+
+  private saveTextPrompt(title: string, text: string): void {
+    this.filePrompt(
+      title,
+      ["New local output path"],
+      "Save text to a new local file",
+      async ([localPath], signal) => {
+        const result = await this.host.files.saveText({ localPath: localPath!, text }, { signal });
+        return `Saved ${result.path} (${result.size} bytes)`;
+      }
+    );
+  }
 
   private prefix(): string {
     return prefixLabel(this.settings.prefixKey);
@@ -1930,7 +2655,12 @@ function editList(
       return null;
     case "backspace":
     case "C-h":
-      state.query = state.query.slice(0, -1);
+      state.query = [
+        ...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(state.query),
+      ]
+        .slice(0, -1)
+        .map((part) => part.segment)
+        .join("");
       state.selected = 0;
       return null;
     case "C-u":
@@ -1988,15 +2718,7 @@ function normalizedSelection(copy: CopyState) {
 
 function selectedText(grid: ShellSessionTab["grid"], copy: CopyState): string {
   const selection = normalizedSelection(copy);
-  if (!selection) return grid.lineText(copy.cursor.y);
-  const lines: string[] = [];
-  for (let y = selection.start.y; y <= selection.end.y; y++) {
-    const line = grid.lineText(y, false);
-    const from = y === selection.start.y ? selection.start.x : 0;
-    const to = y === selection.end.y ? selection.end.x + 1 : line.length;
-    lines.push(line.slice(from, to).replace(/\s+$/, ""));
-  }
-  return lines.join("\n");
+  return selection ? grid.selectedText(selection) : grid.logicalLineText(copy.cursor.y);
 }
 
 function encodeMouseForSession(

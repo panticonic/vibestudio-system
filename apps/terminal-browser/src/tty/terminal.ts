@@ -17,11 +17,14 @@ const ENTER =
   "\x1b[2J";
 const MOUSE_ON = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 const MOUSE_OFF = "\x1b[?1006l\x1b[?1002l\x1b[?1000l";
+const KEYBOARD_ENTER = "\x1b[>1u\x1b[?u";
 const LEAVE = MOUSE_OFF + "\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l";
 
 export class TerminalOwnership {
   private active = false;
   private mouse = false;
+  private originalRaw = false;
+  private keyboardOwned = false;
   private readonly onProcessExit = () => this.release();
 
   constructor(private readonly streams: TerminalStreams) {}
@@ -29,18 +32,33 @@ export class TerminalOwnership {
   acquire(options: { mouse: boolean }): void {
     if (this.active) return;
     this.active = true;
-    this.streams.stdin.setRawMode(true);
-    this.streams.stdin.resume();
-    this.streams.stdout.write(ENTER);
-    this.setMouse(options.mouse);
+    this.originalRaw = !!this.streams.stdin.isRaw;
     process.on("exit", this.onProcessExit);
+    try {
+      this.streams.stdin.setRawMode(true);
+      this.streams.stdin.resume();
+      this.streams.stdout.write(ENTER);
+      // Claim rollback before dispatch: a write failure can follow partial output.
+      this.keyboardOwned = true;
+      this.streams.stdout.write(KEYBOARD_ENTER);
+      this.setMouse(options.mouse);
+    } catch (error) {
+      try {
+        this.release();
+      } catch (cleanup) {
+        throw new AggregateError([error, cleanup], "Terminal acquisition and restoration failed", {
+          cause: error,
+        });
+      }
+      throw error;
+    }
   }
 
   /** Re-assert modes after the terminal was suspended and resumed (SIGCONT). */
   reassert(): void {
     if (!this.active) return;
     this.streams.stdin.setRawMode(true);
-    this.streams.stdout.write(ENTER + (this.mouse ? MOUSE_ON : ""));
+    this.streams.stdout.write(ENTER + "\x1b[=1u" + (this.mouse ? MOUSE_ON : ""));
   }
 
   setMouse(enabled: boolean): void {
@@ -58,15 +76,23 @@ export class TerminalOwnership {
     if (!this.active) return;
     this.active = false;
     process.off("exit", this.onProcessExit);
-    try {
-      this.streams.stdout.write(LEAVE);
-    } finally {
+    const keyboard = this.keyboardOwned ? "\x1b[<u" : "";
+    this.keyboardOwned = false;
+    const failures: unknown[] = [];
+    for (const restore of [
+      () => this.streams.stdout.write(keyboard + LEAVE),
+      () => this.streams.stdin.setRawMode(this.originalRaw),
+      () => this.streams.stdin.pause(),
+    ]) {
       try {
-        this.streams.stdin.setRawMode(false);
-      } finally {
-        this.streams.stdin.pause();
+        restore();
+      } catch (error) {
+        failures.push(error);
       }
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, "Terminal restoration failed", { cause: failures[0] });
   }
 }
 

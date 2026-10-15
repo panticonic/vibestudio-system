@@ -40,7 +40,7 @@ export interface TerminalSessions {
   /** End the session for good. */
   close(sessionId: string): Promise<void>;
   /** The session list changed (on any of the person's devices). Returns an unsubscribe. */
-  onChange(listener: (sessions: TerminalSessionEntry[]) => void): () => void;
+  onChange(listener: (sessions: TerminalSessionEntry[]) => void): () => void | Promise<void>;
 }
 
 export interface TerminalSettingsStore {
@@ -53,6 +53,7 @@ const SESSIONS_CHANGED_EVENT = "terminal-apps:sessions-changed";
 export function createTerminalSessions(rpc: RpcClient): TerminalSessions & TerminalSettingsStore {
   const events = new EventsClient(rpc);
   let listeners = 0;
+  let admission: Promise<void> = Promise.resolve();
   return {
     list: () => rpc.call("main", mainRpcMethods["terminalApps.list"], []),
     launch: (request) => rpc.call("main", mainRpcMethods["terminalApps.launch"], [request]),
@@ -65,19 +66,22 @@ export function createTerminalSessions(rpc: RpcClient): TerminalSessions & Termi
       const stop = events.on(SESSIONS_CHANGED_EVENT, (payload) => listener(payload.sessions));
       listeners += 1;
       if (listeners === 1) {
-        void events
+        admission = events
           .subscribe(SESSIONS_CHANGED_EVENT)
           .catch((error: unknown) =>
             console.warn("[terminal-browser] session updates are unavailable:", error)
           );
       }
       let disposed = false;
-      return () => {
+      return async () => {
         if (disposed) return;
         disposed = true;
         stop();
         listeners = Math.max(0, listeners - 1);
-        if (listeners === 0) void events.unsubscribe(SESSIONS_CHANGED_EVENT).catch(() => {});
+        if (listeners === 0) {
+          await admission;
+          await events.unsubscribe(SESSIONS_CHANGED_EVENT);
+        }
       };
     },
   };

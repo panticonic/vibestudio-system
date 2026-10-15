@@ -22,18 +22,28 @@ export interface GridSize {
   columns: number;
   rows: number;
 }
+export interface GridMatch {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  text: string;
+}
 
 export interface GridPaintOptions {
   /** Lines scrolled back from the live screen (copy mode); 0 = live. */
   scrollback?: number;
   /** Selection in absolute buffer coordinates, inclusive, normalized start <= end. */
-  selection?: { start: { x: number; y: number }; end: { x: number; y: number } } | null;
+  selection?: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  } | null;
   /** A copy-mode cursor in absolute buffer coordinates, drawn inverse. */
   marker?: { x: number; y: number } | null;
 }
 
 /** What a program asked its terminal for through standard control sequences. */
 export interface GridSignals {
+  /** Emulator replies go back to the requesting PTY, never to browser input. */
+  reply?(bytes: string): void;
   /** OSC 0 / OSC 2: window title. */
   title?(title: string): void;
   /** OSC 9 or OSC 777;notify: a notification asking for the person's attention. */
@@ -68,6 +78,19 @@ export class VtGrid {
   private cursorHidden = false;
   private sgrMouse = false;
   private focusReporting = false;
+  private readonly keyboardModes = {
+    normal: { flags: 0, stack: [] as number[] },
+    alternate: { flags: 0, stack: [] as number[] },
+  };
+  private get keyboard(): number {
+    return this.keyboardModes[this.term.buffer.active.type].flags;
+  }
+  private set keyboard(flags: number) {
+    this.keyboardModes[this.term.buffer.active.type].flags = flags;
+  }
+  private get keyboardStack(): number[] {
+    return this.keyboardModes[this.term.buffer.active.type].stack;
+  }
   private openLink: { url: string; y: number; x: number } | null = null;
   private readonly placedLinks: PlacedLink[] = [];
   /** URLs in the order they were last drawn, most recent last, without duplicates. */
@@ -76,10 +99,7 @@ export class VtGrid {
   private readonly bellListeners = new Set<() => void>();
   private disposed = false;
 
-  constructor(
-    size: GridSize,
-    options: { scrollback?: number; signals?: GridSignals } = {}
-  ) {
+  constructor(size: GridSize, options: { scrollback?: number; signals?: GridSignals } = {}) {
     this.size = { ...size };
     this.term = new Terminal({
       cols: size.columns,
@@ -113,6 +133,32 @@ export class VtGrid {
       for (const listener of [...this.bellListeners]) listener();
     });
     const signals = options.signals ?? {};
+    this.term.onData((bytes) => signals.reply?.(bytes));
+    this.term.parser.registerCsiHandler({ prefix: "?", final: "u" }, () => {
+      signals.reply?.(`\x1b[?${this.keyboard}u`);
+      return true;
+    });
+    this.term.parser.registerCsiHandler({ prefix: ">", final: "u" }, (params) => {
+      this.keyboardStack.push(this.keyboard);
+      this.keyboard = Number(params[0] ?? 0) & 1;
+      return true;
+    });
+    this.term.parser.registerCsiHandler({ prefix: "<", final: "u" }, (params) => {
+      for (
+        let remaining = Math.max(1, Number(params[0] ?? 1));
+        remaining > 0 && this.keyboardStack.length;
+        remaining--
+      )
+        this.keyboard = this.keyboardStack.pop()!;
+      return true;
+    });
+    this.term.parser.registerCsiHandler({ prefix: "=", final: "u" }, (params) => {
+      const flags = Number(params[0] ?? 0) & 1;
+      const mode = Number(params[1] ?? 1);
+      this.keyboard =
+        mode === 2 ? this.keyboard | flags : mode === 3 ? this.keyboard & ~flags : flags;
+      return true;
+    });
     this.term.onTitleChange((title) => signals.title?.(title));
     this.term.parser.registerOscHandler(9, (data) => {
       // OSC 9;4 is a progress report (ConEmu), not a notification.
@@ -140,7 +186,8 @@ export class VtGrid {
       const buffer = this.term.buffer.active;
       const here = { y: buffer.baseY + buffer.cursorY, x: buffer.cursorX };
       const open = this.openLink;
-      if (open && open.y === here.y && here.x > open.x) this.placeLink(open.url, open.x, here.x - 1);
+      if (open && open.y === here.y && here.x > open.x)
+        this.placeLink(open.url, open.x, here.x - 1);
       this.openLink = url ? { url, y: here.y, x: here.x } : null;
       return true;
     });
@@ -153,7 +200,13 @@ export class VtGrid {
     if (this.recentUrls.length > MAX_TRACKED_LINKS) this.recentUrls.shift();
     const line = this.term.registerMarker(0);
     if (!line) return;
-    this.placedLinks.push({ url, buffer: this.term.buffer.active.type, line, x1, x2 });
+    this.placedLinks.push({
+      url,
+      buffer: this.term.buffer.active.type,
+      line,
+      x1,
+      x2,
+    });
     if (this.placedLinks.length > MAX_TRACKED_LINKS) this.placedLinks.shift()!.line.dispose();
   }
 
@@ -170,6 +223,90 @@ export class VtGrid {
 
   get rows(): number {
     return this.size.rows;
+  }
+
+  /** Literal matches in logical lines; soft wraps retain their exact xterm cell coordinates. */
+  search(query: string): GridMatch[] {
+    if (!query) return [];
+    const matches: GridMatch[] = [];
+    let text = "";
+    let cells: Array<{ start: { x: number; y: number }; end: { x: number; y: number } }> = [];
+    const finish = () => {
+      for (
+        let index = text.indexOf(query);
+        index >= 0;
+        index = text.indexOf(query, index + query.length)
+      ) {
+        matches.push({
+          start: cells[index]!.start,
+          end: cells[index + query.length - 1]!.end,
+          text,
+        });
+      }
+      text = "";
+      cells = [];
+    };
+    for (let row = 0; row < this.length(); row++) {
+      const line = this.term.buffer.active.getLine(row);
+      if (!line) continue;
+      if (!line.isWrapped) finish();
+      const columns = this.contentColumns(row);
+      for (let column = 0; column < columns; column++) {
+        const cell = line.getCell(column);
+        if (!cell || cell.getWidth() === 0) continue;
+        const chars = cell.getChars() || " ";
+        for (let index = 0; index < chars.length; index++)
+          cells.push({
+            start: { x: column, y: row },
+            end: { x: column + cell.getWidth() - 1, y: row },
+          });
+        text += chars;
+      }
+    }
+    finish();
+    return matches;
+  }
+
+  private contentColumns(row: number): number {
+    const line = this.term.buffer.active.getLine(row);
+    for (let column = this.columns - 1; column >= 0; column--) {
+      const cell = line?.getCell(column);
+      if (cell?.getChars()) return column + cell.getWidth();
+    }
+    return 0;
+  }
+
+  /** Selected cells, preserving hard newlines but never inserting newlines at soft wraps. */
+  selectedText(selection: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  }): string {
+    let text = "";
+    for (let row = selection.start.y; row <= selection.end.y; row++) {
+      if (row > selection.start.y && !this.term.buffer.active.getLine(row)?.isWrapped) text += "\n";
+      const from = row === selection.start.y ? selection.start.x : 0;
+      const to = Math.min(
+        this.contentColumns(row),
+        row === selection.end.y ? selection.end.x + 1 : this.columns
+      );
+      if (to > from) text += this.lineText(row, false, from, to);
+    }
+    return text;
+  }
+
+  logicalLineText(row: number): string {
+    let first = row;
+    let last = row;
+    while (first > 0 && this.term.buffer.active.getLine(first)?.isWrapped) first--;
+    while (last + 1 < this.length() && this.term.buffer.active.getLine(last + 1)?.isWrapped) last++;
+    return this.selectedText({ start: { x: 0, y: first }, end: { x: this.columns - 1, y: last } });
+  }
+
+  retainedText(): string {
+    return this.selectedText({
+      start: { x: 0, y: 0 },
+      end: { x: this.columns - 1, y: this.length() - 1 },
+    });
   }
 
   /** Feed output (text or raw bytes); resolves once the grid reflects it. */
@@ -191,6 +328,10 @@ export class VtGrid {
   }
 
   private forgetModes(): void {
+    for (const mode of Object.values(this.keyboardModes)) {
+      mode.flags = 0;
+      mode.stack.length = 0;
+    }
     this.cursorHidden = false;
     this.sgrMouse = false;
     this.focusReporting = false;
@@ -234,11 +375,18 @@ export class VtGrid {
   /** Cursor in grid coordinates, as the program left it. */
   cursor(): { x: number; y: number; visible: boolean } {
     const buffer = this.term.buffer.active;
-    return { x: buffer.cursorX, y: buffer.cursorY, visible: !this.cursorHidden };
+    return {
+      x: buffer.cursorX,
+      y: buffer.cursorY,
+      visible: !this.cursorHidden,
+    };
   }
 
   /** The mouse reporting the program asked for ("none" means the browser may use the mouse). */
-  mouseMode(): { tracking: "none" | "x10" | "vt200" | "drag" | "any"; sgr: boolean } {
+  mouseMode(): {
+    tracking: "none" | "x10" | "vt200" | "drag" | "any";
+    sgr: boolean;
+  } {
     return { tracking: this.term.modes.mouseTrackingMode, sgr: this.sgrMouse };
   }
 
@@ -248,6 +396,10 @@ export class VtGrid {
 
   applicationCursorKeys(): boolean {
     return this.term.modes.applicationCursorKeysMode;
+  }
+
+  disambiguatedKeys(): boolean {
+    return (this.keyboard & 1) !== 0;
   }
 
   /** Lines available above the live screen. */
@@ -266,8 +418,19 @@ export class VtGrid {
   }
 
   /** Text of one absolute buffer line. */
-  lineText(y: number, trimRight = true): string {
-    return this.term.buffer.active.getLine(y)?.translateToString(trimRight) ?? "";
+  lineText(y: number, trimRight = true, from = 0, to = this.columns): string {
+    const line = this.term.buffer.active.getLine(y);
+    if (!line) return "";
+    while (from > 0 && line.getCell(from)?.getWidth() === 0) from -= 1;
+    return line.translateToString(trimRight, from, to);
+  }
+
+  lineEndColumn(y: number): number {
+    const line = this.term.buffer.active.getLine(y);
+    for (let x = this.columns - 1; x > 0; x--) {
+      if (line?.getCell(x)?.getChars().trim()) return x;
+    }
+    return 0;
   }
 
   /** Copy the grid's visible window into `screen` at `rect` (clipped to both). */

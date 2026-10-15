@@ -3,6 +3,43 @@ import { ATTR_BOLD, ATTR_INVERSE, Screen } from "./screen.js";
 import { VtGrid } from "./vtGrid.js";
 
 describe("VtGrid", () => {
+  it("copies and searches wrapped Unicode logical lines while preserving hard newlines", async () => {
+    const grid = new VtGrid({ columns: 8, rows: 5 });
+    await grid.write("echo A界BC xyz\r\nnext");
+    expect(grid.logicalLineText(1)).toBe("echo A界BC xyz");
+    expect(grid.retainedText()).toMatch(/^echo A界BC xyz\nnext/);
+    expect(grid.selectedText({ start: { x: 0, y: 0 }, end: { x: 3, y: 2 } })).toBe(
+      "echo A界BC xyz\nnext"
+    );
+    const [match] = grid.search("界BC");
+    expect(match).toMatchObject({ start: { x: 6, y: 0 }, end: { x: 1, y: 1 } });
+    expect(grid.selectedText(match!)).toBe("界BC");
+    expect(grid.search("xyznext")).toEqual([]);
+    grid.dispose();
+  });
+  it("copies terminal columns rather than UTF-16 indices", async () => {
+    const grid = new VtGrid({ columns: 20, rows: 2 });
+    await grid.write("A界B👩‍💻C");
+    expect(grid.lineText(0, false, 3, 4)).toBe("B");
+    grid.dispose();
+  });
+
+  it("tracks enhanced keyboard ownership independently across screen buffers", async () => {
+    const reply = vi.fn();
+    const grid = new VtGrid({ columns: 20, rows: 2 }, { signals: { reply } });
+    await grid.write("\x1b[>1u\x1b[?u");
+    expect(grid.disambiguatedKeys()).toBe(true);
+    expect(reply).toHaveBeenLastCalledWith("\x1b[?1u");
+    await grid.write("\x1b[?1049h");
+    expect(grid.disambiguatedKeys()).toBe(false);
+    await grid.write("\x1b[>1u\x1b[<u");
+    expect(grid.disambiguatedKeys()).toBe(false);
+    await grid.write("\x1b[?1049l");
+    expect(grid.disambiguatedKeys()).toBe(true);
+    await grid.write("\x1b[<u");
+    expect(grid.disambiguatedKeys()).toBe(false);
+    grid.dispose();
+  });
   it("emulates Ink-style output (bare LF, relative redraws) into cells with styles", async () => {
     const grid = new VtGrid({ columns: 20, rows: 3 });
     await grid.write("count = 1\n");

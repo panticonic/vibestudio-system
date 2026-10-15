@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakeShell } from "../testing/fakeShell.js";
+import { encodePtyStreamEvent } from "@workspace/pty-stream";
 import type { TerminalSessionEntry } from "./launcher.js";
-import { ShellSessionTab, type SessionEvents } from "./shellSession.js";
+import { ShellSessionTab, describeError, type SessionEvents } from "./shellSession.js";
 
 async function until(predicate: () => boolean, what: string): Promise<void> {
   for (let i = 0; i < 200; i++) {
@@ -39,12 +40,107 @@ function setup() {
 }
 
 describe("ShellSessionTab", () => {
+  it("joins cancellation of a live PTY reader before disposing its grid", async () => {
+    const { shell, tab } = setup();
+    let releaseCancel!: () => void;
+    const cancelled = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseCancel = resolve;
+        })
+    );
+    vi.spyOn(shell, "attach").mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (const bytes of encodePtyStreamEvent({
+              kind: "hello",
+              attachId: "held",
+              epoch: 1,
+              start: 0,
+              cursor: 0,
+              alive: true,
+              cols: 40,
+              rows: 5,
+            }))
+              controller.enqueue(bytes);
+          },
+          cancel: cancelled,
+        })
+      )
+    );
+    const attached = tab.attach(true, true);
+    await until(() => tab.isLive(), "live owned reader");
+    let disposed = false;
+    const disposal = tab.dispose().then(() => {
+      disposed = true;
+    });
+    await until(() => cancelled.mock.calls.length > 0, "reader cancellation admitted");
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(disposed).toBe(false);
+    } finally {
+      releaseCancel();
+      await disposal;
+      await attached;
+    }
+    expect(disposed).toBe(true);
+  });
+  it("retains all nested failure evidence for full error inspection", () => {
+    const cause = new Error("original provider failure");
+    const cleanup = new Error("source cancellation failed");
+    expect(describeError(new AggregateError([cause, cleanup], "Operation failed"))).toBe(
+      "Operation failed\nCaused by: original provider failure\nCaused by: source cancellation failed"
+    );
+  });
+  it("joins a held attachment head and its body cancellation before disposing", async () => {
+    const { shell, tab } = setup();
+    let releaseHead!: (response: Response) => void;
+    let releaseCancel!: () => void;
+    const cancelled = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseCancel = resolve;
+        })
+    );
+    vi.spyOn(shell, "attach").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseHead = resolve;
+        })
+    );
+    const attached = tab.attach(true, true);
+    await until(() => !!releaseHead, "attachment head admitted");
+    let disposed = false;
+    const disposal = tab.dispose().then(() => {
+      disposed = true;
+    });
+    await Promise.resolve();
+    expect(disposed).toBe(false);
+    releaseHead(new Response(new ReadableStream({ cancel: cancelled })));
+    await until(() => cancelled.mock.calls.length > 0, "owned response cancellation");
+    expect(disposed).toBe(false);
+    releaseCancel();
+    await disposal;
+    await attached;
+    expect(disposed).toBe(true);
+  });
+
+  it("rejects input visibly while attaching instead of silently losing it", async () => {
+    const { shell, shellSessionId, tab, events } = setup();
+    tab.sendInput("not delivered");
+    expect(shell.typed(shellSessionId)).toBe("");
+    expect(events.log).toHaveBeenCalledWith("warn", "Echo: input was not sent (attaching)");
+    await tab.dispose();
+  });
   it("replays retained output at its size, then streams and acknowledges output", async () => {
     const { shell, shellSessionId, tab, screen } = setup();
     shell.emit(shellSessionId, "before\r\n");
     void tab.attach(true, true);
     await until(() => tab.isLive() && screen().includes("before"), "replay");
-    expect(shell.attachCalls[0]!.options).toEqual({ size: { cols: 40, rows: 5 } });
+    expect(shell.attachCalls[0]!.options).toEqual({
+      size: { cols: 40, rows: 5 },
+    });
     shell.emit(shellSessionId, "after");
     await until(() => screen().includes("after"), "live output");
     tab.sendInput("ls\r");

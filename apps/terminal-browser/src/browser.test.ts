@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import xterm from "@xterm/headless";
-import type { RpcClient } from "@vibestudio/rpc";
+import type { RpcClient, RpcStreamOptions } from "@vibestudio/rpc";
+import { schemaRpcClientMock } from "@vibestudio/rpc/test-utils";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { encodeEventWatchRecord } from "@vibestudio/shared/events";
 import type {
@@ -9,12 +10,15 @@ import type {
   TerminalBrowserHost,
   TerminalServerConnectionState,
 } from "@vibestudio/shell-core/terminal/terminalBrowserHost";
+import { TERMINAL_BROWSER_HOST_CONTRACT_VERSION } from "@vibestudio/shell-core/terminal/terminalBrowserHost";
 import { TerminalBrowser } from "./browser.js";
 import { run } from "./index.js";
 import type { TerminalSessionEntry } from "./sessions/launcher.js";
 import { FakeShell, FakeTerminalSessions } from "./testing/fakeShell.js";
 
-const { Terminal } = xterm as unknown as { Terminal: typeof import("@xterm/headless").Terminal };
+const { Terminal } = xterm as unknown as {
+  Terminal: typeof import("@xterm/headless").Terminal;
+};
 
 const ECHO = "terminal-apps/echo";
 const APP_ID = "app:apps/terminal-browser:dev-1";
@@ -43,7 +47,11 @@ const SOURCE_TREE = {
           name: "pictures",
           path: "terminal-apps/pictures",
           isUnit: true,
-          launchable: { type: "app", title: "Pictures", icon: "./assets/icon.svg" },
+          launchable: {
+            type: "app",
+            title: "Pictures",
+            icon: "./assets/icon.svg",
+          },
           children: [],
         },
       ],
@@ -68,9 +76,17 @@ const SOURCE_TREE = {
 /** The shown workspace as this device's session: the shell extension, the source tree, approvals. */
 class FakeWorkspace {
   approvals: PendingApproval[] = [];
+  admitApprovalWatch?: () => Promise<void>;
+  readApprovals?: () => Promise<PendingApproval[]>;
   /** `approvalId:decision` per resolve call. */
   readonly resolved: string[] = [];
+  readonly submitted: Array<{
+    method: string;
+    id: string;
+    values: Record<string, string>;
+  }> = [];
   private approvalStream: ReadableStreamDefaultController<Uint8Array> | null = null;
+  private approvalSequence = 0;
 
   constructor(readonly shell: FakeShell) {}
 
@@ -80,70 +96,127 @@ class FakeWorkspace {
         kind: "event",
         event: "shell-approval:pending-changed",
         payload: {},
-        sequence: 1,
+        sequence: ++this.approvalSequence,
       })
     );
   }
 
   rpc(): RpcClient {
     const shell = this.shell as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
-    const call = async (target: string, method: { name: string }, args: unknown[]) => {
+    const call = async (target: string, method: string, args: unknown[]) => {
       expect(target).toBe("main");
-      switch (method.name) {
+      switch (method) {
         case "extensions.streamingMethods":
           expect(args[0]).toBe(SHELL_EXTENSION);
           return ["attach", "watchSessionInfo", "watchAllSessionInfo"];
         case "extensions.invoke": {
           const [name, shellMethod, shellArgs] = args as [string, string, unknown[]];
           expect(name).toBe(SHELL_EXTENSION);
-          return shell[shellMethod]!.call(this.shell, ...shellArgs);
+          // The public extensions.invoke service represents command-style
+          // undefined results as JSON null, exactly as its real handler does.
+          return (await shell[shellMethod]!.call(this.shell, ...shellArgs)) ?? null;
         }
         case "workspace.sourceTree":
           return SOURCE_TREE;
         case "shellApproval.listPending":
-          return this.approvals;
+          return this.readApprovals ? this.readApprovals() : this.approvals;
         case "shellApproval.resolve":
           this.resolved.push(`${String(args[0])}:${String(args[1])}`);
           this.approvals = this.approvals.filter((a) => a.approvalId !== args[0]);
           return undefined;
+        case "shellApproval.submitSecretInput":
+        case "shellApproval.submitCredentialInput":
+        case "shellApproval.submitClientConfig":
+          this.submitted.push({
+            method,
+            id: args[0] as string,
+            values: args[1] as Record<string, string>,
+          });
+          this.approvals = this.approvals.filter((approval) => approval.approvalId !== args[0]);
+          return undefined;
       }
-      throw new Error(`unexpected workspace call ${method.name}`);
+      throw new Error(`unexpected workspace call ${method}`);
     };
-    const stream = async (_target: string, method: { name: string }, args: unknown[]) => {
-      if (method.name === "events.watch") {
+    const stream = async (
+      _target: string,
+      method: string,
+      args: unknown[],
+      options?: RpcStreamOptions
+    ) => {
+      if (method === "events.watch") {
+        if ((args[0] as string[]).includes("shell-approval:pending-changed"))
+          await this.admitApprovalWatch?.();
+        let stop: () => void = () => {};
         return new Response(
           new ReadableStream<Uint8Array>({
             start: (controller) => {
+              const signal = options?.signal;
+              const abort = () => {
+                stop();
+                controller.error(signal!.reason);
+              };
+              stop = () => {
+                signal?.removeEventListener("abort", abort);
+                if (this.approvalStream === controller) this.approvalStream = null;
+              };
+              if (signal?.aborted) {
+                abort();
+                return;
+              }
+              signal?.addEventListener("abort", abort, { once: true });
               const events = args[0] as string[];
               if (!events.includes("workspace:units-changed")) this.approvalStream = controller;
               controller.enqueue(
-                encodeEventWatchRecord({ kind: "watching", events: args[0] as never, epoch: "e" })
+                encodeEventWatchRecord({
+                  kind: "watching",
+                  events: args[0] as never,
+                  epoch: "e",
+                })
               );
             },
+            cancel: () => stop(),
           })
         );
       }
-      if (method.name === "extensions.invokeStream") {
+      if (method === "extensions.invokeStream") {
         const [, shellMethod, shellArgs] = args as [string, string, unknown[]];
         expect(shellMethod).toBe("attach");
         return this.shell.attach(...(shellArgs as Parameters<FakeShell["attach"]>));
       }
-      throw new Error(`unexpected workspace stream ${method.name}`);
+      throw new Error(`unexpected workspace stream ${method}`);
     };
-    return { call, stream, selfId: "shell:dev-1" } as unknown as RpcClient;
+    return schemaRpcClientMock(
+      {
+        call,
+        stream,
+        streamReadable: async (...args) => {
+          const response = await stream(...args);
+          return {
+            status: response.status,
+            statusText: response.statusText,
+            headers: [...response.headers.entries()],
+            finalUrl: response.url,
+            body: response.body!,
+          };
+        },
+      },
+      "shell:dev-1"
+    );
   }
 }
 
 /** The browser's System connection: it calls nothing there itself (settings go through the service). */
-const systemRpc = {
-  call: async (_target: string, method: { name: string }) => {
-    throw new Error(`unexpected System call ${method.name}`);
+const systemRpc = schemaRpcClientMock(
+  {
+    call: async (_target: string, method: string) => {
+      throw new Error(`unexpected System call ${method}`);
+    },
+    stream: async (_target: string, method: string) => {
+      throw new Error(`unexpected System stream ${method}`);
+    },
   },
-  stream: async (_target: string, method: { name: string }) => {
-    throw new Error(`unexpected System stream ${method.name}`);
-  },
-  selfId: APP_ID,
-} as unknown as RpcClient;
+  APP_ID
+);
 
 class FakeTty {
   readonly stdin = Object.assign(new EventEmitter(), {
@@ -160,7 +233,11 @@ class FakeTty {
       return this;
     },
   });
-  readonly screen = new Terminal({ cols: 100, rows: 20, allowProposedApi: true });
+  readonly screen = new Terminal({
+    cols: 100,
+    rows: 20,
+    allowProposedApi: true,
+  });
   readonly written: string[] = [];
   readonly stdout = Object.assign(new EventEmitter(), {
     isTTY: true,
@@ -206,18 +283,27 @@ async function until(predicate: () => boolean, what: string): Promise<void> {
 
 const PREFIX = "\x00";
 
-function setup(prepare?: (sessions: FakeTerminalSessions) => void) {
+function setup(
+  prepare?: (sessions: FakeTerminalSessions) => void,
+  prepareWorkspace?: (workspace: FakeWorkspace) => void
+) {
   const shell = new FakeShell();
-  const sessions = new FakeTerminalSessions(shell, { [ECHO]: { title: "Echo", icon: "🔊" } });
+  const sessions = new FakeTerminalSessions(shell, {
+    [ECHO]: { title: "Echo", icon: "🔊" },
+  });
   prepare?.(sessions);
   const workspace = new FakeWorkspace(shell);
+  prepareWorkspace?.(workspace);
   const tty = new FakeTty();
   currentScreen = () => tty.text();
   let connection: TerminalServerConnectionState = { phase: "connected" };
   const listeners = new Set<(state: TerminalServerConnectionState) => void>();
   const opened: string[] = [];
+  const cancellation = new AbortController();
   const host: TerminalBrowserHost = {
-    contractVersion: 2,
+    contractVersion: TERMINAL_BROWSER_HOST_CONTRACT_VERSION,
+    signal: cancellation.signal,
+    files: { upload: vi.fn(), download: vi.fn(), saveText: vi.fn() },
     rpc: systemRpc,
     appId: APP_ID,
     system: { id: "ws-system", name: "System" },
@@ -246,7 +332,9 @@ function setup(prepare?: (sessions: FakeTerminalSessions) => void) {
   });
   /** The PTY of the most recently active session. */
   const latestPty = () => {
-    const newest = [...sessions.entries.values()].sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    const newest = [...sessions.entries.values()].sort(
+      (a, b) => b.lastActiveAt - a.lastActiveAt
+    )[0];
     return newest!.shellSessionId!;
   };
   return {
@@ -256,6 +344,8 @@ function setup(prepare?: (sessions: FakeTerminalSessions) => void) {
     tty,
     done,
     opened,
+    files: host.files,
+    cancellation,
     latestPty,
     exit: () => exit,
     setConnection(state: TerminalServerConnectionState) {
@@ -269,16 +359,337 @@ type App = ReturnType<typeof setup>;
 
 describe("terminal browser", () => {
   const running: App[] = [];
-  const start = (prepare?: (sessions: FakeTerminalSessions) => void) => {
-    const app = setup(prepare);
+  const start = (
+    prepare?: (sessions: FakeTerminalSessions) => void,
+    prepareWorkspace?: (workspace: FakeWorkspace) => void
+  ) => {
+    const app = setup(prepare, prepareWorkspace);
     running.push(app);
     return app;
   };
   afterEach(async () => {
     for (const app of running.splice(0)) {
       if (!app.exit()) app.tty.type(`${PREFIX}q`);
+      if (!app.exit()) app.cancellation.abort(new Error("Test cleanup"));
       await app.done.catch(() => {});
     }
+  });
+
+  it("loads saved settings before admitting edits instead of replacing unknown preferences", async () => {
+    let complete!: (settings: Record<string, unknown>) => void;
+    const app = start((sessions) => {
+      vi.spyOn(sessions, "getSettings").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            complete = resolve;
+          })
+      );
+    });
+    try {
+      await until(() => app.tty.text().includes("Echo"), "launcher while settings load");
+      app.tty.type(`${PREFIX}s\x1b[C`);
+      await until(() => app.tty.text().includes("still loading"), "edit readiness notice");
+      expect(app.sessions.settings).toEqual({});
+      complete({ prefixKey: "C-b", autoOpenApprovals: false });
+      await until(() => app.tty.text().includes("Ctrl-B"), "saved preferences");
+      app.tty.type("\x1b[C");
+      await until(() => app.sessions.settings["prefixKey"] === "C-]", "new settings saved");
+      expect(app.sessions.settings["autoOpenApprovals"]).toBe(false);
+    } finally {
+      complete({ prefixKey: "C-b", autoOpenApprovals: false });
+    }
+  });
+
+  it("serializes complete settings replacements while allowing immediate local edits", async () => {
+    let release!: () => void;
+    const app = start((sessions) => {
+      vi.spyOn(sessions, "setSettings").mockImplementationOnce(async (settings) => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        sessions.settings = settings;
+      });
+    });
+    await until(() => app.tty.text().includes("Echo"), "loaded launcher");
+    app.tty.type(`${PREFIX}s\x1b[C\x1b[C`);
+    await until(() => !!release, "first settings write");
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(vi.mocked(app.sessions.setSettings)).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+    }
+    await until(() => app.sessions.settings["prefixKey"] === "C-b", "ordered final settings");
+    expect(vi.mocked(app.sessions.setSettings)).toHaveBeenCalledTimes(2);
+  });
+
+  it("never transfers selected consent when the queue reorders or removes that request", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    const request = (id: string): PendingApproval => ({
+      kind: "capability",
+      approvalId: id,
+      callerId: entry.principalId!,
+      callerKind: "app",
+      repoPath: ECHO,
+      effectiveVersion: "ev",
+      requestedAt: 1,
+      capability: "server-logs.read",
+      title: `Read logs ${id}`,
+    });
+    const first = request("first");
+    const second = request("second");
+    app.workspace.approvals = [first, second];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approvals (2)"), "selected first request");
+    app.workspace.approvals = [second, first];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("2. Read logs first"), "reordered queue");
+    app.tty.type("1");
+    await until(() => app.workspace.resolved.includes("first:once"), "original selected decision");
+    await until(
+      () => app.tty.text().includes("selected request ended"),
+      "removed selection explanation"
+    );
+    app.tty.type("1");
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(app.workspace.resolved).toEqual(["first:once"]);
+    app.tty.type("\x1b[B1");
+    await until(
+      () => app.workspace.resolved.includes("second:once"),
+      "explicit replacement selection"
+    );
+  });
+
+  it("blocks hidden approval decisions and session bytes below usable size", async () => {
+    const app = start();
+    const pty = await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.workspace.approvals = [
+      {
+        kind: "capability",
+        approvalId: "narrow",
+        callerId: entry.principalId!,
+        callerKind: "app",
+        repoPath: ECHO,
+        effectiveVersion: "ev",
+        requestedAt: 1,
+        capability: "server-logs.read",
+        title: "Read logs",
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approvals (1)"), "approval");
+    app.tty.stdout.columns = 30;
+    app.tty.stdout.emit("resize");
+    app.tty.type("1text");
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(app.workspace.resolved).toEqual([]);
+    expect(app.shell.typed(pty)).toBe("");
+    app.tty.stdout.columns = 100;
+    app.tty.stdout.rows = 8;
+    app.tty.stdout.emit("resize");
+    app.tty.type("1");
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(app.workspace.resolved).toEqual([]);
+    app.tty.type("\x07");
+    app.tty.stdout.rows = 20;
+    app.tty.stdout.emit("resize");
+    app.tty.type(`${PREFIX}a`);
+    await until(() => app.tty.text().includes("Approvals (1)"), "visible again");
+    app.tty.type("1");
+    await until(() => app.workspace.resolved.length === 1, "visible decision");
+  });
+
+  it("reserves migrated Ctrl-G and cancels armed-prefix modal, approval and protected-form focus", async () => {
+    const app = start((sessions) => {
+      sessions.settings = { prefixKey: "C-g" };
+    });
+    const pty = await startEcho(app);
+    const cancelFragmented = () => {
+      app.tty.type(`${PREFIX}\x1b`);
+      app.tty.type("\x07");
+    };
+    app.tty.type(`${PREFIX}s`);
+    await until(() => app.tty.text().includes("Settings"), "settings modal");
+    cancelFragmented();
+    await until(() => !app.tty.text().includes("Settings"), "cancel modal and prefix");
+    app.tty.type("z");
+    await until(() => app.shell.typed(pty) === "z", "following input is not poisoned");
+    const entry = [...app.sessions.entries.values()][0]!;
+    const common = {
+      callerId: entry.principalId!,
+      callerKind: "app" as const,
+      repoPath: ECHO,
+      effectiveVersion: "ev",
+      requestedAt: 1,
+    };
+    app.workspace.approvals = [
+      {
+        ...common,
+        kind: "capability",
+        approvalId: "cancel-card",
+        capability: "server-logs.read",
+        title: "Read logs",
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approvals (1)"), "approval modal");
+    cancelFragmented();
+    await until(() => !app.tty.text().includes("Approvals (1)"), "approval focus cancelled");
+    expect(app.workspace.resolved).toEqual([]);
+    app.workspace.approvals = [
+      {
+        ...common,
+        kind: "secret-input",
+        approvalId: "cancel-form",
+        title: "Protected form",
+        fields: [{ name: "token", label: "Token", type: "secret", required: true }],
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Protected form"), "form modal");
+    app.tty.type("sensitive");
+    cancelFragmented();
+    await until(() => !app.tty.text().includes("Protected form"), "form focus cancelled");
+    expect(app.workspace.submitted).toEqual([]);
+    expect(app.shell.typed(pty)).toBe("z");
+    app.tty.type(`${PREFIX}a`);
+    await until(() => app.tty.text().includes("Protected form"), "form reopens");
+    expect(app.tty.text()).not.toContain("•");
+  });
+
+  it("searches scrollback by cell coordinates and copies the complete match", async () => {
+    const app = start();
+    const pty = await startEcho(app);
+    app.shell.emit(pty, "A界B needle\r\nnext line");
+    await until(() => app.tty.text().includes("needle"), "output");
+    app.tty.type(`${PREFIX}/needle\r`);
+    await until(() => app.tty.text().includes("copy"), "search result in copy mode");
+    app.tty.type("y");
+    await until(
+      () =>
+        app.tty.written.some((bytes) => bytes.includes(Buffer.from("needle").toString("base64"))),
+      "cell-aware match copied"
+    );
+  });
+
+  it("submits protected secret values through the canonical form without painting or forwarding them", async () => {
+    const app = start();
+    const pty = await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.workspace.approvals = [
+      {
+        kind: "secret-input",
+        approvalId: "protected",
+        callerId: entry.principalId!,
+        callerKind: "app",
+        repoPath: ECHO,
+        effectiveVersion: "ev",
+        requestedAt: 1,
+        title: "Provide token",
+        fields: [{ name: "token", label: "Token", required: true, type: "secret" }],
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Provide token"), "protected input");
+    app.tty.type("\x1b[200~sensitive-👩‍💻\x1b[201~");
+    await until(() => app.tty.text().includes("•"), "masked value");
+    expect(app.tty.text()).not.toContain("sensitive");
+    expect(app.shell.typed(pty)).toBe("");
+    app.tty.type("\r\r");
+    await until(() => app.workspace.submitted.length === 1, "protected submission");
+    expect(app.workspace.submitted).toEqual([
+      {
+        method: "shellApproval.submitSecretInput",
+        id: "protected",
+        values: { token: "sensitive-👩‍💻" },
+      },
+    ]);
+    expect(app.tty.written.join("")).not.toContain("sensitive");
+  });
+
+  it("exports a full browser log through an explicit local path gesture", async () => {
+    const app = start();
+    await startEcho(app);
+    vi.mocked(app.files.saveText).mockResolvedValue({
+      path: "/chosen/log.txt",
+      size: 123,
+    });
+    app.setConnection({
+      phase: "reconnecting",
+      cause: "long failure evidence",
+    });
+    app.setConnection({ phase: "connected" });
+    app.tty.type(`${PREFIX}le`);
+    await until(() => app.tty.text().includes("New local output path"), "explicit export prompt");
+    app.tty.type("/chosen/log.txt\r\r");
+    await until(() => vi.mocked(app.files.saveText).mock.calls.length === 1, "export");
+    expect(vi.mocked(app.files.saveText).mock.calls[0]![0]).toMatchObject({
+      localPath: "/chosen/log.txt",
+      text: expect.stringContaining("long failure evidence"),
+    });
+  });
+
+  it("uploads to the context selected when the file gesture opened, even after switching tabs", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.sessions.update(entry.sessionId, { contextId: "echo-context" });
+    await startShell(app, 2);
+    app.tty.type(`${PREFIX}1${PREFIX}kupload\r`);
+    await until(() => app.tty.text().includes("Local source path"), "upload gesture");
+    app.tty.type(`${PREFIX}2`);
+    vi.mocked(app.files.upload).mockResolvedValue({ path: "uploads/notes.txt", size: 8 });
+    app.tty.type("/local/notes.txt\ruploads/notes.txt\r");
+    await until(
+      () => app.tty.text().includes("Upload and replace workspace destination"),
+      "explicit replacement confirmation"
+    );
+    expect(app.files.upload).not.toHaveBeenCalled();
+    app.tty.type("\r");
+    await until(() => vi.mocked(app.files.upload).mock.calls.length === 1, "context-bound upload");
+    expect(vi.mocked(app.files.upload).mock.calls[0]![0]).toEqual({
+      contextId: "echo-context",
+      localPath: "/local/notes.txt",
+      workspacePath: "uploads/notes.txt",
+    });
+    await until(
+      () => app.tty.text().includes("/attach uploads/notes.txt"),
+      "canonical attach instruction"
+    );
+  });
+
+  it("signals and joins an explicitly cancelled file transfer before browser retirement", async () => {
+    const app = start();
+    await startEcho(app);
+    let settle!: () => void;
+    let transferSignal: AbortSignal | undefined;
+    vi.mocked(app.files.download).mockImplementation((_input, options) => {
+      transferSignal = options?.signal;
+      return new Promise((_resolve, reject) => {
+        settle = () => reject(transferSignal!.reason);
+      });
+    });
+    app.tty.type(`${PREFIX}kdownload\r`);
+    await until(() => app.tty.text().includes("Workspace source path"), "download gesture");
+    app.tty.type("workspace/file.txt\r/local/new.txt\r\r");
+    await until(() => !!settle, "transfer admitted");
+    let retired = false;
+    void app.done.then(() => {
+      retired = true;
+    });
+    app.tty.type(`\x07${PREFIX}q`);
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(transferSignal?.aborted).toBe(true);
+      expect(retired).toBe(false);
+    } finally {
+      settle();
+    }
+    await app.done;
+    expect(retired).toBe(true);
   });
 
   /** Start Echo from the launcher and wait until its tab is attached. */
@@ -301,7 +712,10 @@ describe("terminal browser", () => {
   it("lists Shell and the workspace's terminal apps, and starts an app through the launch service", async () => {
     const app = start();
     const { tty, shell, sessions } = app;
-    await until(() => tty.text().includes("what would you like to open?"), "launcher");
+    await until(
+      () => tty.text().includes("🔊 Echo") && tty.text().includes("Pictures"),
+      "the launcher with its asynchronously loaded terminal app catalog"
+    );
     const screen = tty.text();
     expect(screen).toContain("Start");
     expect(screen).toContain("Shell");
@@ -318,7 +732,10 @@ describe("terminal browser", () => {
     shell.emit(pty, "echo is ready");
     await until(() => tty.text().includes("echo is ready"), "program output");
     tty.type("abc\x01\x0c");
-    await until(() => shell.typed(pty) === "abc\x01\x0c", "every key but the prefix reaches the program");
+    await until(
+      () => shell.typed(pty) === "abc\x01\x0c",
+      "every key but the prefix reaches the program"
+    );
   });
 
   it("opens the person's login shell from the Shell entry", async () => {
@@ -333,7 +750,12 @@ describe("terminal browser", () => {
     let exited!: TerminalSessionEntry;
     const app = start((sessions) => {
       const logs = sessions.add({ title: "Logs" });
-      exited = sessions.add({ title: "Old echo", kind: "app", source: ECHO, running: false });
+      exited = sessions.add({
+        title: "Old echo",
+        kind: "app",
+        source: ECHO,
+        running: false,
+      });
       sessions.shell.exit(exited.shellSessionId!, 1);
       sessions.entries.set(exited.sessionId, { ...exited, exit: { code: 1 } });
       sessions.add({ title: "Build" });
@@ -367,7 +789,9 @@ describe("terminal browser", () => {
     app.tty.type("\r");
     await until(() => app.tty.tabs().includes("1:🔊 Echo"), "tab again");
     await until(() => app.tty.text().includes("kept output"), "replayed output");
-    expect(app.shell.attachCalls.at(-1)!.options).toEqual({ size: { cols: 100, rows: 18 } });
+    expect(app.shell.attachCalls.at(-1)!.options).toEqual({
+      size: { cols: 100, rows: 18 },
+    });
   });
 
   it("lists a detached session under Resume by the title its program last set", async () => {
@@ -396,7 +820,10 @@ describe("terminal browser", () => {
     await until(() => !app.tty.tabs().includes("●"), "badge cleared on focus");
     const payload = Buffer.from("hi").toString("base64");
     app.shell.emit(echo, `\x1b]52;c;${payload}\x07`);
-    await until(() => app.tty.text().includes("Copied 2 characters from Echo: build"), "copy notice");
+    await until(
+      () => app.tty.text().includes("Copied 2 characters from Echo: build"),
+      "copy notice"
+    );
     expect(app.tty.written.join("")).toContain(`\x1b]52;c;${payload}\x07`);
   });
 
@@ -418,7 +845,7 @@ describe("terminal browser", () => {
     await until(() => app.tty.text().includes("Links in Echo"), "links list");
     app.tty.type("\r");
     await until(() => app.tty.text().includes("Open a link from Echo?"), "confirmation again");
-    app.tty.type("\x1b");
+    app.tty.type("\x1b[27u");
     await until(() => !app.tty.text().includes("Open a link from Echo?"), "cancelled");
     expect(app.opened).toHaveLength(1);
   });
@@ -472,6 +899,30 @@ describe("terminal browser", () => {
     });
   });
 
+  it("retries a running session observation failure through canonical resume without relaunching its PTY", async () => {
+    const app = start();
+    const pty = await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.sessions.update(entry.sessionId, { failure: "exit observation failed" });
+    const resume = vi.spyOn(app.sessions, "resume").mockImplementation(async ({ sessionId }) => {
+      const recovered = { ...app.sessions.entries.get(sessionId)! };
+      delete recovered.failure;
+      app.sessions.entries.set(sessionId, recovered);
+      return recovered;
+    });
+    await until(
+      () => app.tty.text().includes("exit observation failed"),
+      "persistent observation warning"
+    );
+    app.tty.type(`${PREFIX}r`);
+    await until(
+      () => resume.mock.calls.length === 1 && !app.tty.text().includes("exit observation failed"),
+      "authoritative observation retry"
+    );
+    expect(app.sessions.entries.get(entry.sessionId)!.shellSessionId).toBe(pty);
+    expect(app.shell.attachCalls).toHaveLength(1);
+  });
+
   it("opens approvals by itself for the app in the focused tab and decides with a digit", async () => {
     const app = start();
     await startEcho(app);
@@ -494,7 +945,10 @@ describe("terminal browser", () => {
     expect(app.tty.text()).toContain("requested by Echo (this tab)");
     app.tty.type("1");
     await until(() => app.workspace.resolved.includes("a1:once"), "decision");
-    await until(() => !app.tty.text().includes("Approvals (1)"), "overlay closes when queue empties");
+    await until(
+      () => !app.tty.text().includes("Approvals (1)"),
+      "overlay closes when queue empties"
+    );
   });
 
   it("attributes an approval raised by an agent the tab's app started, and numbers only its allowed decisions", async () => {
@@ -524,8 +978,18 @@ describe("terminal browser", () => {
           stableIdentityKey: "agents/chat@ev",
           ephemeralInstanceKey: "do:agents/chat:ChatAgent:1",
           breadcrumbs: [
-            { id: entry.principalId!, kind: "app", category: "workspace-app", label: "Echo" },
-            { id: "do:agents/chat:ChatAgent:1", kind: "do", category: "agent", label: "Chat" },
+            {
+              id: entry.principalId!,
+              kind: "app",
+              category: "workspace-app",
+              label: "Echo",
+            },
+            {
+              id: "do:agents/chat:ChatAgent:1",
+              kind: "do",
+              category: "agent",
+              label: "Chat",
+            },
           ],
         },
       },
@@ -535,7 +999,7 @@ describe("terminal browser", () => {
     expect(app.tty.text()).toContain("requested by Echo (this tab)");
     expect(app.tty.text()).toContain("[1] Confirm  [2] Cancel ");
     expect(app.tty.text()).not.toContain("[3]");
-    app.tty.type("\x1b");
+    app.tty.type("\x1b[27u");
     await until(() => app.tty.tabs().includes("!"), "badge on the tab");
     app.tty.type(`${PREFIX}a`);
     await until(() => app.tty.text().includes("Approvals (1)"), "approvals again");
@@ -549,7 +1013,7 @@ describe("terminal browser", () => {
     tty.type(`${PREFIX}?`);
     await until(() => tty.text().includes("Every key goes to the session"), "help");
     expect(tty.text()).toContain("Ctrl-Space o");
-    tty.type("\x1b");
+    tty.type("\x1b[27u");
     await until(() => tty.text().includes("what would you like to open?"), "launcher again");
   });
 
@@ -564,6 +1028,69 @@ describe("terminal browser", () => {
     expect(app.tty.stdin.rawModes).toEqual([true, false]);
   });
 
+  it.each(["admission", "read"] as const)(
+    "joins a held approval %s when quitting before initial readiness",
+    async (stage) => {
+      let admitted = false;
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const app = start(undefined, (workspace) => {
+        const wait = async () => {
+          admitted = true;
+          await held;
+        };
+        if (stage === "admission") workspace.admitApprovalWatch = wait;
+        else
+          workspace.readApprovals = async () => {
+            await wait();
+            return [];
+          };
+      });
+      try {
+        await until(
+          () => admitted && app.tty.text().includes("what would you like to open?"),
+          "held initial approval work and browser chrome"
+        );
+        app.tty.type(`${PREFIX}q`);
+        expect(app.tty.stdin.rawModes).toEqual([true]);
+      } finally {
+        release();
+      }
+      await expect(app.done).resolves.toEqual({ kind: "quit" });
+      expect(app.tty.stdin.rawModes).toEqual([true, false]);
+    }
+  );
+
+  it("retains an independent approval read failure discovered while joining a normal quit", async () => {
+    let reading = false;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const failure = new Error("independent approval projection failure");
+    const app = start(undefined, (workspace) => {
+      workspace.readApprovals = async () => {
+        reading = true;
+        await held;
+        throw failure;
+      };
+    });
+    const outcome = expect(app.done).rejects.toBe(failure);
+    try {
+      await until(
+        () => reading && app.tty.text().includes("what would you like to open?"),
+        "held initial approval read"
+      );
+      app.tty.type(`${PREFIX}q`);
+    } finally {
+      release();
+    }
+    await outcome;
+    expect(app.tty.stdin.rawModes).toEqual([true, false]);
+  });
+
   it("switches workspace through the workspace list", async () => {
     const app = start();
     await until(() => app.tty.text().includes("Echo"), "launcher");
@@ -573,7 +1100,10 @@ describe("terminal browser", () => {
       "workspaces"
     );
     app.tty.type("tea\r");
-    await expect(app.done).resolves.toEqual({ kind: "switch-workspace", workspaceId: "ws-2" });
+    await expect(app.done).resolves.toEqual({
+      kind: "switch-workspace",
+      workspaceId: "ws-2",
+    });
   });
 
   it("ends with the cause when the connection is lost", async () => {
@@ -582,7 +1112,10 @@ describe("terminal browser", () => {
     app.setConnection({ phase: "reconnecting", cause: "socket closed" });
     await until(() => app.tty.text().includes("reconnecting (socket closed)"), "reconnecting");
     app.setConnection({ phase: "lost", cause: "credential revoked" });
-    await expect(app.done).resolves.toEqual({ kind: "connection-lost", cause: "credential revoked" });
+    await expect(app.done).resolves.toEqual({
+      kind: "connection-lost",
+      cause: "credential revoked",
+    });
   });
 
   it("persists a changed prefix key and uses it at once", async () => {
@@ -592,10 +1125,10 @@ describe("terminal browser", () => {
     await until(() => tty.text().includes("Prefix key"), "settings");
     tty.type("\x1b[C"); // right: next prefix
     await until(() => sessions.settings["prefixKey"] === "C-a", "saved");
-    tty.type("\x1b");
+    tty.type("\x1b[27u");
     tty.type("\x01?");
     await until(() => tty.text().includes("Every key goes to the session"), "help via new prefix");
-    tty.type("\x1b");
+    tty.type("\x1b[27u");
     tty.type("\x01q");
   });
 
@@ -603,7 +1136,9 @@ describe("terminal browser", () => {
     const tty = new FakeTty();
     (tty.stdout as { isTTY: boolean }).isTTY = false;
     const host = {
-      contractVersion: 2,
+      contractVersion: TERMINAL_BROWSER_HOST_CONTRACT_VERSION,
+      signal: new AbortController().signal,
+      files: { upload: vi.fn(), download: vi.fn(), saveText: vi.fn() },
       rpc: systemRpc,
       appId: APP_ID,
       system: { id: "ws-system", name: "System" },

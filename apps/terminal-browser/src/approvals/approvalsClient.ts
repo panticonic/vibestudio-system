@@ -34,14 +34,17 @@ export interface ApprovalsClient {
    */
   resolveInstallReview(
     approvalId: string,
-    resolution: TemplateInstallResolution,
+    resolution: TemplateInstallResolution
   ): Promise<InstallReviewResolution>;
   /** The only valid resolution for a `task.rules` card: the exact offered rows the person selected. */
   resolveTaskRules(approvalId: string, resolution: TaskRulesResolution): Promise<void>;
+  submitClientConfig(approvalId: string, values: Record<string, string>): Promise<void>;
+  submitCredentialInput(approvalId: string, values: Record<string, string>): Promise<void>;
+  submitSecretInput(approvalId: string, values: Record<string, string>): Promise<void>;
   /** Own the watched, authoritative queue projection through retirement. */
   observe(
     changed: (pending: PendingApproval[]) => void,
-    error: (error: unknown) => void,
+    error: (error: unknown) => void
   ): DurableObservation;
 }
 
@@ -49,7 +52,7 @@ export function createApprovalsClient(rpc: RpcClient): ApprovalsClient {
   const shellApproval = createTypedRpcServiceClient(
     rpc,
     { targetId: "main", namespace: "shellApproval" },
-    shellApprovalMethods,
+    shellApprovalMethods
   );
   const events = new EventsClient(rpc);
   return {
@@ -66,10 +69,12 @@ export function createApprovalsClient(rpc: RpcClient): ApprovalsClient {
     async resolveTaskRules(approvalId, resolution) {
       await shellApproval.resolveTaskRules(approvalId, resolution);
     },
+    submitClientConfig: (id, values) => shellApproval.submitClientConfig(id, values),
+    submitCredentialInput: (id, values) => shellApproval.submitCredentialInput(id, values),
+    submitSecretInput: (id, values) => shellApproval.submitSecretInput(id, values),
     observe(changed, error) {
       return observeDurableProjection({
-        listen: (invalidate) =>
-          events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, invalidate),
+        listen: (invalidate) => events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, invalidate),
         admit: () => events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
         leave: () => events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
         read: () => shellApproval.listPending(),
