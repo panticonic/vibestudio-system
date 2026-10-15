@@ -19,7 +19,7 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
-    "types": ["node", "react", "react-native"]
+    "types": ["react", "react-native"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", "jest.setup.ts", "**/*.test.ts", "**/*.test.tsx"]
