@@ -1,7 +1,6 @@
 import { mainRpcMethod, mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { channelClientRpcMethods } from "@workspace/pubsub/rpc-contract";
 import { modelSettingsRpcMethods } from "@workspace/model-catalog/rpc-contract";
-import { quickfireRpcMethods } from "@workspace-workers/quickfire-service/contract";
 import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import { createDurableObjectServiceClient } from "@vibestudio/service-schemas/clients/durableObjectServiceClient";
 import { createGadServiceClient } from "@vibestudio/service-schemas/clients/gadServiceClient";
@@ -94,7 +93,10 @@ import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
 import { credentialsMethods } from "@vibestudio/service-schemas/credentials";
 import { websiteHostingMethods } from "@vibestudio/service-schemas/websiteHosting";
 import { pushMethods } from "@vibestudio/service-schemas/push";
-import { QUICKFIRE_SERVICE_PROTOCOL } from "@workspace/quickfire-core/service";
+import {
+  QUICKFIRE_SERVICE_PROTOCOL,
+  quickfireRpcMethods,
+} from "@workspace/quickfire-core/service";
 import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
 import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
