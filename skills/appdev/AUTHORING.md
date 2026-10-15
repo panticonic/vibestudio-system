@@ -2,12 +2,12 @@
 
 Trusted workspace apps live under `apps/` and use flat source paths:
 
-| Package name                 | Source path       |
-| ---------------------------- | ----------------- |
-| `@workspace-apps/shell`      | `apps/shell`      |
-| `@workspace-apps/mobile`     | `apps/mobile`     |
-| `@workspace-apps/remote-cli` | `apps/remote-cli` |
-| `@workspace-apps/foo`        | `apps/foo`        |
+| Package name                       | Source path             |
+| ---------------------------------- | ----------------------- |
+| `@workspace-apps/shell`            | `apps/shell`            |
+| `@workspace-apps/mobile`           | `apps/mobile`           |
+| `@workspace-apps/terminal-browser` | `apps/terminal-browser` |
+| `@workspace-apps/foo`              | `apps/foo`              |
 
 Do not add a package scope segment to the filesystem path. The path
 `apps/@workspace-apps/foo` is wrong.
@@ -90,22 +90,26 @@ the app becomes active.
 
 ## Runtime Update Protocol
 
-To show update state in its own UI, an app subscribes to `apps:lifecycle`.
-The event types are:
+To show update state in its own UI, an app subscribes to `supervision:changed`
+(events for apps and extensions share it; filter on `identity.kind`). The
+`change` values are:
 
-- `update-available`: a new trusted build is active on the server and can be
-  loaded by clients. Payload includes app id, source, target, build key,
-  effective version, previous build metadata, `canRollback`, and an
-  `adoptionPolicy`.
-- `update-error`: source was published, but its derived build or activation
-  failed. The previous active build remains selected. Payload includes the
-  error and rollback availability.
+- `adopted`: a new trusted build is active on the server and can be loaded by
+  clients. Payload includes the identity, source, `app.target`, build key and
+  effective version, previous build metadata, `canRollback`, and the target's
+  `adoption` policy.
+- `update-rejected`: source was published, but its derived build or activation
+  failed. The previous active build remains selected and the unit keeps
+  running; `lastError` carries the reason.
 - `rolled-back`: the server switched the app back to a previous trusted build.
+- `status`: any other lifecycle or error change.
 
-The adoption policy depends on the target. `prompt` means the client keeps its
-loaded build and asks the user when to adopt the new one. `immediate` is used
-for first load, user-requested rollback, and terminal process replacement.
-Once started, terminal apps are supervised by the server runner.
+The adoption policy is a property of the target. Electron and React Native use
+`prompt` for an update: the client keeps its loaded build and asks the user when
+to adopt the new one; `immediate` is used for first load and user-requested
+rollback. A terminal client app is `artifact-only`: it adopts a new build when
+`vibestudio terminal` loads it again (on relaunch, or when the CLI reconnects
+after an update).
 
 To list current and previous app builds, call
 `runtime.supervision.versions({ kind: "app", releaseId: appName })`. To restore
@@ -229,7 +233,7 @@ Use an app when the code is a trusted client runtime:
 
 - the desktop shell UI
 - the mobile workspace shell loaded by a native host
-- a future terminal client
+- the terminal browser run by `vibestudio terminal`
 - a client that owns pairing or principal-grant flows
 
 Use a panel for a workspace surface shown inside the shell. Use an extension

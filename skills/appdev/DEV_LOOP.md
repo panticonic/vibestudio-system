@@ -68,25 +68,32 @@ activation fails:
 
 - semantic `main` stays at the published event and the previous build stays in
   use
-- app status becomes `error`, and `apps:status` reports the build key and
-  effective version still in use
-- `apps:lifecycle` emits `type: "update-error"` with the failure message, which
-  the shell and mobile clients show as notifications/toasts
+- the app keeps status `running` with the error recorded as `lastError`
+  ("update not adopted"); a working build is never demoted to `error`
+- `supervision:changed` reports `change: "update-rejected"` with the failure
+  message, which the shell and mobile clients show as notifications/toasts
+
+A push that fails the protected-main build gate never reaches this state: the
+gate builds each affected app target and enforces its artifact contract (a
+terminal app's single `.mjs` entry, a React Native app's signed per-platform
+bundles and provider), so a bad artifact rejects the push with the app, target
+and defect named. Only activation-time failures that need a running host
+(for example a review the user has not accepted) land here.
 
 Fix the failure with a new semantic event. Do not roll back source history to
 hide the failed publication.
 
-A successful update records the replaced build in app version history and emits
-`apps:lifecycle` with `type: "update-available"`. Clients that already have the
+A successful update records the replaced build in the unit's version history and
+emits `supervision:changed` with `change: "adopted"` and the target's `adoption`
+policy. Clients that already have the
 app loaded adopt it explicitly:
 
 - desktop Electron apps keep the current view and show a notification with
   `Load update` and, when available, `Roll back`
 - mobile apps show a native prompt with `Install`, `Later`, and, when rollback
   history exists, `Roll back`
-- running terminal apps restart automatically; otherwise the new build waits
-  until the host target is launched or
-  `runtime.supervision.activate({ kind: "app", releaseId: appName })` starts it
+- terminal client apps keep the loaded build until `vibestudio terminal` loads the app
+  again: on the next run, or when the CLI reconnects after the update
 
 Clients can call
 `runtime.supervision.versions({ kind: "app", releaseId: appName })` to list the
@@ -175,30 +182,35 @@ pnpm test:iroh-desktop-e2e
 pnpm test:iroh-mobile-e2e
 ```
 
-## Terminal App Loop
+## Terminal Client App Loop
 
-For terminal apps:
+For terminal client apps:
 
-- Expect `apps:available` with `launchMode: "terminal-process"`.
-- Start an available terminal app with
-  `runtime.supervision.activate({ kind: "app", releaseId: appName })`.
-- Status is `available` when the build is trusted but no process runs, and
-  `running` once the runner has spawned the process.
-- Address the live process by its release key:
-  `runtime.supervision.describe({ kind: "app", releaseId: appName })` and
-  `runtime.supervision.logs({ kind: "app", releaseId: appName })` read its rows
-  and stdout/stderr; `restart(row.identity)` replaces it.
-- For host runner/reconcile failures, use `serverLog.query` (eval:
-  `services.serverLog.query(...)`; app/panel/worker: pass
-  `mainRpcMethods["serverLog.query"]` from
-  `@vibestudio/service-schemas/mainRpc`) or the `about/server-logs`
-  live viewer; see `../server-logs/SKILL.md`.
-- Test pushed updates and rollback while the app is running; the runner should
-  replace the process with the selected trusted build.
+- Expect `supervision:changed` with `change: "adopted"` and
+  `adoption: "artifact-only"`. The server only builds terminal client apps; it
+  never runs them.
+- Run the app with `vibestudio terminal` (from the host checkout,
+  `pnpm terminal [--instance ID]`). The CLI runs the launch gate for the
+  `terminal` target, obtains the device's app principal through
+  `auth.grantAppPrincipal([{ principal: "terminal-app", source }])`, downloads
+  the build's primary `index.mjs`, and calls its exported `run(host)` in the
+  CLI process. The app named by `hostTargets.terminal.app` is the one opened.
+- Server output for a server the command started is in
+  `<stateDir>/logs/server.log` (`<instanceRoot>/logs/server.log` for
+  `pnpm terminal`). For host build, launch-gate, or grant failures, use
+  `serverLog.query` (eval: `services.serverLog.query(...)`; app/panel/worker:
+  pass `mainRpcMethods["serverLog.query"]` from
+  `@vibestudio/service-schemas/mainRpc`) or the `about/server-logs` live
+  viewer; see `../server-logs/SKILL.md`.
+- To test an update or rollback, publish or roll back, then rerun
+  `vibestudio terminal` (or let a running one reconnect) and confirm the
+  selected trusted build loads.
 
-Write terminal app source as a clean Node ESM entry that reads the
-runner-provided `VIBESTUDIO_TERMINAL_APP_*` environment, connects with the
-provided RPC grant, and handles shutdown messages from the runner.
+Write terminal client app source as a clean Node ESM module that exports
+`run(host: TerminalBrowserHost)` from
+`@vibestudio/shell-core/terminal/terminalBrowserHost`, uses `host.rpc` (already
+authenticated as the app principal) and `host.stdin`/`host.stdout`, and
+resolves with its exit instead of calling `process.exit`.
 
 ## Debugging Headless App State
 
@@ -207,22 +219,21 @@ synthetic human shell. On first boot, pair the CLI with the root invite, select
 a workspace, and use the typed services from that session.
 
 From app, panel, worker, or eval contexts, use `runtime.supervision.*` with the
-app's entity or release identity for the app process, and `serverLog.*` for the
-host server. In eval, use `services.serverLog.*`; elsewhere use
+app's entity or release identity for the app's build and activation state, and
+`serverLog.*` for the host server. In eval, use `services.serverLog.*`; elsewhere use
 `rpc.call("main", mainRpcMethods["serverLog.query"], [{ ... }])`.
 `serverLog.query/tail/stats`
 is read-only and supports live following through `server-log:append`. Humans
 can open `about/server-logs`.
 
-Full terminal app smoke:
+Full terminal client app smoke:
 
 ```bash
 pnpm test:terminal-app-smoke
 ```
 
-It builds the app, starts an ephemeral server, launches the built-in remote CLI
-terminal app, asserts it reaches `running`, checks that a pairing invite
-appears in the logs, and shuts the server down.
+Run it when you change the terminal target, the terminal launch path, app
+principal grants, or pairing.
 
 ## Updating Docs And Skills
 

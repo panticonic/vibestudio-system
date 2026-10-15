@@ -1,7 +1,7 @@
 import { act, render, waitFor } from "@testing-library/react-native";
 import { WorkspaceSessionEffects } from "./WorkspaceSessionEffects";
 import { handleExternalOpen } from "../services/oauthLoopback";
-import { handleMobileAppLifecycleEvent } from "../services/appUpdatePrompt";
+import { handleMobileSupervisionChange } from "../services/appUpdatePrompt";
 import type {
   MobileWorkspaceDirectory,
   MobileWorkspaceSession,
@@ -11,7 +11,7 @@ jest.mock("../services/oauthLoopback", () => ({
   handleExternalOpen: jest.fn(async () => undefined),
 }));
 jest.mock("../services/appUpdatePrompt", () => ({
-  handleMobileAppLifecycleEvent: jest.fn(),
+  handleMobileSupervisionChange: jest.fn(),
 }));
 
 function setup(workspaceId = "personal") {
@@ -183,57 +183,39 @@ it("attributes external handoff failure to its owner without changing the active
   expect(f.directory.activate).not.toHaveBeenCalled();
 });
 
-it("reconciles the selected native app update from durable status in System", async () => {
+it("reconciles the selected native app update from supervision in System", async () => {
   const system = setup("system");
   const personal = setup();
-  const update = {
-    type: "update-available" as const,
-    appId: "mobile",
-    target: "react-native" as const,
+  const event = {
+    identity: { kind: "app", entityId: "mobile" },
+    change: "adopted",
     source: "apps/mobile",
-    buildKey: "mobile-build-2",
-    effectiveVersion: "2",
-    previousBuildKey: "mobile-build-1",
-    previousEffectiveVersion: "1",
-    canRollback: true,
-    requiresReload: true as const,
-    adoptionPolicy: "prompt" as const,
-    selectedForHost: true as const,
+    app: { target: "react-native" },
   };
-  system.client.hostLaunch.mobileUpdateStatus.mockResolvedValue(update);
   const view = render(
     <>
       <WorkspaceSessionEffects {...system.props} />
       <WorkspaceSessionEffects {...personal.props} />
     </>,
   );
+  system.emit("supervision:changed", event);
+  personal.emit("supervision:changed", event);
   await waitFor(() =>
-    expect(handleMobileAppLifecycleEvent).toHaveBeenCalledTimes(1),
+    expect(handleMobileSupervisionChange).toHaveBeenCalledTimes(1),
   );
-  expect(handleMobileAppLifecycleEvent).toHaveBeenCalledWith(
-    update,
+  expect(handleMobileSupervisionChange).toHaveBeenCalledWith(
+    event,
     expect.objectContaining({
       shellClient: system.client,
       selectedSource: "apps/mobile",
     }),
   );
   expect(personal.client.hostLaunch.configuredCandidate).not.toHaveBeenCalled();
-  expect(system.client.events.subscribe).toHaveBeenCalledWith("apps:status");
-  const recover = system.resubscribeHandlers.get("mobile-app-update-status");
-  expect(recover).toBeDefined();
-  system.client.hostLaunch.mobileUpdateStatus.mockResolvedValueOnce(null);
-  await expect(recover!()).resolves.toBeUndefined();
-  expect(system.client.hostLaunch.mobileUpdateStatus).toHaveBeenCalledTimes(2);
   expect(personal.client.events.subscribeAll).toHaveBeenCalledWith([
     "notification:show",
     "external-open:open",
   ]);
   view.unmount();
-  await waitFor(() =>
-    expect(system.client.events.unsubscribe).toHaveBeenCalledWith(
-      "apps:status",
-    ),
-  );
 });
 
 it("does not present old app lifecycle work after its System session is replaced", async () => {
@@ -246,26 +228,24 @@ it("does not present old app lifecycle work after its System session is replaced
       }),
   );
   const view = render(<WorkspaceSessionEffects {...f.props} />);
-  f.emit("apps:lifecycle", {
-    type: "update-available",
-    target: "react-native",
+  f.emit("supervision:changed", {
+    identity: { kind: "app", entityId: "mobile" },
+    change: "adopted",
     source: "apps/mobile",
+    app: { target: "react-native" },
   });
   f.directory.sessions.set("system", { ...f.session });
   await act(async () => {
     resolve({ source: "apps/mobile", name: "mobile" });
   });
-  expect(handleMobileAppLifecycleEvent).not.toHaveBeenCalled();
+  expect(handleMobileSupervisionChange).not.toHaveBeenCalled();
   view.unmount();
   await waitFor(() =>
     expect(f.client.events.unsubscribeMany).toHaveBeenCalledWith([
       "notification:show",
       "external-open:open",
-      "apps:lifecycle",
+      "supervision:changed",
     ]),
-  );
-  await waitFor(() =>
-    expect(f.client.events.unsubscribe).toHaveBeenCalledWith("apps:status"),
   );
 });
 

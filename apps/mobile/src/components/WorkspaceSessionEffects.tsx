@@ -9,12 +9,8 @@ import {
   handleExternalOpen,
   type ExternalOpenPayload,
 } from "../services/oauthLoopback";
-import {
-  handleMobileAppLifecycleEvent,
-  type AppLifecyclePayload,
-} from "../services/appUpdatePrompt";
+import { handleMobileSupervisionChange } from "../services/appUpdatePrompt";
 import type { ToastInput } from "../state/toastAtoms";
-import { nativeActiveAppBuildKey } from "../services/nativeAppBuildIdentity";
 
 /** Connected workspace events remain visible even before its panels are opened. */
 export function WorkspaceSessionEffects({
@@ -45,60 +41,12 @@ export function WorkspaceSessionEffects({
     void candidate.catch(() => undefined);
     const current = () =>
       active && directory.sessions.get(session.workspaceId) === session;
-    const appUpdateObservation = isAppSource
-      ? observeDurableProjection({
-          listen: (changed) => {
-            const stopEvent = client.events.on(
-              "apps:status",
-              () => void changed(),
-            );
-            const stopResubscribe = client.recovery.registerResubscribeHandler(
-              "mobile-app-update-status",
-              () => changed(),
-            );
-            const stopColdRecover = client.recovery.registerColdRecoverHandler(
-              "mobile-app-update-status",
-              () => changed(),
-            );
-            return () => {
-              stopEvent();
-              stopResubscribe();
-              stopColdRecover();
-            };
-          },
-          admit: () => client.events.subscribe("apps:status"),
-          leave: () => client.events.unsubscribe("apps:status"),
-          read: () =>
-            client.hostLaunch.mobileUpdateStatus(nativeActiveAppBuildKey()),
-          apply: (update) => {
-            if (!current() || !update) return;
-            handleMobileAppLifecycleEvent(update, {
-              shellClient: client,
-              pushToast: (toast) => {
-                if (current()) notify(toast);
-              },
-              prompted: promptedAppUpdates.current,
-              selectedSource: update.source,
-              selectedAppId: update.appId,
-            });
-          },
-          error: (error) => {
-            if (current())
-              console.warn(
-                "[WorkspaceSession] Mobile update status unavailable",
-                error,
-              );
-          },
-        })
-      : null;
     const stopAppLifecycle = isAppSource
-      ? client.events.on("apps:lifecycle", (payload) => {
-          if ((payload as AppLifecyclePayload).type === "update-available")
-            return;
+      ? client.events.on("supervision:changed", (change) => {
           void candidate
             .then((selected) => {
               if (!current() || !selected) return;
-              handleMobileAppLifecycleEvent(payload as AppLifecyclePayload, {
+              handleMobileSupervisionChange(change, {
                 shellClient: client,
                 pushToast: (toast) => {
                   if (current()) notify(toast);
@@ -146,7 +94,7 @@ export function WorkspaceSessionEffects({
     const topics = [
       "notification:show",
       "external-open:open",
-      ...(isAppSource ? (["apps:lifecycle"] as const) : []),
+      ...(isAppSource ? ["supervision:changed" as const] : []),
     ] as const;
     const openExternal = (payload: ExternalOpenPayload) => {
       if (!active || directory.sessions.get(session.workspaceId) !== session)
@@ -195,15 +143,6 @@ export function WorkspaceSessionEffects({
     });
     return () => {
       active = false;
-      if (appUpdateObservation)
-        void appUpdateObservation
-          .stop()
-          .catch((error: unknown) =>
-            console.warn(
-              "[WorkspaceNotifications] App update observation retirement failed",
-              error,
-            ),
-          );
       stopAppLifecycle?.();
       void observation
         .stop()

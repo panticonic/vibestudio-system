@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RpcClient } from "@vibestudio/rpc";
+import { schemaRpcClientMock } from "@vibestudio/rpc/test-utils";
 import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 import { encodeEventWatchRecord } from "@vibestudio/shared/events";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
@@ -136,48 +136,47 @@ function installReviewResolution(): InstallReviewResolution {
 
 function fakeRpc(pending: PendingApproval[]) {
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
-  const call = vi.fn(
-    async (_target: string, method: { name: string }, _args: unknown[]) => {
-      if (method.name === "shellApproval.listPending") return pending;
-      // Resolving a review answers with what actually happened; the typed client
-      // parses that answer, so a mock that returns nothing fails the contract
-      // rather than the call under test.
-      if (method.name === "shellApproval.resolveInstallReview")
-        return installReviewResolution();
-      return undefined;
-    },
+  const call = vi.fn(async (_target: string, method: string, _args: unknown[]) => {
+    if (method === "shellApproval.listPending") return pending;
+    // Resolving a review answers with what actually happened; the typed client
+    // parses that answer, so a mock that returns nothing fails the contract
+    // rather than the call under test.
+    if (method === "shellApproval.resolveInstallReview") return installReviewResolution();
+    return undefined;
+  });
+  const streamReadable = vi.fn(
+    async (
+      _target: string,
+      _method: unknown,
+      args: unknown[],
+      options?: { signal?: AbortSignal }
+    ) => ({
+      status: 200,
+      statusText: "OK",
+      headers: [],
+      finalUrl: "",
+      body: new ReadableStream<Uint8Array>({
+        start(next) {
+          controller = next;
+          options?.signal?.addEventListener("abort", () => next.close(), {
+            once: true,
+          });
+          next.enqueue(
+            encodeEventWatchRecord({
+              kind: "watching",
+              events: args[0] as never,
+              epoch: "test-epoch",
+            })
+          );
+        },
+      }),
+    })
   );
-  const rpc = {
-    call,
-    stream: vi.fn(
-      async (
-        _target: string,
-        _method: unknown,
-        args: unknown[],
-        options?: { signal?: AbortSignal },
-      ) =>
-        new Response(
-          new ReadableStream({
-            start(next) {
-              controller = next;
-              options?.signal?.addEventListener("abort", () => next.close(), {
-                once: true,
-              });
-              next.enqueue(
-                encodeEventWatchRecord({
-                  kind: "watching",
-                  events: args[0] as never,
-                  epoch: "test-epoch",
-                }),
-              );
-            },
-          }),
-        ),
-    ),
-  } as unknown as RpcClient;
+  const rpc = schemaRpcClientMock({ call, streamReadable }, "terminal-browser-test");
   return {
     rpc,
     call,
+    streamReadable,
     emit(payload: unknown) {
       controller?.enqueue(
         encodeEventWatchRecord({
@@ -185,7 +184,7 @@ function fakeRpc(pending: PendingApproval[]) {
           event: "shell-approval:pending-changed",
           payload,
           sequence: 1,
-        }),
+        })
       );
     },
   };
@@ -196,10 +195,7 @@ describe("createApprovalsClient", () => {
     const { rpc } = fakeRpc([startupUnitApproval(), runtimeApproval()]);
     const client = createApprovalsClient(rpc);
 
-    await expect(client.list()).resolves.toEqual([
-      startupUnitApproval(),
-      runtimeApproval(),
-    ]);
+    await expect(client.list()).resolves.toEqual([startupUnitApproval(), runtimeApproval()]);
   });
 
   it("shows a later extension review in the running queue, because the app can host it", async () => {
@@ -218,10 +214,7 @@ describe("createApprovalsClient", () => {
     const { rpc } = fakeRpc([extensionReview, runtimeApproval()]);
     const client = createApprovalsClient(rpc);
 
-    await expect(client.list()).resolves.toEqual([
-      extensionReview,
-      runtimeApproval(),
-    ]);
+    await expect(client.list()).resolves.toEqual([extensionReview, runtimeApproval()]);
   });
 
   it("resolves an install review through resolveInstallReview, never the decision-id path", async () => {
@@ -236,31 +229,41 @@ describe("createApprovalsClient", () => {
 
     expect(call).toHaveBeenCalledTimes(1);
     expect(call.mock.calls[0]?.[0]).toBe("main");
-    expect(call.mock.calls[0]?.[1]).toMatchObject({
-      name: mainRpcMethods["shellApproval.resolveInstallReview"].name,
-    });
+    expect(call.mock.calls[0]?.[1]).toBe(mainRpcMethods["shellApproval.resolveInstallReview"].name);
     expect(call.mock.calls[0]?.[2]).toEqual(["install-1", resolution]);
   });
 
+  it("resolves a chat-rules card through resolveTaskRules, never the decision-id path", async () => {
+    const { rpc, call } = fakeRpc([]);
+    const client = createApprovalsClient(rpc);
+    const resolution = { decision: "accept" as const, selected: ["row-a"] };
+
+    await client.resolveTaskRules("rules-1", resolution);
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0]?.[1]).toBe(mainRpcMethods["shellApproval.resolveTaskRules"].name);
+    expect(call.mock.calls[0]?.[2]).toEqual(["rules-1", resolution]);
+  });
+
   it("watches the shared shell approval queue", async () => {
-    const { rpc, emit } = fakeRpc([]);
+    const { rpc, emit, streamReadable } = fakeRpc([]);
     const client = createApprovalsClient(rpc);
     const changed = vi.fn();
     const error = vi.fn();
 
     const observation = client.observe(changed, error);
-    await vi.waitFor(() => expect(rpc.stream).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(streamReadable).toHaveBeenCalledTimes(1));
     await observation.ready;
     expect(changed).toHaveBeenCalledWith([]);
     emit([]);
     await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(2));
     await observation.stop();
     expect(error).not.toHaveBeenCalled();
-    expect(rpc.stream).toHaveBeenCalledWith(
+    expect(streamReadable).toHaveBeenCalledWith(
       "main",
-      mainRpcMethods["events.watch"],
+      mainRpcMethods["events.watch"].name,
       [["shell-approval:pending-changed"], expect.any(String)],
-      expect.objectContaining({ bodyIdleTimeoutMs: null }),
+      expect.objectContaining({ bodyIdleTimeoutMs: null })
     );
   });
 });

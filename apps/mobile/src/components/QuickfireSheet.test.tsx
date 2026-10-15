@@ -32,6 +32,9 @@ const fresh: QuickfireSessionFacts = {
 function channelClient() {
   return {
     clientId: "user:me",
+    // The shared channel feed reads these to decide whether replay has settled.
+    connected: true,
+    onReady: () => () => undefined,
     events: () => ({
       [Symbol.asyncIterator]: () => ({
         next: () => new Promise<IteratorResult<unknown>>(() => {}),
