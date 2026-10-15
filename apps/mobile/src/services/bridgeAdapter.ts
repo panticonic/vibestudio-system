@@ -178,8 +178,7 @@ export function createBridgeAdapter(deps: {
         const lease = requirePanelLease(panelId);
         if (typeof session.streamReadable !== "function") {
           throw new Error(
-            "Streaming request bodies (uploads) require the Iroh transport; " +
-              "this panel's host session cannot stream a request body",
+            "Streaming request bodies (uploads) are unavailable on this panel's host session",
           );
         }
         return session.streamReadable(

@@ -607,7 +607,10 @@ describe("bridgeAdapter upload streams", () => {
     await waitFor(() => expect(delivered.at(-1)?.msg.kind).toBe("error"));
     expect(delivered.at(-1)?.msg).toMatchObject({
       kind: "error",
-      error: { message: expect.stringMatching(/require the Iroh transport/) },
+      error: {
+        message:
+          "Streaming request bodies (uploads) are unavailable on this panel's host session",
+      },
     });
   });
 
