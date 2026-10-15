@@ -34,7 +34,6 @@ export function createMobileShellCore(deps: {
       deps.localStorageScope,
       deps.workspaceId,
     ),
-    workspacePath: "",
     allowMissingManifests: true,
     serverInfo: {
       gatewayConfig: { serverUrl, workspace: deps.workspaceId },
