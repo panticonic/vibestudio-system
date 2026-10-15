@@ -1,5 +1,5 @@
 import { mainRpcMethod, mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
-import { channelRpcMethods } from "@workspace-workers/pubsub-channel/contract";
+import { channelClientRpcMethods } from "@workspace/pubsub/rpc-contract";
 import { modelSettingsRpcMethods } from "@workspace/model-catalog/rpc-contract";
 import { quickfireRpcMethods } from "@workspace-workers/quickfire-service/contract";
 import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
@@ -1482,12 +1482,12 @@ export class ShellClient {
         const [config, contextId] = await Promise.all([
           this.transport.call(
             channelTargetId,
-            channelRpcMethods["getConfig"],
+            channelClientRpcMethods["getConfig"],
             [],
           ),
           this.transport.call(
             channelTargetId,
-            channelRpcMethods["getContextId"],
+            channelClientRpcMethods["getContextId"],
             [],
           ),
         ]);
@@ -1506,12 +1506,12 @@ export class ShellClient {
         const [config, contextId] = await Promise.all([
           this.transport.call(
             channelTargetId,
-            channelRpcMethods["getConfig"],
+            channelClientRpcMethods["getConfig"],
             [],
           ),
           this.transport.call(
             channelTargetId,
-            channelRpcMethods["getContextId"],
+            channelClientRpcMethods["getContextId"],
             [],
           ),
         ]);
