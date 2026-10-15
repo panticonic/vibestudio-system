@@ -1,5 +1,9 @@
 import { isRpcConnectionLost } from "@vibestudio/rpc";
-import { useShellWorkspaceClient } from "../workspaceContext";
+import {
+  useShellWorkspaceClient,
+  useWorkspaceNavigationHost,
+} from "../workspaceContext";
+import { measureShellPhase } from "../startupPerformance";
 import {
   createContext,
   useCallback,
@@ -304,6 +308,7 @@ function hasSameTreePresentation(
 
 export function PanelTreeProvider({ children }: { children: ReactNode }) {
   const { panel } = useShellWorkspaceClient();
+  const scope = useWorkspaceNavigationHost()?.workspaceId ?? "system";
 
   const currentAccount = useCurrentAccountProfile();
   const selfUserId = currentAccount.profile?.userId ?? null;
@@ -387,9 +392,11 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
 
   const reconcilePins = useCallback(async () => {
     const dispatchedAt = pinSeq.current;
-    const ids = await panel.listPinnedPanelIds();
+    const ids = await measureShellPhase("tree-pins", scope, () =>
+      panel.listPinnedPanelIds(),
+    );
     if (pinSeq.current === dispatchedAt) setPinnedPanelIds(new Set(ids));
-  }, [setPinnedPanelIds]);
+  }, [setPinnedPanelIds, scope]);
 
   const refreshTreeGroups = useCallback(
     async (options: {
@@ -402,7 +409,9 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
       setRefreshing(true);
       try {
         const rootPage = options.refreshRootGroups
-          ? await cache.loadRootGroups(true)
+          ? await measureShellPhase("tree-root-groups", scope, () =>
+              cache.loadRootGroups(true),
+            )
           : null;
         const groups = new Map<string, PanelTreeGroup>();
         for (const group of options.groups) {
@@ -417,8 +426,8 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
             groups.set(panelTreeGroupKey(group), group);
           }
         }
-        const loaded = await Promise.all(
-          [...groups.values()].map((group) => cache.loadFirst(group)),
+        const loaded = await measureShellPhase("tree-pages", scope, () =>
+          Promise.all([...groups.values()].map((group) => cache.loadFirst(group))),
         );
         // Tree topology is usable before exact-state visual presentation has
         // resolved. Let icons and other decoration arrive without holding the
@@ -444,7 +453,7 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [cache, hydratePresentations, reconcilePins],
+    [cache, hydratePresentations, reconcilePins, scope],
   );
 
   const refreshTree = useCallback(

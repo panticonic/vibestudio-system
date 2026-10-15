@@ -18,8 +18,12 @@ import {
   useApprovalPresentationController,
 } from "./ApprovalPresentationContext";
 import { WorkspaceDesktop } from "./WorkspaceDesktop";
-import { WorkspaceChooser } from "./WorkspaceChooser";
+import { deferredFeature } from "./deferredFeature";
 import { WorkspaceConnectionNotice } from "./WorkspaceConnectionNotice";
+
+const WorkspaceChooser = deferredFeature(async () => ({
+  default: (await import("./WorkspaceChooser")).WorkspaceChooser,
+}));
 
 /**
  * Main mode: the normal desktop startup surface with the panel app and its

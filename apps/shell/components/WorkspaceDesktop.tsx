@@ -1,4 +1,5 @@
 import { userFacingError } from "../utils/userFacingError";
+import { measureShellPhase } from "../shell/startupPerformance";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
 import { APPROVAL_OVERLAY_HOST_ID } from "./ConsentApprovalBar";
 import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
@@ -285,7 +286,11 @@ export function WorkspaceDesktop({
       if (pending) return pending;
       const generation = epoch.current;
       setBusy((ids) => new Set(ids).add(workspace.workspaceId));
-      const operation = createWorkspaceShellClient(workspace.workspaceId)
+      const operation = measureShellPhase(
+        "workspace-open",
+        workspace.workspaceId,
+        () => createWorkspaceShellClient(workspace.workspaceId),
+      )
         .then((owner) => {
           if (
             generation !== epoch.current ||
@@ -326,7 +331,9 @@ export function WorkspaceDesktop({
           (entry) => entry.workspaceId === id,
         );
         if (!workspace) {
-          const entries = await hubControl.listWorkspaces();
+          const entries = await measureShellPhase(
+            "workspace-catalog", "window", () => hubControl.listWorkspaces(),
+          );
           if (generation !== focusGeneration.current) return;
           workspace = entries.find((entry) => entry.workspaceId === id);
           if (!workspace)
@@ -338,7 +345,9 @@ export function WorkspaceDesktop({
         }
         await open(workspace);
         if (generation !== focusGeneration.current) return;
-        await hubControl.routeWorkspace({ workspaceId: id });
+        await measureShellPhase("workspace-route", id, () =>
+          hubControl.routeWorkspace({ workspaceId: id }),
+        );
         if (generation !== focusGeneration.current) return;
         setFocusedId(id);
         setError(null);
@@ -357,7 +366,9 @@ export function WorkspaceDesktop({
       const focusAtStart = focusGeneration.current;
       try {
         const [pair, sourceId, initialInfo] = await Promise.all([
-          hubControl.ensureUserWorkspaces(),
+          measureShellPhase("workspace-pair", "window", () =>
+            hubControl.ensureUserWorkspaces(),
+          ),
           systemWorkspaceId,
           !focusedRef.current && !focusWorkspaceId
             ? app.getInfo()
@@ -365,7 +376,9 @@ export function WorkspaceDesktop({
         ]);
         if (sourceId !== pair.system.workspaceId)
           throw new Error("Desktop chrome must run from your System workspace");
-        const entries = await hubControl.listWorkspaces();
+        const entries = await measureShellPhase(
+          "workspace-catalog", "window", () => hubControl.listWorkspaces(),
+        );
         if (!focusedRef.current && !focusWorkspaceId) {
           focusWorkspaceId = initialInfo?.initialFocusedWorkspaceId;
         }
@@ -399,7 +412,9 @@ export function WorkspaceDesktop({
           focusAtStart !== focusGeneration.current
         )
           return;
-        await hubControl.routeWorkspace({ workspaceId: targetId });
+        await measureShellPhase("workspace-route", targetId, () =>
+          hubControl.routeWorkspace({ workspaceId: targetId }),
+        );
         if (
           generation !== epoch.current ||
           focusAtStart !== focusGeneration.current

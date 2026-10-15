@@ -1,5 +1,5 @@
 import { userFacingError } from "../utils/userFacingError";
-import { ProblemReportingSection } from "./ProblemReporting";
+import { deferredFeature } from "./deferredFeature";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -25,15 +25,34 @@ import { type RemoteCredCurrent } from "../shell/client";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
 import { connectionStatusCopy } from "./connectionStatusCopy";
-import { PairedDevicesSection } from "./PairedDevicesSection";
-import { AppUpdatesSection } from "./AppUpdatesSection";
-import { AccountProfileSection } from "./AccountProfileSection";
-import { ThemeSettingsControls } from "./ThemeSettings";
-import { HostTargetsSection } from "./HostTargetsSection";
-import { TemplatesSection } from "./TemplatesSection";
-import { WorkspaceConnectionsSection } from "./WorkspaceConnectionsSection";
-
 import "./connectionSettingsDialog.css";
+
+// The dialog keeps pairing and connection listeners alive while closed.
+// Section toolchains belong to opening their actual tab, not desktop startup.
+const PairedDevicesSection = deferredFeature(async () => ({
+  default: (await import("./PairedDevicesSection")).PairedDevicesSection,
+}));
+const AppUpdatesSection = deferredFeature(async () => ({
+  default: (await import("./AppUpdatesSection")).AppUpdatesSection,
+}));
+const AccountProfileSection = deferredFeature(async () => ({
+  default: (await import("./AccountProfileSection")).AccountProfileSection,
+}));
+const ThemeSettingsControls = deferredFeature(async () => ({
+  default: (await import("./ThemeSettings")).ThemeSettingsControls,
+}));
+const HostTargetsSection = deferredFeature(async () => ({
+  default: (await import("./HostTargetsSection")).HostTargetsSection,
+}));
+const TemplatesSection = deferredFeature(async () => ({
+  default: (await import("./TemplatesSection")).TemplatesSection,
+}));
+const WorkspaceConnectionsSection = deferredFeature(async () => ({
+  default: (await import("./WorkspaceConnectionsSection")).WorkspaceConnectionsSection,
+}));
+const ProblemReportingSection = deferredFeature(async () => ({
+  default: (await import("./ProblemReportingSection")).ProblemReportingSection,
+}));
 
 type LiveConnection = {
   status: "connected" | "connecting" | "disconnected";

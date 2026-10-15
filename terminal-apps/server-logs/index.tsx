@@ -22,7 +22,7 @@ function logSource(app: TerminalApp): LogSource {
       return envelope.records as LogRecord[];
     },
     async watch(onBatch, signal) {
-      const response = await app.rpc.stream(
+      const response = await app.rpc.streamReadable(
         "main",
         mainRpcMethods["events.watch"],
         [["server-log:append"], `terminal-server-logs-${app.launch.sessionId}`],
@@ -75,7 +75,10 @@ function ptyTerminal(): LogTerminal & { dispose(): void } {
   };
   process.stdin.on("data", onData);
   return {
-    size: () => ({ columns: process.stdout.columns || 80, rows: process.stdout.rows || 24 }),
+    size: () => ({
+      columns: process.stdout.columns || 80,
+      rows: process.stdout.rows || 24,
+    }),
     onResize(listener) {
       process.stdout.on("resize", listener);
       return () => process.stdout.off("resize", listener);
@@ -119,7 +122,10 @@ async function main(): Promise<number> {
     await new Promise<void>((resolve) => {
       process.once("SIGHUP", resolve);
       process.once("SIGTERM", resolve);
-      void instance.waitUntilExit().then(() => resolve(), () => resolve());
+      void instance.waitUntilExit().then(
+        () => resolve(),
+        () => resolve()
+      );
     });
     instance.unmount();
     return 0;
