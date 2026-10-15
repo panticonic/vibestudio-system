@@ -95,6 +95,7 @@ describe("React Native provider Metro projection", () => {
     // throw into `undefined`, and the app dies on an unrelated property read.
     const sourcePath = path.resolve("apps/mobile");
     const outputPath = fs.mkdtempSync(path.join(os.tmpdir(), "metro-babel-"));
+    temporaryRoots.push(outputPath);
     const input: BuildProviderInput = {
       target: "react-native",
       unitName: "@workspace-apps/mobile",
@@ -215,7 +216,7 @@ describe("React Native provider Metro projection", () => {
     );
   });
 
-  it("keeps the mobile Iroh boundary aligned with the account session owner", () => {
+  it("keeps native imports with their exact platform initialization and session owners", () => {
     const sourcePath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       "../../apps/mobile",
@@ -274,6 +275,16 @@ describe("React Native provider Metro projection", () => {
         "android",
       ),
     ).toBe("@vibestudio/mobile-iroh");
+    expect(
+      config.resolver.resolveRequest(
+        {
+          originModulePath: path.join(sourcePath, "src/setupGlobals.ts"),
+          resolveRequest,
+        },
+        "@vibestudio/mobile-iroh/polyfills",
+        "android",
+      ),
+    ).toBe("@vibestudio/mobile-iroh/polyfills");
     expect(() =>
       config.resolver.resolveRequest(
         {
@@ -287,5 +298,47 @@ describe("React Native provider Metro projection", () => {
         "android",
       ),
     ).toThrow('Direct import of native module "@vibestudio/mobile-iroh"');
+    expect(() =>
+      config.resolver.resolveRequest(
+        {
+          originModulePath: path.join(
+            sourcePath,
+            "src/services/workspaceSelection.ts",
+          ),
+          resolveRequest,
+        },
+        "@vibestudio/mobile-iroh/polyfills",
+        "android",
+      ),
+    ).toThrow(
+      'Direct import of native module "@vibestudio/mobile-iroh/polyfills"',
+    );
+
+    // No filesystem API is installed on mobile. Preserve the actual resolver
+    // failure instead of masking the unsupported import with an empty stub.
+    for (const moduleName of ["fs", "node:fs"]) {
+      const failure = new Error(`Native resolver cannot resolve ${moduleName}`);
+      const resolveUnsupported = vi.fn(() => {
+        throw failure;
+      });
+      try {
+        config.resolver.resolveRequest(
+          {
+            originModulePath: path.join(sourcePath, "src/setupGlobals.ts"),
+            resolveRequest: resolveUnsupported,
+          },
+          moduleName,
+          "android",
+        );
+        expect.unreachable("Unsupported filesystem import must fail");
+      } catch (error) {
+        expect(error).toBe(failure);
+      }
+      expect(resolveUnsupported).toHaveBeenCalledWith(
+        expect.any(Object),
+        moduleName,
+        "android",
+      );
+    }
   });
 });

@@ -214,10 +214,8 @@ const guardNativeImport = (moduleName, originModulePath) => {
 const polyfills = {
   path: require.resolve("path-browserify", { paths: [data.nodeModulesPath] }),
   crypto: path.join(data.sourcePath, "src/polyfills/crypto.js"),
-  fs: path.join(data.sourcePath, "src/polyfills/fs.js"),
   "node:crypto": path.join(data.sourcePath, "src/polyfills/crypto.js"),
   "node:path": require.resolve("path-browserify", { paths: [data.nodeModulesPath] }),
-  "node:fs": path.join(data.sourcePath, "src/polyfills/fs.js"),
 };
 const config = {
   transformer: {

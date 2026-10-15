@@ -15,6 +15,7 @@
       "src/services/nativeAppStorage.ts"
     ],
     "@vibestudio/mobile-iroh": [
+      "src/setupGlobals.ts",
       "src/services/mobileTransport.ts",
       "src/services/mobileCredentials.ts",
       "src/services/workspaceDirectory.ts",
