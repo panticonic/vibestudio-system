@@ -140,7 +140,10 @@ export interface Button {
   color?: "green" | "red" | "yellow" | "cyan";
 }
 
-/** A one-line row of buttons, two spaces apart, clipped to its width. */
+/**
+ * A one-line row of buttons, clipped to its width. Each is a filled block, so
+ * it reads as something to press: its color fills it, or it is drawn inverse.
+ */
 export function ButtonRow({ buttons }: { buttons: readonly Button[] }): React.ReactElement {
   return (
     <Box height={1} overflow="hidden" flexShrink={0}>
@@ -148,8 +151,14 @@ export function ButtonRow({ buttons }: { buttons: readonly Button[] }): React.Re
         <React.Fragment key={button.id}>
           {index > 0 ? <Text>{"  "}</Text> : null}
           <Clickable id={button.id} action={button.action}>
-            <Text bold color={button.color} wrap="truncate-end">
-              {button.label}
+            <Text
+              bold
+              {...(button.color
+                ? { backgroundColor: button.color, color: "black" }
+                : { inverse: true })}
+              wrap="truncate-end"
+            >
+              {` ${button.label} `}
             </Text>
           </Clickable>
         </React.Fragment>

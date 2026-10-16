@@ -14,6 +14,7 @@ import {
   ApprovalsOverlay,
   approvalHeadline,
   approvalQueueIndexAt,
+  approvalQueueWindow,
 } from "./approvals/ApprovalsOverlay.js";
 import { approvalRequestedBy } from "./approvals/approvalRequester.js";
 import { installReviewOutcomeLines } from "./approvals/installReviewOutcome.js";
@@ -1139,10 +1140,13 @@ export class TerminalBrowser {
               {...this.installReviewProps(overlay)}
               protectedInput={overlay.protectedInput}
               height={body.height}
+              width={body.width}
               detailScroll={overlay.scroll}
+              detailContentHeight={overlay.contentHeight}
               onDetailHeight={(rows) => {
                 if (this.overlay === overlay && overlay.contentHeight !== rows) {
                   overlay.contentHeight = rows;
+                  this.changed();
                 }
               }}
               {...(overlay.origin ? { origin: overlay.origin } : {})}
@@ -1807,6 +1811,18 @@ export class TerminalBrowser {
     }
     if (this.isModalOpen()) {
       if (event.action === "wheel-up" || event.action === "wheel-down") {
+        const overlay = this.overlay;
+        if (overlay?.kind === "approvals") {
+          // The wheel reads the request; ↑↓ choose between requests.
+          const rows = this.approvalDetailRows(overlay);
+          overlay.scroll = clampScroll(
+            overlay.scroll + (event.action === "wheel-up" ? -3 : 3),
+            overlay.contentHeight,
+            rows
+          );
+          this.changed();
+          return;
+        }
         this.onUiInput(syntheticKey(event.action === "wheel-up" ? "up" : "down"));
         return;
       }
@@ -2113,7 +2129,7 @@ export class TerminalBrowser {
       nav !== "end" &&
       nav !== "escape"
     ) {
-      this.notice = `Not answered: click a decision, or press ${this.prefix()} a to answer with keys`;
+      this.notice = `Not answered: click a button, or press ${this.prefix()} a to answer with keys`;
       return;
     }
     if (isProtectedApproval(target) && event.kind === "key" && event.name === "C-d") {
@@ -2175,7 +2191,7 @@ export class TerminalBrowser {
       this.copyToClipboard(target.userCode);
       return;
     }
-    const detailRows = Math.max(1, this.layout().body.height - 8);
+    const detailRows = this.approvalDetailRows(overlay);
     if (nav === "escape") {
       this.overlay = null;
     } else if (nav === "up" || nav === "down") {
@@ -2215,8 +2231,15 @@ export class TerminalBrowser {
               const lines = installReviewOutcomeLines(outcome);
               for (const line of lines)
                 this.log(outcome.landing?.failed.length ? "warn" : "info", line);
-              this.setNotice(`${outcome.heading} · ${this.prefix()} l for details`);
-              this.openDetail(outcome.heading, lines.join("\n"));
+              // Done as asked: one line says so, and the log keeps the rest. Only an
+              // outcome that differs from the decision is worth stopping on.
+              const short = outcome.landing !== undefined && outcome.landing.failed.length === 0;
+              this.setNotice(
+                short && outcome.entryPoint
+                  ? `${outcome.heading} · open ${outcome.entryPoint.title} from the launcher`
+                  : `${outcome.heading} · ${this.prefix()} l for details`
+              );
+              if (!short) this.openDetail(outcome.heading, lines.join("\n"));
               return this.refreshApprovals();
             })
             .catch((error: unknown) => this.reportApprovalFailure(error))
@@ -2424,6 +2447,15 @@ export class TerminalBrowser {
     if (!overlay) return false;
     if (overlay.kind === "file" || overlay.kind === "approvals") return false;
     return !(overlay.kind === "launcher" && this.sessions.length === 0);
+  }
+
+  /** Rows the open request's detail shows: what one scroll step is measured against. */
+  private approvalDetailRows(overlay: Extract<Overlay, { kind: "approvals" }>): number {
+    return approvalQueueWindow(
+      this.approvals.length,
+      this.approvalIndex(overlay),
+      this.layout().body.height
+    ).detailRows;
   }
 
   private approvalIndex(overlay: Extract<Overlay, { kind: "approvals" }>): number {

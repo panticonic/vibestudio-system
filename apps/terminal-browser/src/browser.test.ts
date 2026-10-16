@@ -503,9 +503,9 @@ describe("terminal browser", () => {
     ];
     app.workspace.emitApprovalsChanged();
     await until(() => app.tty.text().includes("Approvals (1)"), "presented on arrival");
-    expect(app.tty.text()).toContain("Click a decision, or press Ctrl-B a to answer with keys");
+    expect(app.tty.text()).toContain("Click a button to answer · Ctrl-B a to answer with keys");
     app.tty.type("1\r");
-    await until(() => app.tty.text().includes("Not answered: click a decision"), "explained");
+    await until(() => app.tty.text().includes("Not answered: click a button"), "explained");
     expect(app.workspace.resolved).toEqual([]);
     expect(app.shell.typed(pty)).toBe("");
     // Esc hides it for good; it stays named in the status bar.
@@ -523,9 +523,69 @@ describe("terminal browser", () => {
     // Asked for, it answers to keys.
     app.tty.click(4, 19);
     await until(() => app.tty.text().includes("Approvals (1)"), "status bar click opens approvals");
-    expect(app.tty.text()).not.toContain("Click a decision, or press");
+    expect(app.tty.text()).not.toContain("Click a button to answer");
     app.tty.type("1");
     await until(() => app.workspace.resolved.includes("workspace:once"), "decided by key");
+  });
+
+  it("scrolls a long request with the wheel and hides it with a bare Esc", async () => {
+    const app = start();
+    type Review = Extract<PendingApproval, { kind: "unit-install-review" }>;
+    const parts: Review["parts"] = Array.from({ length: 30 }, (_, index) => ({
+      identityKey: `part-${index}`,
+      kind: "worker",
+      label: "Agent",
+      surfaces: [],
+      name: `part-${index}`,
+      title: `Part ${index}`,
+      purpose: "Does something.",
+      repoPath: `parts/part-${index}`,
+      effectiveVersion: `ev-${index}`,
+      version: null,
+      requiredUnitKeys: [],
+      runsInBackground: false,
+      origin: {
+        url: null,
+        originKey: "vibestudio",
+        registrableDomain: null,
+        version: null,
+        isHostBuild: true,
+        firstEncounter: false,
+      },
+      notableRows: [],
+      everydayRows: [],
+      change: "added",
+      section: "template",
+    }));
+    app.workspace.approvals = [
+      {
+        kind: "unit-install-review",
+        approvalId: "long",
+        callerId: "system:units",
+        callerKind: "system",
+        repoPath: "meta",
+        effectiveVersion: "",
+        requestedAt: 1,
+        mode: "adopt-root",
+        title: "what's in your workspace",
+        description: "Everything already in this workspace.",
+        parts,
+        summary: { panels: 0, agents: 30, services: 0, clientApps: 0, extensions: 0 },
+        unchangedPartCount: 0,
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("more above the line"), "says there is more");
+    // One request: no list above it, the detail names it.
+    expect(app.tty.text()).not.toContain("1. what's in your workspace");
+    expect(app.tty.text()).not.toContain("Part 29");
+    const { x, y } = app.tty.find("Part 3 ");
+    for (let step = 0; step < 30; step++) app.tty.type(`\x1b[<65;${x + 1};${y + 1}M`);
+    await until(() => app.tty.text().includes("Part 29"), "wheel scrolled to the end");
+    expect(app.tty.text()).not.toContain("more above the line");
+    // A real terminal's Esc is a lone ESC byte.
+    app.tty.type("\x1b");
+    await until(() => app.tty.text().includes("what would you like to open?"), "hidden by Esc");
   });
 
   it("presents the workspace review over the launcher at startup, with the prefix menu over both", async () => {
@@ -559,7 +619,7 @@ describe("terminal browser", () => {
     await until(() => app.tty.text().includes("the browser menu"), "prefix menu over the launcher");
     app.tty.type("a");
     await until(() => app.tty.text().includes("Approvals (1)"), "asked for");
-    await until(() => !app.tty.text().includes("Click a decision, or press"), "keys answer it");
+    await until(() => !app.tty.text().includes("Click a button to answer"), "keys answer it");
     app.tty.type("\x1b[27u");
     await until(() => app.tty.text().includes("what would you like to open?"), "launcher again");
   });
@@ -1118,7 +1178,7 @@ describe("terminal browser", () => {
     app.workspace.emitApprovalsChanged();
     await until(() => app.tty.text().includes("Approvals (1)"), "approvals overlay");
     expect(app.tty.text()).toContain("requested by Echo (this tab)");
-    expect(app.tty.text()).toContain("[1] Confirm  [2] Cancel ");
+    expect(app.tty.text()).toContain("[1] Confirm    [2] Cancel ");
     expect(app.tty.text()).not.toContain("[3]");
     app.tty.type("\x1b[27u");
     await until(() => app.tty.tabs().includes("!"), "badge on the tab");

@@ -89,6 +89,10 @@ export interface ApprovalsOverlayProps {
   detailScroll?: number;
   /** Reports the detail's natural height so the owner can clamp `detailScroll`. */
   onDetailHeight?: (rows: number) => void;
+  /** Columns the overlay spans, border included: the decision rule runs its full width. */
+  width?: number;
+  /** The last height reported through `onDetailHeight`. */
+  detailContentHeight?: number;
   /** Why the overlay opened by itself, e.g. "Requested by Server Logs (this tab)". */
   origin?: string;
   /** Presented by itself: keys do not answer it until the person asks with the prefix. */
@@ -141,14 +145,17 @@ export function approvalQueueWindow(
   count: number,
   selectedIndex: number,
   height: number
-): { inner: number; queueRows: number; first: number } {
+): { inner: number; queueRows: number; first: number; detailRows: number } {
   const inner = Math.max(4, height - 2);
-  const queueRows = Math.min(count, Math.max(1, Math.floor((inner - 3) / 3)));
+  // One request needs no list: the detail below names it.
+  const queueRows = count > 1 ? Math.min(count, Math.max(1, Math.floor((inner - 3) / 3))) : 0;
   const first = Math.min(
     Math.max(0, selectedIndex - Math.floor(queueRows / 2)),
     Math.max(0, count - queueRows)
   );
-  return { inner, queueRows, first };
+  // Title, the list and the gap below it, then the decision area: a rule, the buttons, the hint.
+  const detailRows = Math.max(1, inner - 1 - (queueRows > 0 ? queueRows + 1 : 0) - 3);
+  return { inner, queueRows, first, detailRows };
 }
 
 /**
@@ -178,6 +185,8 @@ export function ApprovalsOverlay({
   height,
   detailScroll = 0,
   onDetailHeight,
+  detailContentHeight = 0,
+  width,
   origin,
   locked = false,
   prefixLabel = "the prefix",
@@ -245,11 +254,14 @@ export function ApprovalsOverlay({
     );
   }
 
-  const { inner, queueRows, first } = approvalQueueWindow(pending.length, selectedIndex, height);
+  const { queueRows, first, detailRows } = approvalQueueWindow(
+    pending.length,
+    selectedIndex,
+    height
+  );
   const window = pending.slice(first, first + queueRows);
-  const above = first;
-  const below = pending.length - first - window.length;
-  const detailRows = Math.max(1, inner - 1 - queueRows - 1 - 2);
+  const above = queueRows > 0 ? first : 0;
+  const below = queueRows > 0 ? pending.length - first - window.length : 0;
   return (
     <Box
       flexDirection="column"
@@ -272,17 +284,24 @@ export function ApprovalsOverlay({
               {`${first + i + 1}. ${summarizeTitle(a)}`}
             </Text>
           ))}
-          <Box height={1} />
+          {queueRows > 0 ? <Box height={1} /> : null}
           <Scrollable height={detailRows} scroll={detailScroll} onContentHeight={onDetailHeight}>
             {detail}
           </Scrollable>
+          {/* The decision stands apart from what it decides, and says when there is more to read. */}
+          <Text dimColor wrap="truncate-end">
+            {(detailContentHeight > detailScroll + detailRows
+              ? "── more above the line: scroll with the wheel or PgDn "
+              : ""
+            ).padEnd(Math.max(0, (width ?? 0) - 4), "─")}
+          </Text>
           <ButtonRow buttons={hint.decisions} />
           {locked ? (
             <Text wrap="truncate-end" color="yellow">
-              {`Click a decision, or press ${prefixLabel} a to answer with keys · ↑↓ PgUp/PgDn look · Esc hides it`}
+              {`Click a button to answer · ${prefixLabel} a to answer with keys · Esc hides this`}
             </Text>
           ) : (
-            <Text wrap="truncate-end">{`${hint.keys} · PgUp/PgDn scroll · click or press a key to decide`}</Text>
+            <Text wrap="truncate-end">{`Click a button or press its key · ${hint.keys} · PgUp/PgDn scroll`}</Text>
           )}
         </>
       )}

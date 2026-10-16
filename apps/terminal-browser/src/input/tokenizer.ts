@@ -2,9 +2,9 @@
  * Splits raw terminal input into events: keys (with their exact bytes, so
  * session input passes through unchanged), bracketed pastes and SGR mouse
  * reports. Stateful across chunks: a paste or an escape sequence may arrive
- * split over several reads. Legacy ESC is intrinsically ambiguous and stays
- * pending; CSI-u disambiguates Escape. Ctrl-G explicitly cancels browser UI
- * and clears a pending legacy Escape without a timing guess.
+ * split over several reads. A terminal writes each key's bytes at once, so
+ * a lone ESC that ends a read is the Escape key, not the start of a sequence
+ * still on its way; CSI-u terminals disambiguate it outright.
  */
 
 export interface KeyEvent {
@@ -152,8 +152,9 @@ export class InputTokenizer {
       }
       // Escape sequences.
       if (i + 1 >= text.length) {
-        this.pending = text.slice(i);
-        return events;
+        events.push({ kind: "key", name: "escape", seq: "\x1b" });
+        i += 1;
+        continue;
       }
       const next = text[i + 1]!;
       if (next === "\x1b") {

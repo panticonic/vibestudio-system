@@ -26,18 +26,13 @@ describe("InputTokenizer", () => {
     expect(events[1]!.seq).toBe("\x1b[A");
   });
 
-  it("holds ambiguous legacy ESC and resolves it only through authoritative input", () => {
+  it("reads a lone legacy ESC that ends a read as the Escape key", () => {
+    // A terminal writes each key's bytes at once: a sequence never ends a read on its ESC.
     const tokenizer = new InputTokenizer();
-    expect(tokenizer.push("\x1b")).toEqual([]);
-    expect(names(tokenizer.push("[A"))).toEqual(["up"]);
-    expect(tokenizer.push("\x1b")).toEqual([]);
-    expect(names(tokenizer.push("\x07x"))).toEqual(["C-g", "x"]);
-  });
-  it("preserves the session's raw bytes when explicit Ctrl-G resolves a pending legacy ESC", () => {
-    const tokenizer = new InputTokenizer();
-    expect(tokenizer.push("\x1b")).toEqual([]);
-    expect(tokenizer.push("\x07")).toEqual([{ kind: "key", name: "C-g", seq: "\x1b\x07" }]);
-    expect(names(tokenizer.push("x"))).toEqual(["x"]);
+    expect(tokenizer.push("\x1b")).toEqual([{ kind: "key", name: "escape", seq: "\x1b" }]);
+    expect(names(tokenizer.push("\x1b[A"))).toEqual(["up"]);
+    expect(names(tokenizer.push("\x1b\x1b[<0;5;3M"))).toEqual(["escape", "mouse"]);
+    expect(tokenizer.push("\x1b\x07")).toEqual([{ kind: "key", name: "C-g", seq: "\x1b\x07" }]);
   });
 
   it("decodes enhanced Escape and control keys without a timing heuristic", () => {
@@ -49,10 +44,10 @@ describe("InputTokenizer", () => {
     ]);
   });
 
-  it("does not split an initial ESC away from a fragmented paste", () => {
+  it("does not split a paste marker fragmented after its CSI", () => {
     const tokenizer = new InputTokenizer();
-    expect(tokenizer.push("\x1b")).toEqual([]);
-    expect(tokenizer.push("[200~1\x00q")).toEqual([]);
+    expect(tokenizer.push("\x1b[20")).toEqual([]);
+    expect(tokenizer.push("0~1\x00q")).toEqual([]);
     expect(tokenizer.push("\x1b[201~")).toEqual([{ kind: "paste", text: "1\x00q" }]);
   });
 
@@ -105,13 +100,18 @@ describe("InputTokenizer", () => {
 
 describe("KeyRouter", () => {
   const route = (router: KeyRouter, text: string) => router.route(new InputTokenizer().push(text));
-  it("reserves Ctrl-G for browser cancellation, including prefix-armed fragmented ESC", () => {
+  it("reserves Ctrl-G for browser cancellation, and a legacy ESC cancels an armed prefix", () => {
     expect(isPrefixKeyId("C-g")).toBe(false);
     expect(parseSettings({ prefixKey: "C-g" }).prefixKey).toBe("C-b");
     const router = new KeyRouter("C-space");
     const tokenizer = new InputTokenizer();
-    router.route(tokenizer.push("\x00\x1b"));
-    expect(router.route(tokenizer.push("\x07"))).toEqual([
+    expect(router.route(tokenizer.push("\x00\x1b"))).toEqual([
+      { kind: "prefix", pending: true },
+      { kind: "prefix", pending: false },
+    ]);
+    expect(router.pending).toBe(false);
+    router.route(tokenizer.push("\x00"));
+    expect(router.route(tokenizer.push("\x1b\x07"))).toEqual([
       { kind: "prefix", pending: false },
       { kind: "command", command: { kind: "cancel" } },
     ]);
