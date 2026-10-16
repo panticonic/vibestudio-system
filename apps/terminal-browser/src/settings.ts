@@ -67,7 +67,8 @@ export const SETTING_ROWS: readonly SettingRow[] = [
     key: "autoOpenApprovals",
     label: "Open approvals automatically",
     value: (s) => (s.autoOpenApprovals ? "on" : "off"),
-    explain: "When the session you are looking at needs an approval, show it at once.",
+    explain:
+      "Show each new approval in full as it arrives; click to answer, or press the prefix then a for keys.",
     step: toggle("autoOpenApprovals"),
   },
   {

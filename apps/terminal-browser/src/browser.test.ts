@@ -469,7 +469,7 @@ describe("terminal browser", () => {
     app.workspace.approvals = [second, first];
     app.workspace.emitApprovalsChanged();
     await until(() => app.tty.text().includes("2. Read logs first"), "reordered queue");
-    app.tty.type("1");
+    app.tty.type(`${PREFIX}a1`);
     await until(() => app.workspace.resolved.includes("first:once"), "original selected decision");
     await until(
       () => app.tty.text().includes("selected request ended"),
@@ -485,7 +485,7 @@ describe("terminal browser", () => {
     );
   });
 
-  it("names an approval no tab owns in the status bar without taking the keyboard", async () => {
+  it("presents a new approval in full at once, but stray keys never answer it", async () => {
     const app = start();
     const pty = await startEcho(app);
     app.workspace.approvals = [
@@ -502,6 +502,16 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approvals (1)"), "presented on arrival");
+    expect(app.tty.text()).toContain("Click a decision, or press Ctrl-B a to answer with keys");
+    app.tty.type("1\r");
+    await until(() => app.tty.text().includes("Not answered: click a decision"), "explained");
+    expect(app.workspace.resolved).toEqual([]);
+    expect(app.shell.typed(pty)).toBe("");
+    // Esc hides it for good; it stays named in the status bar.
+    app.tty.type("\x1b[27u");
+    await until(() => !app.tty.text().includes("Approvals (1)"), "hidden");
+    app.workspace.emitApprovalsChanged();
     await until(
       () =>
         app.tty.text().split("\n").at(-1)!.includes("Approval needed — press Ctrl-B a · Read logs"),
@@ -509,10 +519,49 @@ describe("terminal browser", () => {
     );
     expect(app.tty.text()).not.toContain("Approvals (1)");
     app.tty.type("1");
-    await until(() => app.shell.typed(pty) === "1", "keys still reach the tab");
-    expect(app.workspace.resolved).toEqual([]);
+    await until(() => app.shell.typed(pty) === "1", "keys reach the tab again");
+    // Asked for, it answers to keys.
     app.tty.click(4, 19);
     await until(() => app.tty.text().includes("Approvals (1)"), "status bar click opens approvals");
+    expect(app.tty.text()).not.toContain("Click a decision, or press");
+    app.tty.type("1");
+    await until(() => app.workspace.resolved.includes("workspace:once"), "decided by key");
+  });
+
+  it("presents the workspace review over the launcher at startup, with the prefix menu over both", async () => {
+    const app = start();
+    app.workspace.approvals = [
+      {
+        kind: "unit-install-review",
+        approvalId: "welcome",
+        callerId: "system:units",
+        callerKind: "system",
+        repoPath: "meta",
+        effectiveVersion: "",
+        requestedAt: 1,
+        mode: "adopt-root",
+        title: "what's in your workspace",
+        description: "Everything already in this workspace.",
+        parts: [],
+        summary: { panels: 0, agents: 0, services: 0, clientApps: 0, extensions: 0 },
+        unchangedPartCount: 0,
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approvals (1)"), "review presented");
+    app.tty.type(PREFIX);
+    await until(() => app.tty.text().includes("the browser menu"), "prefix menu over the review");
+    app.tty.type("\x1b[27u");
+    await until(() => app.tty.text().includes("Approvals (1)"), "review back after cancel");
+    app.tty.type("\x1b[27u");
+    await until(() => app.tty.text().includes("what would you like to open?"), "launcher");
+    app.tty.type(PREFIX);
+    await until(() => app.tty.text().includes("the browser menu"), "prefix menu over the launcher");
+    app.tty.type("a");
+    await until(() => app.tty.text().includes("Approvals (1)"), "asked for");
+    await until(() => !app.tty.text().includes("Click a decision, or press"), "keys answer it");
+    app.tty.type("\x1b[27u");
+    await until(() => app.tty.text().includes("what would you like to open?"), "launcher again");
   });
 
   it("blocks hidden approval decisions and session bytes below usable size", async () => {
@@ -647,6 +696,10 @@ describe("terminal browser", () => {
     ];
     app.workspace.emitApprovalsChanged();
     await until(() => app.tty.text().includes("Provide token"), "protected input");
+    // Presented by itself, it takes nothing typed until asked for.
+    app.tty.type("\x1b[200~stray\x1b[201~");
+    await until(() => app.tty.text().includes("Not answered"), "stray paste refused");
+    app.tty.type(`${PREFIX}a`);
     app.tty.type("\x1b[200~sensitive-👩‍💻\x1b[201~");
     await until(() => app.tty.text().includes("•"), "masked value");
     expect(app.tty.text()).not.toContain("sensitive");
@@ -991,7 +1044,7 @@ describe("terminal browser", () => {
     expect(app.shell.attachCalls).toHaveLength(1);
   });
 
-  it("opens approvals by itself for the app in the focused tab and decides with a digit", async () => {
+  it("presents approvals for the app in the focused tab and decides with a digit once asked", async () => {
     const app = start();
     await startEcho(app);
     const entry = [...app.sessions.entries.values()][0]!;
@@ -1011,7 +1064,7 @@ describe("terminal browser", () => {
     app.workspace.emitApprovalsChanged();
     await until(() => app.tty.text().includes("Approvals (1)"), "approvals overlay");
     expect(app.tty.text()).toContain("requested by Echo (this tab)");
-    app.tty.type("1");
+    app.tty.type(`${PREFIX}a1`);
     await until(() => app.workspace.resolved.includes("a1:once"), "decision");
     await until(
       () => !app.tty.text().includes("Approvals (1)"),
@@ -1075,7 +1128,7 @@ describe("terminal browser", () => {
     await until(() => app.workspace.resolved.includes("a2:deny"), "denied");
   });
 
-  it("opens a workspace review once this tab's work is parked on it, and badges the tab", async () => {
+  it("badges the tab whose work is parked on an already presented workspace review", async () => {
     const app = start();
     await startEcho(app);
     const entry = [...app.sessions.entries.values()][0]!;
@@ -1102,9 +1155,10 @@ describe("terminal browser", () => {
     };
     app.workspace.approvals = [welcome];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approval needed"), "status bar approval");
-    expect(app.tty.text()).not.toContain("Approvals (1)");
+    await until(() => app.tty.text().includes("Approvals (1)"), "presented on arrival");
     expect(app.tty.tabs()).not.toContain("!");
+    app.tty.type("\x1b[27u");
+    await until(() => !app.tty.text().includes("Approvals (1)"), "hidden");
     app.workspace.approvals = [
       {
         ...welcome,
@@ -1129,10 +1183,9 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (1)"), "approvals overlay");
-    expect(app.tty.text()).toContain("(this tab)");
-    app.tty.type("\x1b[27u");
     await until(() => app.tty.tabs().includes("!"), "badge on the tab");
+    // Presented once already: it does not pop up again.
+    expect(app.tty.text()).not.toContain("Approvals (1)");
     // The browser's own bar names it above the status bar; the tab gives it a row.
     const lines = () => app.tty.text().split("\n");
     await until(() => lines().at(-2)!.includes("Needs you — click here or press Ctrl-B a"), "bar");

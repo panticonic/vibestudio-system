@@ -161,11 +161,12 @@ export function StatusBar({
       <Box flexShrink={1} flexGrow={1}>
         <Text wrap="truncate-end">
           {/* Most important first: truncation cuts the server address, never approvals.
-              A waiting approval names itself and the key that opens it, before anything else. */}
+              A waiting approval names itself and the key that opens it, before anything else;
+              a one-shot notice takes the headline's room. */}
           {view.approvals > 0 ? (
             <Text color="black" backgroundColor="yellow" bold>
               {` ! Approval needed — press ${view.prefixLabel} a`}
-              {view.approvalHeadline ? ` · ${view.approvalHeadline}` : ""}
+              {view.approvalHeadline && !view.notice ? ` · ${view.approvalHeadline}` : ""}
               {view.approvals > 1 ? ` (+${view.approvals - 1} more)` : ""}{" "}
             </Text>
           ) : null}

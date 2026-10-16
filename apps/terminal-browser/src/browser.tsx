@@ -130,6 +130,12 @@ type Overlay =
       taskRules: TaskRulesNavState;
       protectedInput: ProtectedInputState;
       origin?: string;
+      /**
+       * Presented by itself, so keys typed for something else must not decide
+       * it: only looking around and Esc work until the person clicks into it
+       * or asks for it with the prefix.
+       */
+      locked: boolean;
     }
   | { kind: "help"; scroll: number; contentHeight: number }
   | { kind: "logs"; scroll: number }
@@ -250,6 +256,8 @@ export class TerminalBrowser {
   private copy: CopyState | null = null;
   private lastSearch = "";
   private notice: string | null = null;
+  /** Requests already shown by themselves: each is presented once. */
+  private readonly presented = new Set<string>();
   private readonly logs: LogLine[] = [];
   private connection: TerminalServerConnectionState;
   private overlayVisible = false;
@@ -644,7 +652,6 @@ export class TerminalBrowser {
     const previous = this.approvals;
     const emptied = previous.length > 0 && pending.length === 0;
     this.approvals = pending;
-    const focused = this.focusedSession();
     if (this.overlay?.kind === "approvals") {
       const overlay = this.overlay;
       // The queue was worked through: get out of the way. (Opened empty: stay, it says so.)
@@ -660,22 +667,52 @@ export class TerminalBrowser {
         overlay.taskRules = INITIAL_TASK_RULES_NAV;
         overlay.protectedInput = newProtectedInput();
       }
-    } else if (focused && this.settings.autoOpenApprovals && !this.isModalOpen()) {
-      // Newly this tab's: a new request from its work, or its work newly
-      // parked on a review that was already waiting.
-      const principalId = focused.entry.principalId;
-      const index = pending.findIndex(
-        (approval) =>
-          approvalRequestedBy(approval, principalId) &&
-          !previous.some(
-            (earlier) =>
-              earlier.approvalId === approval.approvalId &&
-              approvalRequestedBy(earlier, principalId)
-          )
-      );
-      if (index !== -1) this.openApprovals(index, `requested by ${focused.title} (this tab)`);
     }
     this.changed();
+  }
+
+  /**
+   * Show each request once, in full, as it arrives: over the tab or the
+   * launcher, but never over a dialog the person is in the middle of (it
+   * waits for that to close). After Esc it lives in the Needs-you bar and the
+   * status bar.
+   */
+  private presentArrivals(): void {
+    const current = new Set(this.approvals.map((approval) => approval.approvalId));
+    for (const id of this.presented) if (!current.has(id)) this.presented.delete(id);
+    const shown =
+      this.overlay?.kind === "approvals" || !this.settings.autoOpenApprovals || this.copy !== null;
+    const covers =
+      !this.overlay || (this.overlay.kind === "launcher" && this.sessions.length === 0);
+    if (!shown) {
+      if (!covers) return;
+      const index = this.approvals.findIndex(
+        (approval) => !this.presented.has(approval.approvalId)
+      );
+      if (index === -1) return;
+      if (this.overlay?.kind === "launcher")
+        this.launcher = { query: this.overlay.query, selected: this.overlay.selected };
+      const focused = this.focusedSession();
+      const own = focused
+        ? this.approvals.findIndex(
+            (approval) =>
+              !this.presented.has(approval.approvalId) &&
+              approvalRequestedBy(approval, focused.entry.principalId)
+          )
+        : -1;
+      const selected = own === -1 ? index : own;
+      const requester = this.sessions.find((session) =>
+        approvalRequestedBy(this.approvals[selected]!, session.entry.principalId)
+      );
+      this.openApprovals(
+        selected,
+        requester
+          ? `requested by ${requester.title}${requester === focused ? " (this tab)" : ""}`
+          : undefined,
+        true
+      );
+    }
+    for (const id of current) this.presented.add(id);
   }
 
   // ── layout & composition ───────────────────────────────────────────────────
@@ -763,6 +800,7 @@ export class TerminalBrowser {
     if (!this.overlay && this.sessions.length === 0) {
       this.overlay = { kind: "launcher", ...this.launcher };
     }
+    this.presentArrivals();
     const layout = this.layout();
     this.tabsLayer.update(
       <TabStrip
@@ -869,9 +907,10 @@ export class TerminalBrowser {
     const overlay = this.overlay;
     const body = layout.body;
     const prefix = this.prefix();
-    if (!overlay && this.router.pending) {
+    if (this.router.pending) {
       // The armed prefix shows every command it can run, in full, over the
-      // bottom of the tab; the next key picks one or cancels.
+      // bottom of the screen and whatever is open there; the next key picks
+      // one or cancels, and what was open comes back.
       const lines = prefixMenuLines(prefix, body.width, body.height - 2);
       const height = Math.min(lines.length + 2, body.height);
       return {
@@ -1107,9 +1146,11 @@ export class TerminalBrowser {
                 }
               }}
               {...(overlay.origin ? { origin: overlay.origin } : {})}
+              locked={overlay.locked}
+              prefixLabel={prefix}
             />
           ),
-          // A click selects a request; deciding stays on keys.
+          // A click on the queue selects a request; buttons decide.
           click: ((count, selected) => (_x: number, y: number) => {
             const index = approvalQueueIndexAt(count, selected, body.height, y);
             return index === null ? null : { select: index };
@@ -1771,6 +1812,9 @@ export class TerminalBrowser {
       }
       if (event.button !== 0 || (event.action !== "press" && event.action !== "release")) return;
       const region = onOverlay ? this.overlayRegions.at(event.x - rect.x, event.y - rect.y) : null;
+      // Clicking into a request presented by itself is the person engaging with it.
+      if (onOverlay && event.action === "press" && this.overlay?.kind === "approvals")
+        this.overlay.locked = false;
       if (event.action === "release") {
         // A decision acts only when released on the button it was pressed on.
         const pressed = this.pressedRegion;
@@ -2059,6 +2103,19 @@ export class TerminalBrowser {
     const nav = event.kind === "key" ? navKeyOf(event) : null;
     const selected = this.approvalIndex(overlay);
     const target = this.approvals[selected];
+    if (
+      overlay.locked &&
+      nav !== "up" &&
+      nav !== "down" &&
+      nav !== "pageup" &&
+      nav !== "pagedown" &&
+      nav !== "home" &&
+      nav !== "end" &&
+      nav !== "escape"
+    ) {
+      this.notice = `Not answered: click a decision, or press ${this.prefix()} a to answer with keys`;
+      return;
+    }
     if (isProtectedApproval(target) && event.kind === "key" && event.name === "C-d") {
       overlay.protectedInput = newProtectedInput();
       void this.own(
@@ -2245,7 +2302,9 @@ export class TerminalBrowser {
         if (session) this.openSearch(session);
         break;
       case "approvals": {
-        this.openApprovals(this.firstApprovalIndex());
+        // Asked for: keys answer it, the one already showing included.
+        if (this.overlay?.kind === "approvals") this.overlay.locked = false;
+        else this.openApprovals(this.firstApprovalIndex());
         void this.own(this.refreshApprovals());
         break;
       }
@@ -2287,7 +2346,7 @@ export class TerminalBrowser {
     this.changed();
   }
 
-  private openApprovals(selected: number, origin?: string): void {
+  private openApprovals(selected: number, origin?: string, locked = false): void {
     this.copy = null;
     this.overlay = {
       kind: "approvals",
@@ -2300,6 +2359,7 @@ export class TerminalBrowser {
       taskRules: INITIAL_TASK_RULES_NAV,
       protectedInput: newProtectedInput(),
       ...(origin ? { origin } : {}),
+      locked,
     };
   }
 
@@ -2566,13 +2626,6 @@ export class TerminalBrowser {
     }
     const session = this.sessions[index]!;
     session.setFocused(true);
-    if (!this.overlay && this.settings.autoOpenApprovals) {
-      const pendingIndex = this.approvals.findIndex((approval) =>
-        approvalRequestedBy(approval, session.entry.principalId)
-      );
-      if (pendingIndex !== -1)
-        this.openApprovals(pendingIndex, `requested by ${session.title} (this tab)`);
-    }
     this.compositor.invalidate();
     this.changed();
   }

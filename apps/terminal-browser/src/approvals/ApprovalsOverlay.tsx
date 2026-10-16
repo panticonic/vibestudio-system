@@ -91,6 +91,10 @@ export interface ApprovalsOverlayProps {
   onDetailHeight?: (rows: number) => void;
   /** Why the overlay opened by itself, e.g. "Requested by Server Logs (this tab)". */
   origin?: string;
+  /** Presented by itself: keys do not answer it until the person asks with the prefix. */
+  locked?: boolean;
+  /** The browser prefix, to name the key that unlocks a presented request. */
+  prefixLabel?: string;
   protectedInput?: ProtectedInputState;
 }
 
@@ -175,6 +179,8 @@ export function ApprovalsOverlay({
   detailScroll = 0,
   onDetailHeight,
   origin,
+  locked = false,
+  prefixLabel = "the prefix",
   protectedInput,
 }: ApprovalsOverlayProps): React.ReactElement {
   const current = pending[selectedIndex];
@@ -271,7 +277,13 @@ export function ApprovalsOverlay({
             {detail}
           </Scrollable>
           <ButtonRow buttons={hint.decisions} />
-          <Text wrap="truncate-end">{`${hint.keys} · PgUp/PgDn scroll · click or press a key to decide`}</Text>
+          {locked ? (
+            <Text wrap="truncate-end" color="yellow">
+              {`Click a decision, or press ${prefixLabel} a to answer with keys · ↑↓ PgUp/PgDn look · Esc hides it`}
+            </Text>
+          ) : (
+            <Text wrap="truncate-end">{`${hint.keys} · PgUp/PgDn scroll · click or press a key to decide`}</Text>
+          )}
         </>
       )}
     </Box>
