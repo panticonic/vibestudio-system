@@ -7,6 +7,9 @@ clients:
   - source: clients/desktop-browser
   - source: clients/mobile-browser
   - source: clients/terminal-browser
+  - source: clients/chat-terminal
+  - source: clients/chat-mobile
+  - source: clients/chat-desktop
 extensions:
   - source: extensions/typecheck-service
   - source: extensions/mobile-debug
@@ -38,4 +41,7 @@ trust:
   clients:
     - clients/desktop-browser
     - clients/terminal-browser
+    - clients/chat-terminal
+    - clients/chat-mobile
+    - clients/chat-desktop
     - clients/mobile-browser

@@ -1,7 +1,6 @@
 import type { NativeWebsiteRequest } from "./websiteDocumentHost";
 import {
   Platform,
-  NativeModules,
   UIManager,
   requireNativeComponent,
 } from "react-native";
@@ -9,6 +8,7 @@ import type { WebViewProps } from "react-native-webview";
 import type { NativeProps } from "react-native-webview/lib/RNCWebViewNativeComponent";
 import type { HostComponent } from "react-native";
 
+import { panelHostModule } from "./panelHostModule";
 import type { NativeBrowserPermissionRequest } from "./workspaceBrowserPermission";
 import type { NativeWebsiteNotificationRequest } from "./workspaceWebsiteNotifications";
 
@@ -67,5 +67,6 @@ export async function clearWorkspaceCookies(
   workspaceId: string,
 ): Promise<void> {
   const scope = workspaceBrowserProfile(accountScope, workspaceId);
-  await NativeModules["VibestudioMobileHost"].clearWorkspaceCookies(scope);
+  await panelHostModule<{ clearWorkspaceCookies(scope: string): Promise<void> }>()
+    .clearWorkspaceCookies(scope);
 }

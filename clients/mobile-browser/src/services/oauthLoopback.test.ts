@@ -1,9 +1,10 @@
-import { Linking, NativeModules, Platform } from "react-native";
+import { NativeModules, Platform } from "react-native";
 import { handleExternalOpen } from "./oauthLoopback";
-import { setApprovedAppCapabilities } from "./appCapabilities";
+import { installClientApi } from "@workspace/client-kit-native/host";
+import { createFakeClientHost } from "@workspace/client-kit-native/testing";
 import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
 
-const mockOpenURL = jest.fn(async () => undefined);
+const mockOpenURL = jest.fn(async (_url: string) => undefined);
 const mockStart = jest.fn(async () => undefined);
 const mockWait = jest.fn(async () => ({
   url: "http://localhost:1455/auth/callback?code=code-1&state=state-1",
@@ -30,13 +31,19 @@ function createShellClient() {
   } as never;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   Object.defineProperty(Platform, "OS", {
     value: "android",
     configurable: true,
   });
-  setApprovedAppCapabilities(["open-external"]);
-  (Linking as unknown as { openURL: typeof mockOpenURL }).openURL = mockOpenURL;
+  // The host opens the URL; the client only asks.
+  installClientApi(
+    (
+      await createFakeClientHost({
+        handlers: { "openExternal.open": (url: string) => mockOpenURL(url) },
+      })
+    ).api,
+  );
   (NativeModules as unknown as { OAuthLoopback: unknown }).OAuthLoopback = {
     start: mockStart,
     wait: mockWait,

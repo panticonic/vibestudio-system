@@ -9,10 +9,6 @@ import {
   handleExternalOpen,
   type ExternalOpenPayload,
 } from "../services/oauthLoopback";
-import { Alert } from "react-native";
-import { presentClientUpdates } from "@workspace/client-kit-native";
-import type { ClientUpdateModel } from "@workspace/client-update-core";
-import { createMobileClientUpdateModel } from "../services/mobileClientUpdate";
 import type { ToastInput } from "../state/toastAtoms";
 
 /** Connected workspace events remain visible even before its panels are opened. */
@@ -36,50 +32,6 @@ export function WorkspaceSessionEffects({
   useEffect(() => {
     const client = session.client;
     let active = true;
-    const isAppSource = session.workspaceId === directory.systemWorkspaceId;
-    const candidate = isAppSource
-      ? client.hostLaunch.configuredCandidate("react-native")
-      : Promise.resolve(null);
-    void candidate.catch(() => undefined);
-    const current = () =>
-      active && directory.sessions.get(session.workspaceId) === session;
-    // The update model is made when the selected client is first known and is
-    // retired with this session; it asks once per ready build.
-    let updates: { model: ClientUpdateModel; stop: () => void } | undefined;
-    const updatesFor = (selected: { source: string; name: string }) => {
-      if (updates) return updates.model;
-      const model = createMobileClientUpdateModel({
-        shellClient: client,
-        selectedSource: selected.source,
-        selectedClientId: selected.name,
-      });
-      updates = {
-        model,
-        stop: presentClientUpdates(model, {
-          alert: Alert.alert,
-          notify: (toast) => {
-            if (current()) notify(toast);
-          },
-        }),
-      };
-      return model;
-    };
-    const stopAppLifecycle = isAppSource
-      ? client.events.on("supervision:changed", (change) => {
-          void candidate
-            .then((selected) => {
-              if (!current() || !selected) return;
-              updatesFor(selected).handleChange(change);
-            })
-            .catch((error: unknown) => {
-              if (current())
-                console.warn(
-                  "[WorkspaceSession] App lifecycle unavailable",
-                  error,
-                );
-            });
-        })
-      : undefined;
     const present = (payload: unknown) => {
       if (!active || directory.sessions.get(session.workspaceId) !== session)
         return;
@@ -106,11 +58,7 @@ export function WorkspaceSessionEffects({
         tone: "info",
       });
     };
-    const topics = [
-      "notification:show",
-      "external-open:open",
-      ...(isAppSource ? ["supervision:changed" as const] : []),
-    ] as const;
+    const topics = ["notification:show", "external-open:open"] as const;
     const openExternal = (payload: ExternalOpenPayload) => {
       if (!active || directory.sessions.get(session.workspaceId) !== session)
         return;
@@ -158,8 +106,6 @@ export function WorkspaceSessionEffects({
     });
     return () => {
       active = false;
-      stopAppLifecycle?.();
-      updates?.stop();
       void observation
         .stop()
         .catch((error: unknown) =>

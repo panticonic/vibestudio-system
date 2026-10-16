@@ -473,4 +473,24 @@ describe("NotificationBar", () => {
       );
     });
   });
+
+  it("renders a reply field for an action that takes text and reports the reply with the action", async () => {
+    renderBar();
+    emitShellEvent("notification:show", {
+      id: "agent-ask:1",
+      type: "info",
+      title: "Agent asks",
+      message: "Which branch?",
+      ttl: 0,
+      actions: [{ id: "answer", label: "Reply", input: "text" }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Reply"), { target: { value: "use main" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(shellClient.reportAction).toHaveBeenCalledWith("agent-ask:1", "answer", "use main")
+    );
+    await waitFor(() => expect(screen.queryByText("Agent asks")).toBeNull());
+  });
 });

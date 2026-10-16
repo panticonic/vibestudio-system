@@ -1,0 +1,81 @@
+{
+  "name": "@workspace-clients/chat-terminal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "displayName": "Vibestudio Chat",
+    "icon": "./assets/icon.svg",
+    "client": {
+      "id": "chat",
+      "runtime": "terminal",
+      "hostAbi": "terminal-host-1",
+      "entry": "src/index.ts",
+      "title": "Chat",
+      "capabilities": {
+        "required": [
+          "device-session",
+          "approval-surface"
+        ],
+        "optional": [
+          "local-files",
+          "clipboard",
+          "notifications"
+        ]
+      },
+      "intents": [
+        {
+          "name": "ask",
+          "kind": "background",
+          "title": "Ask",
+          "params": {
+            "text": "text"
+          },
+          "handler": "vibestudio.quickfire.v1#ask"
+        }
+      ],
+      "integration": {
+        "terminal": {
+          "command": "chat"
+        }
+      }
+    },
+    "authority": {
+      "provides": [],
+      "serviceRequests": [
+        {
+          "protocol": "vibestudio.quickfire.v1",
+          "availability": "required"
+        }
+      ],
+      "requests": [
+        {
+          "capability": "workspace-service:quickfire",
+          "resource": {
+            "kind": "exact",
+            "key": "do:workers/quickfire-service:QuickfireSessionsDO:workspace-quickfire"
+          },
+          "tier": "gated",
+          "evidence": "exact"
+        }
+      ]
+    },
+    "description": "Talk with agents in your workspace from any terminal: the full chat, answering approvals in its own overlay."
+  },
+  "dependencies": {
+    "@vibestudio/rpc": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@vibestudio/shell-core": "workspace:*",
+    "@workspace/approvals-core": "workspace:*",
+    "@workspace/client-kit-terminal": "workspace:*",
+    "@workspace/client-update-core": "workspace:*",
+    "@workspace/terminal-chat": "workspace:*",
+    "ink": "^6.8.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@workspace/snapshot-store": "workspace:*",
+    "vitest": "^3.2.7"
+  }
+}

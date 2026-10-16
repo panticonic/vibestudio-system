@@ -1,23 +1,20 @@
 /**
- * Auth state atoms -- Jotai atoms for authentication state.
+ * Connection-entry state atoms -- Jotai atoms for opening the account.
  *
- * Tracks whether the user has stored credentials and is authenticated.
- * Credentials are persisted in the device keychain (see services/auth.ts).
+ * The device credential is the host's; these only track whether this client
+ * has an open account session and how entering it is going.
  */
 
 import { atom } from "jotai";
 
-/** Stored server URL (populated from keychain on app launch) */
+/** The on-device panel-asset origin of the shown workspace. */
 export const serverUrlAtom = atom<string>("");
 
-/** Human-readable remote pairing identity (never the on-device loopback façade). */
-export const pairingIdentityAtom = atom<{ server: string; deviceId: string } | null>(null);
-
-/** Whether valid credentials are loaded (not whether WS is connected) */
+/** Whether the account session is open and the shell is entered */
 export const isAuthenticatedAtom = atom<boolean>(false);
 
-/** Loading state for credential operations */
+/** Loading state for opening the account */
 export const authLoadingAtom = atom<boolean>(false);
 
-/** Auth error message (e.g., invalid pairing code, connection refused) */
+/** Why the account could not be opened (e.g., connection refused) */
 export const authErrorAtom = atom<string | null>(null);

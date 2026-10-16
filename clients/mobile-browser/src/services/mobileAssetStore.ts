@@ -1,4 +1,4 @@
-import { NativeModules } from "react-native";
+import { PANEL_HOST_MODULE, panelHostModule } from "./panelHostModule";
 import { Buffer } from "buffer";
 
 export const MOBILE_ASSET_STORE_MAX_BYTES = 256 * 1024 * 1024;
@@ -196,9 +196,7 @@ export class MobileAssetStore {
 }
 
 function requireNativeAssetStoreHost(): NativeMobileAssetStoreHost {
-  const host = NativeModules["VibestudioMobileHost"] as
-    | NativeMobileAssetStoreHost
-    | undefined;
+  const host = panelHostModule<NativeMobileAssetStoreHost>();
   const required: Array<keyof NativeMobileAssetStoreHost> = [
     "assetStoreLookup",
     "assetStoreOpenWrite",
@@ -208,8 +206,8 @@ function requireNativeAssetStoreHost(): NativeMobileAssetStoreHost {
     "assetStoreTrim",
     "assetStoreClear",
   ];
-  if (!host || required.some((method) => typeof host[method] !== "function")) {
-    throw new Error("VibestudioMobileHost durable asset store is unavailable");
+  if (required.some((method) => typeof host[method] !== "function")) {
+    throw new Error(`${PANEL_HOST_MODULE} durable asset store is unavailable`);
   }
   return host;
 }

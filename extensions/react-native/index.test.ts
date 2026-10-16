@@ -3,22 +3,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  RN_HOST_ABI,
-  type BuildProviderInput,
-} from "@vibestudio/shared/buildProvider";
+import type { BuildProviderInput } from "@vibestudio/shared/buildProvider";
 import { activate, integrityForFile } from "./index.js";
 
-function input(rnHostAbi: unknown): BuildProviderInput {
+function input(entry: string): BuildProviderInput {
   return {
     target: "react-native",
     unitName: "clients/mobile-browser",
     sourcePath: "/nonexistent",
     dependencyProjection: { nodeModulesPath: null, modules: {} },
     effectiveVersion: "ev",
-    manifest: {
-      app: { renderer: "index.tsx", rnComponentName: "Mobile", rnHostAbi },
-    },
+    client: { id: "browser", runtime: "react-native", hostAbi: "rn-host-6", entry },
   };
 }
 
@@ -38,17 +33,17 @@ describe("React Native build provider", () => {
     }
   });
 
-  it("fails the build when the app declares another native host ABI", async () => {
+  it("builds the entry the client manifest names, not a host ABI of its own", async () => {
     const provider = await activate();
-    await expect(provider.build(input("rn-host-0"))).rejects.toThrow(
-      `declares rnHostAbi "rn-host-0", but this host builds for "${RN_HOST_ABI}"`,
+    await expect(provider.build(input("App.tsx"))).rejects.toThrow(
+      "React Native builds require a Build V2 dependency projection",
     );
   });
 
-  it("accepts the current native host ABI", async () => {
+  it("refuses an entry outside the client's source", async () => {
     const provider = await activate();
-    await expect(provider.build(input(RN_HOST_ABI))).rejects.toThrow(
-      "React Native builds require a Build V2 dependency projection",
+    await expect(provider.build(input("../../etc/passwd"))).rejects.toThrow(
+      "declares an entry outside its source",
     );
   });
 });

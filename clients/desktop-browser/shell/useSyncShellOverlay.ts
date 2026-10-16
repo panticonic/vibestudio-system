@@ -7,9 +7,9 @@ type ShellCompositorBridge = {
 function compositorBridge(): ShellCompositorBridge {
   const bridge = (
     globalThis as typeof globalThis & {
-      __vibestudioApp?: ShellCompositorBridge;
+      __vibestudioClient?: ShellCompositorBridge;
     }
-  ).__vibestudioApp;
+  ).__vibestudioClient;
   if (!bridge)
     throw new Error("Desktop shell compositor bridge is unavailable");
   return bridge;

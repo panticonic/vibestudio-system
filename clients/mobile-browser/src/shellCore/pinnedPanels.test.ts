@@ -1,14 +1,12 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { installClientApi } from "@workspace/client-kit-native/host";
+import { createFakeClientHost } from "@workspace/client-kit-native/testing";
 import { loadPinnedPanelIds, savePinnedPanelIds } from "./pinnedPanels";
 
-// Override the global no-op AsyncStorage mock (jest.setup.ts) with the official
-// in-memory mock so load/save actually round-trips.
-jest.mock("@react-native-async-storage/async-storage", () =>
-  require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
-);
-
+// The host's client state is the store; a fresh fake host round-trips in memory.
+let host: Awaited<ReturnType<typeof createFakeClientHost>>;
 beforeEach(async () => {
-  await AsyncStorage.clear();
+  host = await createFakeClientHost();
+  installClientApi(host.api);
 });
 
 describe("pinnedPanels store", () => {
@@ -42,7 +40,7 @@ describe("pinnedPanels store", () => {
   });
 
   it("ignores malformed persisted data", async () => {
-    await AsyncStorage.setItem(
+    host.state.set(
       "vibestudio:account:account-a:workspace:wsX:pinned-panels",
       "{not json",
     );

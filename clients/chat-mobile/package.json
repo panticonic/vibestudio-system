@@ -1,0 +1,102 @@
+{
+  "name": "@workspace-clients/chat-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "//dependencies": "react is 19.0.0 and react-native 0.79.7, the pair the installed host's react-native-renderer accepts; they move together with clients/mobile-browser. The device credential, the connection, push and every other device-owned module belong to the host runtime; this client imports only @vibestudio/rn-client-api for them.",
+  "//capabilities": "device-session and hub-control are the whole required set: the conversation runs on this device's session in the Personal workspace, which the client finds through the account's hub control. notifications and notifications.reply are optional: conversation notifications and their lock-screen reply field are drawn and relayed by the host, so chat works without them. clipboard and open-external serve copy buttons and links in agent prose.",
+  "//intents": "open-conversation has no dynamic entries: no workspace service lists recent conversations yet, so a launcher offers a plain Chat entry and the conversation list lives inside the client.",
+  "vibestudio": {
+    "displayName": "Vibestudio Chat",
+    "icon": "💬",
+    "client": {
+      "id": "chat",
+      "runtime": "react-native",
+      "hostAbi": "rn-host-6",
+      "entry": "App.tsx",
+      "title": "Chat",
+      "capabilities": {
+        "required": [
+          "device-session",
+          "hub-control"
+        ],
+        "optional": [
+          "notifications",
+          "notifications.reply",
+          "clipboard",
+          "open-external"
+        ]
+      },
+      "intents": [
+        {
+          "name": "open-conversation",
+          "kind": "foreground",
+          "title": "Open conversation",
+          "params": {
+            "conversation": "string"
+          }
+        },
+        {
+          "name": "share",
+          "kind": "foreground",
+          "title": "Share to chat",
+          "params": {
+            "text": "text"
+          },
+          "accepts": [
+            "text/*"
+          ]
+        },
+        {
+          "name": "ask",
+          "kind": "background",
+          "title": "Ask",
+          "params": {
+            "text": "text"
+          },
+          "handler": "vibestudio.quickfire.v1#ask"
+        }
+      ]
+    },
+    "authority": {
+      "provides": [],
+      "serviceRequests": [
+        {
+          "protocol": "vibestudio.quickfire.v1",
+          "availability": "required"
+        }
+      ],
+      "requests": [
+        {
+          "capability": "workspace-service:quickfire",
+          "resource": {
+            "kind": "exact",
+            "key": "do:workers/quickfire-service:QuickfireSessionsDO:workspace-quickfire"
+          },
+          "tier": "gated",
+          "evidence": "exact"
+        }
+      ]
+    },
+    "description": "Talk with agents in your workspace from your phone: your conversations, shared text and quick questions from the lock screen."
+  },
+  "dependencies": {
+    "@vibestudio/rn-client-api": "workspace:*",
+    "@vibestudio/rpc": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@vibestudio/workspace-contracts": "workspace:*",
+    "@workspace/agentic-chat-native": "workspace:*",
+    "@workspace/agentic-core": "workspace:*",
+    "@workspace/client-kit-native": "workspace:*",
+    "@workspace/client-update-core": "workspace:*",
+    "lucide-react-native": "^1.39.0",
+    "react": "19.0.0",
+    "react-native": "0.79.7",
+    "react-native-get-random-values": "1.11.0",
+    "react-native-haptic-feedback": "2.3.4",
+    "react-native-safe-area-context": "5.7.0",
+    "react-native-svg": "15.15.4",
+    "react-native-url-polyfill": "^3.0.0"
+  }
+}

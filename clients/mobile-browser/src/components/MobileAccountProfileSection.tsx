@@ -18,16 +18,11 @@ import {
   validateAccountProfileDraft,
   type AccountProfileDraft,
 } from "@vibestudio/identity/accountProfileDraft";
-import {
-  ACCOUNT_AVATAR_DATA_URI_PATTERN,
-  MAX_AVATAR_DATA_URI_BYTES,
-} from "@vibestudio/service-schemas/account";
 import type {
   MobileAccountProfile,
   MobileAccountProfileUpdate,
   ShellClient,
 } from "../services/shellClient";
-import { readClipboardImageOrText } from "../services/nativeCapabilities";
 import { themeColorsAtom } from "../state/themeAtoms";
 import {
   spacing,
@@ -50,7 +45,6 @@ export function MobileAccountProfileSection({ client }: MobileAccountProfileSect
   const [profile, setProfile] = React.useState<MobileAccountProfile | null>(null);
   const [draft, setDraft] = React.useState<AccountProfileDraft>(EMPTY_ACCOUNT_PROFILE_DRAFT);
   const [avatarDraft, setAvatarDraft] = React.useState<string | null | undefined>(undefined);
-  const [avatarLoading, setAvatarLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -126,27 +120,6 @@ export function MobileAccountProfileSection({ client }: MobileAccountProfileSect
     }
   };
 
-  const pasteAvatar = async () => {
-    if (saving || avatarLoading) return;
-    setAvatarLoading(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const avatar = await readClipboardImageOrText();
-      if (!ACCOUNT_AVATAR_DATA_URI_PATTERN.test(avatar)) {
-        throw new Error("Copy a PNG, JPEG, WebP, or GIF image data URI first.");
-      }
-      if (avatar.length > MAX_AVATAR_DATA_URI_BYTES) {
-        throw new Error("The copied avatar exceeds the 256 KiB profile limit.");
-      }
-      setAvatarDraft(avatar);
-    } catch (avatarError) {
-      setError(messageFor(avatarError));
-    } finally {
-      setAvatarLoading(false);
-    }
-  };
-
   return (
     <View accessibilityLabel="Account profile">
       <SectionHeader label="Your profile" />
@@ -197,21 +170,6 @@ export function MobileAccountProfileSection({ client }: MobileAccountProfileSect
               </View>
             </View>
             <View style={styles.avatarActions}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Paste profile avatar"
-                disabled={saving || avatarLoading}
-                onPress={() => void pasteAvatar()}
-                style={({ pressed }) => [styles.avatarAction, pressed && styles.pressed]}
-              >
-                <Text style={[type.body, { color: colors.accent }]}>
-                  {avatarLoading
-                    ? "Reading…"
-                    : previewAvatar
-                      ? "Replace from clipboard"
-                      : "Paste avatar"}
-                </Text>
-              </Pressable>
               {previewAvatar ? (
                 <Pressable
                   accessibilityRole="button"

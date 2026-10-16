@@ -1,8 +1,6 @@
 import { act, render, waitFor } from "@testing-library/react-native";
 import { WorkspaceSessionEffects } from "./WorkspaceSessionEffects";
 import { handleExternalOpen } from "../services/oauthLoopback";
-import { createMobileClientUpdateModel } from "../services/mobileClientUpdate";
-import { presentClientUpdates } from "@workspace/client-kit-native";
 import type {
   MobileWorkspaceDirectory,
   MobileWorkspaceSession,
@@ -10,13 +8,6 @@ import type {
 
 jest.mock("../services/oauthLoopback", () => ({
   handleExternalOpen: jest.fn(async () => undefined),
-}));
-const mockUpdateModel = { handleChange: jest.fn() };
-jest.mock("../services/mobileClientUpdate", () => ({
-  createMobileClientUpdateModel: jest.fn(() => mockUpdateModel),
-}));
-jest.mock("@workspace/client-kit-native", () => ({
-  presentClientUpdates: jest.fn(() => jest.fn()),
 }));
 
 function setup(workspaceId = "personal") {
@@ -27,13 +18,6 @@ function setup(workspaceId = "personal") {
   const stop = jest.fn();
   const client = {
     panels: { updateTheme: jest.fn(async (_theme: string) => undefined) },
-    hostLaunch: {
-      configuredCandidate: jest.fn(async () => ({
-        source: "clients/mobile-browser",
-        name: "mobile",
-      })),
-      mobileUpdateStatus: jest.fn(async (): Promise<any> => null),
-    },
     events: {
       subscribe: jest.fn(async (_topic: string) => undefined),
       unsubscribe: jest.fn(async (_topic: string) => undefined),
@@ -188,70 +172,26 @@ it("attributes external handoff failure to its owner without changing the active
   expect(f.directory.activate).not.toHaveBeenCalled();
 });
 
-it("reconciles the selected native app update from supervision in System", async () => {
+it("watches only notifications and external opens in every workspace, System included; updates come from the host", () => {
   const system = setup("system");
   const personal = setup();
-  const event = {
-    identity: { kind: "client", entityId: "mobile" },
-    change: "adopted",
-    source: "clients/mobile-browser",
-    client: { id: "mobile", runtime: "react-native" },
-  };
   const view = render(
     <>
       <WorkspaceSessionEffects {...system.props} />
       <WorkspaceSessionEffects {...personal.props} />
     </>,
   );
-  system.emit("supervision:changed", event);
-  personal.emit("supervision:changed", event);
-  await waitFor(() => expect(mockUpdateModel.handleChange).toHaveBeenCalledTimes(1));
-  expect(mockUpdateModel.handleChange).toHaveBeenCalledWith(event);
-  expect(createMobileClientUpdateModel).toHaveBeenCalledTimes(1);
-  expect(createMobileClientUpdateModel).toHaveBeenCalledWith({
-    shellClient: system.client,
-    selectedSource: "clients/mobile-browser",
-    selectedClientId: "mobile",
-  });
-  expect(presentClientUpdates).toHaveBeenCalledTimes(1);
-  expect(personal.client.hostLaunch.configuredCandidate).not.toHaveBeenCalled();
-  expect(personal.client.events.subscribeAll).toHaveBeenCalledWith([
-    "notification:show",
-    "external-open:open",
-  ]);
-  view.unmount();
-});
-
-it("does not present old app lifecycle work after its System session is replaced", async () => {
-  const f = setup("system");
-  let resolve!: (candidate: { source: string; name: string }) => void;
-  f.client.hostLaunch.configuredCandidate.mockImplementationOnce(
-    () =>
-      new Promise((done) => {
-        resolve = done;
-      }),
-  );
-  const view = render(<WorkspaceSessionEffects {...f.props} />);
-  f.emit("supervision:changed", {
-    identity: { kind: "client", entityId: "mobile" },
-    change: "adopted",
-    source: "clients/mobile-browser",
-    client: { id: "mobile", runtime: "react-native" },
-  });
-  f.directory.sessions.set("system", { ...f.session });
-  await act(async () => {
-    resolve({ source: "clients/mobile-browser", name: "mobile" });
-  });
-  expect(mockUpdateModel.handleChange).not.toHaveBeenCalled();
-  expect(createMobileClientUpdateModel).not.toHaveBeenCalled();
-  view.unmount();
-  await waitFor(() =>
-    expect(f.client.events.unsubscribeMany).toHaveBeenCalledWith([
+  for (const f of [system, personal]) {
+    expect(f.client.events.subscribeAll).toHaveBeenCalledWith([
       "notification:show",
       "external-open:open",
+    ]);
+    expect(f.client.events.on).not.toHaveBeenCalledWith(
       "supervision:changed",
-    ]),
-  );
+      expect.anything(),
+    );
+  }
+  view.unmount();
 });
 
 it("handles targeted OAuth delivery once, independently of the broadcast watch", () => {

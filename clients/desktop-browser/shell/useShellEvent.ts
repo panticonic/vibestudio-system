@@ -14,6 +14,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import type { EventName, EventPayloads } from "./workspaceClient";
 import { useShellWorkspaceClient } from "./workspaceContext";
+import { localShellEvents } from "./localShellEvents";
 
 // Re-export for consumers
 export type { EventPayloads } from "./client.js";
@@ -48,6 +49,8 @@ export function useShellEvent<E extends EventName>(
 
   useEffect(() => {
     const lifetime = new AbortController();
+    // The same handler also serves events this client raises for itself.
+    const releaseLocal = localShellEvents.on(event, (payload) => callbackRef.current(payload));
     const observation = observeDurableProjection({
       listen: (invalidate) =>
         events.on(event, (payload) => {
@@ -67,6 +70,7 @@ export function useShellEvent<E extends EventName>(
     });
 
     return () => {
+      releaseLocal();
       lifetime.abort();
       void observation.stop().catch((error: unknown) => {
         if (!isRpcConnectionLost(error))

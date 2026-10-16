@@ -1,48 +1,74 @@
 ---
 name: workspace-mobile-client
-description: Develop and diagnose the React Native client in the user’s System workspace, including workspace navigation, scoped approvals, pairing, and mobile equivalents of shared shell behavior.
+description: Develop and diagnose the React Native client in the user’s System workspace, including workspace navigation, scoped approvals, the host API it runs on, and mobile equivalents of shared shell behavior.
 ---
 
 # Workspace Mobile Client
 
 `clients/mobile-browser` is the source of the React Native client (`vibestudio.client` runtime `react-native`, host ABI `rn-host-6`). It lives in the user’s
-**System** workspace and is streamed to the host after pairing. It shows
+**System** workspace and is delivered to the device by the host after pairing. It shows
 the Personal, System, and any other workspaces the account can access over a
 single account connection. Workspaces are isolated from each other; contexts
 stay inside their workspace.
 
 ## What this client does and doesn't own
 
-- First pairing is handled by the native host's bootstrap that ships in the
-  application binary.
-- This client runs only after the host has paired, fetched the current
-  platform artifact, verified its integrity, and started it.
-- Long-lived device credentials and the native Endpoint identity live in
-  `@vibestudio/mobile-iroh`. This app uses the active Iroh transport and
-  one-use client principal grants.
-- A cold client process derives the same connection owner from its installed
-  Endpoint identity and each authenticated server reach. Keep that identity
-  stable so admission replaces the dead process before server-to-shell work is
-  routed; do not generate a new connection owner on every launch.
-- Bundle installation and self-update use the shared streamed delivery helper
-  in `@vibestudio/mobile-iroh`. Don't add direct HTTP artifact fetches or
-  native workspace-selection APIs.
+- The host runtime owns everything device-level: pairing and re-pairing, the
+  device credential and endpoint identity, the single physical Iroh connection
+  (and its reconnection), delivering and verifying this client's build, and push
+  (FCM, notifee, lock-screen decisions). This client runs only after the host
+  has paired and started it in its own React Native instance; it never runs
+  unpaired and holds no credential.
+- The client reaches the host through `@vibestudio/rn-client-api` and nothing
+  else host-owned. `App.tsx` builds the API once (`connectNativeClientApi`),
+  installs it with `installClientApi` from `@workspace/client-kit-native/host`
+  and registers the root component `VibestudioClient`. Services and components
+  read it with `clientApi()`; tests install a fake from
+  `@workspace/client-kit-native/testing` (`createFakeClientHost`, the real API
+  over an in-memory host).
+- Import rules: the raw device modules (`react-native-keychain`,
+  `@react-native-firebase/*`, `@notifee/react-native`,
+  `@react-native-async-storage/async-storage`,
+  `@react-native-clipboard/clipboard`) and the root of
+  `@vibestudio/mobile-iroh` are not available in a client instance and are
+  blocked at build time. Only `@vibestudio/mobile-iroh/polyfills` and
+  `import type` from `@vibestudio/mobile-iroh` are allowed. `rawModuleImports.test.ts`
+  enforces this. Persisted state is `api.state`, the clipboard is
+  `api.clipboard`, links open through `api.openExternal`, browser import is
+  `api.browserImport`, push is `api.notifications`, and what the host grants is
+  `api.capabilities`. Each call fails with the host's refusal when the
+  capability is not granted.
+- The panel-hosting natives (`VibestudioWorkspaceWebView`, the durable asset
+  store and per-workspace cookie clearing in `VibestudioPanelHost`,
+  `react-native-tcp-socket`, `react-native-webview`) exist in the instance only
+  when `panel-hosting` is granted; they are not device capabilities.
+- An account session is `api.session.openAccount()` (hub control plus routed
+  workspace sessions); `MobileRpcClient` adapts one `RemoteConnection` to the
+  `RpcClient` surface. A panel's own session is `connection.transport.openSession`
+  (an auxiliary session on the same physical connection; its token comes from
+  `getToken` on each authentication). A session closed with reason
+  `trust-revoked` is terminal: the host tears the instance down and the client
+  neither retries nor reopens it.
+- Intents arrive through `api.intent` (`initial`, `onIntent`); `open-panel`
+  carries the raw panel link in `params.panel`. Don't read deep links from
+  `Linking` for panel links.
 
 ## Workspaces
 
-- `MobileWorkspaceDirectory` keeps one `MobileWorkspaceAccount` control pipe
+- `MobileWorkspaceDirectory` keeps one `RemoteAccount` control session
   and opens immutable child sessions on demand. Selecting a workspace changes
-  what is shown; it never changes the saved native bundle source or reloads the
-  app.
+  what is shown; it never reloads the client.
 - The app ensures the account’s Personal and System workspaces exist with
   `hubControl.ensureUserWorkspaces`. Both are private to that account. Other
   workspaces can have several members.
 - Each opened workspace has its own `ShellClient`, Jotai store, panel tree,
   local focus, and pinned panels. Only activated workspaces mount panel
   screens; expanding a tree or reviewing an approval does not load its panels.
-- Client capabilities and host launch stay on the System client. A target
-  workspace's session hosts that workspace's panels and calls its services.
-  Don't expose native browser import through target workspace sessions.
+- The device surfaces the server calls into (workspace readiness, browser
+  privacy presentation, browser import) stay on the System client
+  (`exposesDeviceSurfaces`). A target workspace's session hosts that
+  workspace's panels and calls its services. Don't expose native browser
+  import through target workspace sessions.
 - New creates a panel in the focused panel’s workspace; the + on a workspace
   heading creates one in that heading's workspace. About panels load their
   source from their own workspace. Never fetch a missing about page from
@@ -83,15 +109,15 @@ stay inside their workspace.
   scope are not replayed. Notification IDs and local state are namespaced by
   account and workspace.
 
-## Pairing And Re-Pair
+## Pairing
 
-- Accept both `https://vibestudio.app/p#...` and `vibestudio://connect/...`
-  links through the shared compact-v4 parser.
-- The login/recovery screen should offer paste-link and scanner options that
-  call native host capabilities.
-- Consumed or stale links must fail visibly and leave the recovery UI usable.
-- Re-pairing clears the active OTA bundle and returns to the shipped
-  bootstrap; don't try to pair from a stale workspace bundle.
+- Pairing and re-pairing belong to the host; there is no pairing, paste-link
+  or credential screen here. `ConnectScreen` only opens the account and offers
+  Retry, which keeps the pairing. "Re-pair" in the UI asks the host to forget
+  this device (`api.device.reset()`); the host tears every client down and
+  returns to its pairing screen.
+- The host cannot read the clipboard for the client, so there is no
+  paste-avatar action; the profile editor only clears or undoes an avatar.
 - A connected app can create account-level invitations for another device
   through `hubControl.pairDevice`. The receiving device authenticates first and
   then opens that account's Personal workspace by default. Settings → Devices
@@ -101,27 +127,23 @@ stay inside their workspace.
   never reconstructs pairing fields or touches the current device's refresh
   credential.
 
-## OTA Updates
+## Updates
 
-- `mobileClientUpdate.ts` is this app's `ClientUpdatePort` (install, roll back)
-  over `@workspace/client-update-core`; `@workspace/client-kit-native` words the
-  prompt (`presentClientUpdates`) and `WorkspaceSessionEffects` feeds it
-  `supervision:changed` events for this client.
-- Install calls the shared bundle-delivery flow over the app's System
-  app-source `MobileRpcClient` transport, then activates the prepared bundle.
-- Roll back first changes the trusted server build, then activates the
-  selected bundle.
-- The native host's persisted active bundle build key is authoritative for
-  what this installation has adopted. Query update status by comparing that
-  device-relative key with the System workspace's selected React Native build.
-  `apps:status` only invalidates that query; its workspace-global active build
-  and rollback history never prove that a particular phone installed it.
-- Bundle activation persists the native active build key before React Native
-  reloads. Preserve that order so the reloaded app immediately queries as
-  current and cannot prompt again for the bundle it is already running.
-- `vibestudio.client.hostAbi` in `package.json` declares the host contract the
-  client was written for. The host reports the client `unavailable`, naming the
-  expected ABI, when it differs from the one it implements.
+- The server announces a ready build; the host decides what to do. The client
+  observes it only through `api.updates`: `clientUpdatePortFromHost`,
+  `createHostUpdateModel` and `observeHostUpdates` in
+  `@workspace/client-kit-native` feed the `@workspace/client-update-core` model
+  from the host's pending offer and `onUpdate`, and `useHostUpdates` presents
+  it with `presentClientUpdates`.
+- Install is `api.updates.restartAtSafePoint()`; roll back is
+  `api.updates.rollback()`. The host reloads only this client's instance. In
+  development mode the host reloads without asking; the client must simply
+  survive its instance being replaced.
+- There is no bundle download, activation or build-key bookkeeping in the
+  client. `vibestudio.client.hostAbi` in `package.json` declares the host
+  contract the client was written for. The host reports the client
+  `unavailable`, naming the expected ABI, when it differs from the one it
+  implements.
 
 ## Desktop Parity
 
@@ -198,8 +220,8 @@ stay inside their workspace.
 - Run the focused checks declared by the client package and the affected
   workspace packages.
 - Use `extensions/mobile-debug/SKILL.md` for device or simulator verification.
-- Use the repository mobile smoke workflow only when the change crosses native
-  bootstrap, pairing, transport, or OTA boundaries.
+- Use the repository mobile smoke workflow only when the change crosses the
+  host API, pairing, transport, or update boundaries.
 
 ## Browser storage isolation
 

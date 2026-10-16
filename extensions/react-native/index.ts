@@ -3,10 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  RN_HOST_ABI,
-  type BuildProviderInput,
-  type BuildProviderOutput,
+import type {
+  BuildProviderInput,
+  BuildProviderOutput,
 } from "@vibestudio/shared/buildProvider";
 import { contentTypeForPath } from "@vibestudio/shared/contentType";
 import { writeProjectedMetroConfig } from "./metroConfig.js";
@@ -35,15 +34,12 @@ export async function activate() {
           `react-native provider cannot build target: ${input.target}`,
         );
       }
-      const appManifest =
-        input.manifest["app"] && typeof input.manifest["app"] === "object"
-          ? (input.manifest["app"] as Record<string, unknown>)
-          : input.manifest;
-      const entry = String(appManifest["renderer"] ?? "index.tsx");
-      const entryPath = path.resolve(input.sourcePath, entry);
-      if (appManifest["rnHostAbi"] !== RN_HOST_ABI) {
+      // The client's root component module. Whether the bundle matches the host
+      // ABI is the launcher's and the build contract's check, not the provider's.
+      const entryPath = path.resolve(input.sourcePath, input.client.entry);
+      if (!entryPath.startsWith(`${path.resolve(input.sourcePath)}${path.sep}`)) {
         throw new Error(
-          `React Native app ${input.unitName} declares rnHostAbi ${JSON.stringify(appManifest["rnHostAbi"] ?? null)}, but this host builds for ${JSON.stringify(RN_HOST_ABI)}. Port the app to the current native host contract and declare that value.`,
+          `React Native client ${input.unitName} declares an entry outside its source: ${input.client.entry}`,
         );
       }
       const tempDir = fs.mkdtempSync(
@@ -118,12 +114,7 @@ export async function activate() {
         throw error;
       }
       tempDirRefs.set(tempDir, artifacts.length);
-      return {
-        artifacts,
-        metadata: {
-          rnHostAbi: RN_HOST_ABI,
-        },
-      };
+      return { artifacts };
     },
     buildArtifact(artifactId: string): ReadableStream<Uint8Array> {
       const artifact = artifactFiles.get(artifactId);

@@ -28,18 +28,22 @@ WebKit location-permission hook, so this app does not request location entitleme
 there; iOS location remains unsupported. No page-injected permission shim is used.
 
 This directory is the hot-updatable Vibestudio mobile product: React Native
-screens, navigation, panel WebViews, approvals, notifications, OAuth, and
-workspace-facing services. It is a userland workspace client built by buildV2 and
-delivered as an integrity-verified bundle to the installed native host.
+screens, navigation, panel WebViews, approvals, notification handling, OAuth,
+and workspace-facing services. It is a userland client built by buildV2 and
+run by the installed host in its own React Native instance.
 
-The shipped Android/iOS projects and minimal first-pairing/recovery bootstrap
-live in the repository's native host package (the mobile project of the application checkout). Native modules, signing,
-release packaging, and OS-level integration belong there; product UI and
-workspace behavior belong here.
+The shipped Android/iOS projects and the host runtime live in the repository's
+native host package (the mobile project of the application checkout). The host
+owns pairing, the device credential, the Iroh connection, delivering and
+verifying this client's build, and push. This client sees them only through
+`@vibestudio/rn-client-api`; the raw device modules are not available to it and
+are blocked at build time. Native modules, signing, release packaging, and
+OS-level integration belong to the host; product UI and workspace behavior
+belong here.
 
 The connected product exposes **Settings** → **Devices** → **Connect another
 device**. It asks hub control for a complete, workspace-targeted invitation and
-offers copy/share actions; first pairing and recovery remain native-host
+offers copy/share actions; first pairing and recovery remain host
 responsibilities.
 
 The client runs from **System** and keeps one authenticated account connection.
@@ -59,7 +63,7 @@ remain reachable from the sheet.
 ## Checks
 
 Run the native package's commands from the repository root; its Jest and
-TypeScript configuration intentionally includes this workspace client:
+TypeScript configuration intentionally includes this client:
 
 ```bash
 pnpm -C <native host mobile project> test

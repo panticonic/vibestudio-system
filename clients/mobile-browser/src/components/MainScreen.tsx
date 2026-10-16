@@ -105,8 +105,7 @@ import {
   openExternalUrl,
   shareText,
 } from "../services/nativeCapabilities";
-import { resetToNativeBootstrap } from "../services/auth";
-import { clearShellCredential } from "../services/mobileCredentials";
+import { clientApi } from "@workspace/client-kit-native/host";
 import {
   buildPanelChromeState,
   isBrowserPanelSource,
@@ -674,7 +673,7 @@ export function MainScreen({
       clearTimeout(timer);
     };
   }, [activeChromeState, addressBarVisible, addressQuery, shellClient]);
-  // Persist the pin set to AsyncStorage (workspace-scoped). Best-effort.
+  // Persist the pin set to the client state (workspace-scoped). Best-effort.
   const persistPins = useCallback(
     (ids: Set<string>) => {
       const workspaceId = shellClient?.workspaceId;
@@ -1253,12 +1252,21 @@ export function MainScreen({
                 ? getCurrentSnapshot(panel).source
                 : undefined;
           if (address) {
-            copyToClipboard(address);
-            pushToast({
-              title: "Address copied",
-              message: address,
-              tone: "success",
-            });
+            void copyToClipboard(address).then(
+              () =>
+                pushToast({
+                  title: "Address copied",
+                  message: address,
+                  tone: "success",
+                }),
+              (error: unknown) =>
+                pushToast({
+                  title: "Could not copy address",
+                  message:
+                    error instanceof Error ? error.message : "Try again.",
+                  tone: "danger",
+                }),
+            );
           }
           return;
         }
@@ -2347,8 +2355,8 @@ export function MainScreen({
           text: "Re-pair",
           style: "destructive",
           onPress: () =>
-            void clearShellCredential()
-              .then(() => resetToNativeBootstrap())
+            void clientApi()
+              .device.reset()
               .catch((error) =>
                 Alert.alert(
                   "Re-pair failed",

@@ -24,7 +24,7 @@ import {
   type BridgeStreamRelay,
   type RpcEnvelope,
 } from "@vibestudio/rpc";
-import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
+import type { RemoteSession } from "@vibestudio/rn-client-api";
 import type { MobileRpcClient } from "./mobileTransport";
 import mobilePackage from "../../package.json";
 
@@ -38,7 +38,7 @@ export interface BridgeAdapterCallbacks {
 type PanelLease = { runtimeEntityId: PanelEntityId; connectionId: string };
 
 type PanelSessionEntry = {
-  session: IrohClientSession;
+  session: RemoteSession;
   leaseKey: string;
 };
 
@@ -82,7 +82,7 @@ export function createBridgeAdapter(deps: {
     return lease;
   }
 
-  function ensurePanelSession(panelId: string): Promise<IrohClientSession> {
+  function ensurePanelSession(panelId: string): Promise<RemoteSession> {
     let lease: PanelLease;
     try {
       lease = requirePanelLease(panelId);
@@ -469,6 +469,6 @@ function panelLeaseKey(lease: PanelLease): string {
   return `${lease.runtimeEntityId}\u0000${lease.connectionId}`;
 }
 
-function isPanelSessionLive(session: IrohClientSession): boolean {
+function isPanelSessionLive(session: RemoteSession): boolean {
   return !session.isClosed();
 }

@@ -850,14 +850,14 @@ export function createShellWorkspaceClient(
   /**
    * Forwards the renderer's `window` `online` event to main (fire-and-forget) so
    * main can nudge a possibly-stale server pipe awake after a network flap. The
-   * bridge is injected by the app preload (`__vibestudioApp`); absent outside
+   * bridge is injected by the app preload (`__vibestudioClient`); absent outside
    * Electron, where it is a no-op.
    */
   const shellNetwork = {
     notifyOnline: () => {
       const bridge = (
-        globalThis as unknown as { __vibestudioApp?: ShellNetworkBridge }
-      ).__vibestudioApp;
+        globalThis as unknown as { __vibestudioClient?: ShellNetworkBridge }
+      ).__vibestudioClient;
       bridge?.notifyNetworkOnline?.();
     },
   };
@@ -1260,8 +1260,8 @@ export function createShellWorkspaceClient(
     show: (
       opts: Omit<NotificationPayload, "id" | "sourcePanelId" | "iconDataUrl">,
     ) => notificationClient.show(opts),
-    reportAction: (id: string, actionId: string) =>
-      notificationClient.reportAction(id, actionId),
+    reportAction: (id: string, actionId: string, text?: string) =>
+      notificationClient.reportAction(id, actionId, ...(text === undefined ? [] : [text])),
     dismiss: (id: string) => notificationClient.dismiss(id),
   };
   // =============================================================================

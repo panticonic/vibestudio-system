@@ -579,14 +579,16 @@ export function createNativeSkin(
               accessibilityRole="button"
               accessibilityLabel={copied ? "Copied" : "Copy this block"}
               onPress={() => {
-                try {
-                  copyToClipboard(text);
-                  setCopied(true);
-                  setCopyError(false);
-                } catch {
-                  setCopied(false);
-                  setCopyError(true);
-                }
+                copyToClipboard(text).then(
+                  () => {
+                    setCopied(true);
+                    setCopyError(false);
+                  },
+                  () => {
+                    setCopied(false);
+                    setCopyError(true);
+                  },
+                );
               }}
             >
               <RNText style={[type.caption, { color: colors.accent }]}>

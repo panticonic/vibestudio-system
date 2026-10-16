@@ -10,7 +10,7 @@ import { atom } from "jotai";
 /** The ID of the currently active/focused panel */
 export const activePanelIdAtom = atom<string | null>(null);
 
-/** Slot ids of client-local pinned panels (hydrated from AsyncStorage). */
+/** Slot ids of client-local pinned panels (hydrated from the host-kept client state). */
 export const pinnedPanelIdsAtom = atom<Set<string>>(new Set<string>());
 
 /** Whether pins have finished hydrating; gates the GC sweep on cold start. */

@@ -484,14 +484,23 @@ export function PanelDrawer({
           togglePanelPin(panelId);
           return;
         case "copy-address":
-          void shellClient.panels.observe(panelId).then((observation) => {
-            copyToClipboard(observation.source);
-            pushToast({
-              title: "Address copied",
-              message: observation.source,
-              tone: "success",
-            });
-          });
+          void shellClient.panels
+            .observe(panelId)
+            .then(async (observation) => {
+              await copyToClipboard(observation.source);
+              pushToast({
+                title: "Address copied",
+                message: observation.source,
+                tone: "success",
+              });
+            })
+            .catch((error: unknown) =>
+              pushToast({
+                title: "Could not copy address",
+                message: error instanceof Error ? error.message : "Try again.",
+                tone: "danger",
+              }),
+            );
           return;
         case "share-address":
           void shellClient.panels

@@ -16,14 +16,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { StackNavigationProp } from "@workspace/mobile-navigation";
 import { useAtomValue, useSetAtom } from "jotai";
-import {
-  clearShellCredential,
-  loadShellCredential,
-  persistStoredMobileConnection,
-  type MobileHubWorkspace,
-} from "../services/mobileCredentials";
+import type { HubWorkspaceEntry as MobileHubWorkspace } from "@vibestudio/service-schemas/hubControl";
+import { clientApi } from "@workspace/client-kit-native/host";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { resetToNativeBootstrap } from "../services/auth";
 import {
   listMobileWorkspaces,
   mobileWorkspaceSelectionDependencies,
@@ -237,50 +232,19 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
   );
 
   const performDisconnect = async () => {
-    let previousCredential: Awaited<ReturnType<typeof loadShellCredential>>;
+    // The host forgets this device's pairing and tears every client down; a
+    // failed reset leaves this session and its workspace resources live.
     try {
-      previousCredential = await loadShellCredential();
-      await clearShellCredential();
+      await clientApi().device.reset();
     } catch (error) {
       Alert.alert(
         "Could not disconnect securely",
         error instanceof Error
           ? error.message
-          : "The device credential could not be cleared.",
+          : "The device pairing could not be cleared.",
       );
       return;
     }
-
-    try {
-      const reset = await resetToNativeBootstrap();
-      if (!reset.reloading)
-        throw new Error("The native host did not start the pairing reload.");
-    } catch (error) {
-      try {
-        if (previousCredential)
-          await persistStoredMobileConnection(previousCredential);
-      } catch (rollbackError) {
-        Alert.alert(
-          "Disconnect needs attention",
-          `The native reload failed and the prior credential could not be restored: ${
-            rollbackError instanceof Error
-              ? rollbackError.message
-              : String(rollbackError)
-          }`,
-        );
-        return;
-      }
-      Alert.alert(
-        "Could not open pairing",
-        error instanceof Error
-          ? error.message
-          : "The native host could not reload.",
-      );
-      return;
-    }
-
-    // Keychain is clear and native reload is committed; now release the old
-    // workspace resources. Failure paths above intentionally leave them live.
     await directory?.dispose();
     shellClient?.dispose();
     setShellClient(null);
@@ -292,7 +256,7 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
   const handleDisconnect = () => {
     Alert.alert(
       "Disconnect this device?",
-      "This clears the stored pairing and returns to the native pairing screen.",
+      "This clears the stored pairing and returns to the pairing screen.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -313,8 +277,14 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
 
   const handleCopyDeviceId = () => {
     if (!deviceId) return;
-    copyToClipboard(deviceId);
-    pushToast({ message: "Device ID copied", tone: "success" });
+    void copyToClipboard(deviceId).then(
+      () => pushToast({ message: "Device ID copied", tone: "success" }),
+      (error: unknown) =>
+        pushToast({
+          message: error instanceof Error ? error.message : "Could not copy",
+          tone: "danger",
+        }),
+    );
   };
 
   const currentWorkspace = workspaces.find(
@@ -348,8 +318,14 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
 
   const handleCopyPairingLink = () => {
     if (!pairingInvite || pairingOutcome) return;
-    copyToClipboard(pairingInvite.pairUrl);
-    pushToast({ message: "Pairing link copied", tone: "success" });
+    void copyToClipboard(pairingInvite.pairUrl).then(
+      () => pushToast({ message: "Pairing link copied", tone: "success" }),
+      (error: unknown) =>
+        pushToast({
+          message: error instanceof Error ? error.message : "Could not copy",
+          tone: "danger",
+        }),
+    );
   };
 
   const handleSharePairingLink = async () => {

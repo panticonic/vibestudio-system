@@ -96,7 +96,7 @@ export interface MobileSlateDeps {
   /** Make a panel the visible one (mobile's equivalent of focusing a pane). */
   navigateToPanel: (panelId: string) => void;
   setThemePreference: (mode: "system" | "light" | "dark") => void;
-  copyText: (text: string) => void;
+  copyText: (text: string) => Promise<void>;
   /**
    * Open (or focus) the chat panel for a promoted conversation — the same
    * dedupe-aware path the quickfire sheet's ⧉ uses, so the slate command and
@@ -163,7 +163,7 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
     const observation = await deps.panels.observe(panelId);
     // The raw source is not a link. Build the canonical share URL, which
     // survives being pasted somewhere outside this device.
-    deps.copyText(
+    await deps.copyText(
       createPanelShareUrl({
         source: observation.source,
         ...(observation.contextId ? { contextId: observation.contextId } : {}),

@@ -8,7 +8,7 @@ import {
 jest.mock("react-native", () => ({
   Platform: { OS: "android" },
   NativeModules: {
-    VibestudioMobileHost: {
+    VibestudioPanelHost: {
       clearWorkspaceCookies: jest.fn(async () => undefined),
     },
   },
@@ -54,7 +54,7 @@ describe("workspace browser profiles", () => {
 
 it("clears only the captured profile and rejects missing scope before native access", async () => {
   const clear = jest.mocked(
-    NativeModules["VibestudioMobileHost"].clearWorkspaceCookies,
+    NativeModules["VibestudioPanelHost"].clearWorkspaceCookies,
   );
   await clearWorkspaceCookies("server-a:device-a", "project");
   expect(clear).toHaveBeenCalledWith('["server-a:device-a","project"]');

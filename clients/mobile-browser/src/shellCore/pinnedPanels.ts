@@ -1,7 +1,7 @@
 /**
  * Client-local, workspace-scoped panel pin store for mobile.
  *
- * Mirrors `localViewState.ts` (AsyncStorage via a `require` guard). Pins are
+ * Mirrors `localViewState.ts` (the host-kept client state). Pins are
  * keyed by **slot id** and persist across reloads under a per-workspace key.
  */
 

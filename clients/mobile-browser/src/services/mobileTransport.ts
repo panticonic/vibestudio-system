@@ -1,10 +1,12 @@
 import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 /**
- * Mobile RPC client for React Native — Iroh transport.
+ * Mobile RPC client for React Native.
  *
- * Native bootstrap and the workspace app share one Keychain-backed endpoint
- * identity. Returning connections authenticate that Endpoint ID plus the stored
- * device credential, and every RPC owns an independent QUIC stream.
+ * The connection is the host's: the device credential, the physical Iroh
+ * connection and its reconnection live in the host runtime, and a workspace
+ * session is a `RemoteConnection` the client's account opened through it. This
+ * class adapts one such connection (and its hub control pipe) to the
+ * `RpcClient` surface the shell code consumes.
  */
 
 import {
@@ -17,17 +19,33 @@ import {
   type RpcStreamOptions,
 } from "@vibestudio/rpc";
 import type { RecoveryKind } from "@vibestudio/rpc/protocol/recoveryCoordinator";
-import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
-import { Platform } from "react-native";
+import type { RemoteConnection, RemoteSession } from "@vibestudio/rn-client-api";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { authMethods } from "@vibestudio/service-schemas/auth";
 
-import {
-  loadShellCredential,
-  MobileConnectionAggregateError,
-  reconnectMobileSession,
-  type IrohConnection,
-} from "@vibestudio/mobile-iroh";
+/** Several independent failures of one operation, kept together so none is lost. */
+export class MobileConnectionAggregateError extends Error {
+  readonly errors: readonly unknown[];
+  override readonly cause: unknown;
+
+  constructor(errors: readonly unknown[], message: string) {
+    super(`${message}: ${errors.map(errorMessage).join("; ")}`);
+    this.name = "MobileConnectionAggregateError";
+    this.errors = errors;
+    this.cause = errors[0];
+  }
+}
+
+/**
+ * The System owner withdrew this client's device-level trust. The host tears the
+ * instance down; nothing in the client reopens a session after it.
+ */
+export class ClientTrustRevokedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClientTrustRevokedError";
+  }
+}
 
 export interface ReconnectProgress {
   attempt: number;
@@ -81,18 +99,13 @@ export function isTransientMobileTransportFailure(error: unknown): boolean {
 
 export interface MobileRpcClientConfig {
   /** Immutable workspace session factory supplied by the retained account. */
-  connectWorkspace?: (
+  connectWorkspace: (
     onRecovery: (kind: RecoveryKind) => void | Promise<void>,
-  ) => Promise<IrohConnection>;
-  initialConnectionRetry?: {
-    maxMs?: number;
-    delayMs?: number;
-    maxDelayMs?: number;
-  };
+  ) => Promise<RemoteConnection>;
 }
 
 export function createMobileRpcClient(
-  config: MobileRpcClientConfig = {},
+  config: MobileRpcClientConfig,
 ): MobileRpcClient {
   return new MobileRpcClient(config);
 }
@@ -109,7 +122,7 @@ export class MobileRpcClient implements Pick<
   | "onRecovery"
 > {
   private readonly config: MobileRpcClientConfig;
-  private connection: IrohConnection | null = null;
+  private connection: RemoteConnection | null = null;
   private rpc: RpcClient | null = null;
   private controlRpc: RpcClient | null = null;
   // Dedupes concurrent connect attempts: the Iroh handshake is eager + async,
@@ -122,6 +135,9 @@ export class MobileRpcClient implements Pick<
   private connectionToken: object | null = null;
   private connectionSubscriptions: Array<() => void> = [];
   private currentCallerId: string | null = null;
+  // Set when the host reported this client's trust withdrawn: terminal, so no
+  // later call or reconnect opens another session.
+  private trustRevoked: ClientTrustRevokedError | null = null;
   private authenticatedServerId: string | null = null;
   private statusState: ConnectionStatus = "disconnected";
   private readonly statusListeners = new Set<
@@ -162,10 +178,10 @@ export class MobileRpcClient implements Pick<
     void this.ensureRpc().catch(() => undefined);
   }
 
-  async connectAndWait(timeoutMs?: number | null): Promise<void> {
+  async connectAndWait(): Promise<void> {
     const token = this.ensureConnectionLifetime();
     try {
-      await this.ensureRpc(timeoutMs);
+      await this.ensureRpc();
       this.assertConnectionLifetime(token);
     } catch (error) {
       this.assertConnectionLifetime(token);
@@ -177,7 +193,7 @@ export class MobileRpcClient implements Pick<
   reconnect(): void {
     const closing = this.teardown();
     const token = this.ensureConnectionLifetime();
-    this.startConnectionJob(token, undefined, closing);
+    this.startConnectionJob(token, closing);
   }
 
   onReconnectProgress(
@@ -314,40 +330,34 @@ export class MobileRpcClient implements Pick<
   }
 
   /**
-   * Open a dedicated per-panel "panel" session over the existing pipe. The
-   * server attributes calls by the authenticated SESSION principal, so a panel
-   * needs its OWN grant-redeemed "panel" session — relaying over the shell
+   * Open a dedicated per-panel "panel" session over the existing connection.
+   * The server attributes calls by the authenticated SESSION principal, so a
+   * panel needs its OWN grant-redeemed "panel" session — relaying over the shell
    * session makes its calls show up as "shell", which capability-gated services
-   * (e.g. PubSub `subscribe`, allowed: panel/do) reject. This rides the SAME pipe
-   * (a logical session, not a 2nd connection), so it does not trip the runtime
-   * lease gate (that gates panel HOSTING, not sessions). The grant is one-shot,
-   * so `getToken` refetches a fresh one on every (re)open.
+   * (e.g. PubSub `subscribe`, allowed: panel/do) reject. The host opens it as a
+   * logical session on the same physical connection (a second session, not a
+   * second connection). The grant is one-shot, so `getToken` refetches a fresh
+   * one on every (re)authentication; the grant principal becomes this session's
+   * callerId, which equals the panel bundle's RPC `from` (cfg.entityId) so routed
+   * responses match their recorded origin.
    */
   async openPanelSession(
     runtimeEntityId: PanelEntityId,
     connectionId: string,
-  ): Promise<IrohClientSession> {
+  ): Promise<RemoteSession> {
     const rpc = await this.ensureRpc();
     const connection = this.connection;
-    if (!connection) throw new Error("Iroh connection not established");
+    if (!connection) throw new Error("Workspace connection not established");
     const authClient = createTypedRpcServiceClient(rpc, { targetId: "main", namespace: "auth" }, authMethods);
     const session = connection.transport.openSession({
-      // Reuse the lease's connectionId and grant for the runtime ENTITY id (not
-      // the slot id) so the server's authorizePanelConnection(callerId,
-      // connectionId) matches the materializer's lease (keyed by entity id +
-      // that connectionId). The grant principal becomes this session's callerId,
-      // which equals the panel bundle's RPC `from` (cfg.entityId) so routed
-      // responses match their recorded origin.
+      label: `panel ${runtimeEntityId}`,
       connectionId,
-      clientPlatform: "mobile",
-      oauthCallbackMode:
-        Platform.OS === "ios" ? "app-scheme" : "client-loopback",
       getToken: async () => {
         const grant = await authClient.grantConnection(runtimeEntityId);
         return grant.token;
       },
     });
-    await session.ready?.();
+    await session.ready();
     return session;
   }
 
@@ -386,24 +396,42 @@ export class MobileRpcClient implements Pick<
     if (this.connectionToken !== token) throw new ConnectSupersededError();
   }
 
-  private async ensureRpc(timeoutMs?: number | null): Promise<RpcClient> {
+  private async ensureRpc(): Promise<RpcClient> {
+    if (this.trustRevoked) throw this.trustRevoked;
     if (this.rpc) return this.rpc;
     if (this.connecting) return this.connecting;
-    return this.startConnectionJob(this.ensureConnectionLifetime(), timeoutMs);
+    return this.startConnectionJob(this.ensureConnectionLifetime());
   }
 
   private startConnectionJob(
     token: object,
-    timeoutMs?: number | null,
     retirement = this.retirement,
   ): Promise<RpcClient> {
-    // This one promise includes preceding retirement and every initial attempt.
-    // A failed job remains terminal until an explicit new connection intent.
+    // This one promise includes preceding retirement and the opening of the
+    // session; the host owns every later reconnection. A failed job remains
+    // terminal until an explicit new connection intent.
     const connecting = (async () => {
       await retirement;
       this.assertConnectionLifetime(token);
+      if (this.trustRevoked) throw this.trustRevoked;
       this.setStatus("connecting");
-      return this.establishConnectionWithRetry(token, timeoutMs);
+      this.emitReconnectProgress({
+        attempt: 1,
+        phase: "connecting",
+        reason: "opening the workspace session",
+      });
+      try {
+        return await this.establishConnection(token);
+      } catch (error) {
+        if (!(error instanceof ConnectSupersededError)) {
+          this.emitReconnectProgress({
+            attempt: 1,
+            phase: "failed",
+            reason: errorMessage(error),
+          });
+        }
+        throw error;
+      }
     })();
     this.connecting = connecting;
     void connecting.catch((error) => {
@@ -414,7 +442,7 @@ export class MobileRpcClient implements Pick<
   }
 
   private async establishConnection(token: object): Promise<RpcClient> {
-    let connection: IrohConnection | undefined;
+    let connection: RemoteConnection | undefined;
     const current = () =>
       this.connectionToken === token &&
       connection !== undefined &&
@@ -423,9 +451,7 @@ export class MobileRpcClient implements Pick<
       if (current()) this.emitRecovery(kind);
     };
     try {
-      connection = this.config.connectWorkspace
-        ? await this.config.connectWorkspace(recover)
-        : await this.restoreBootstrapSession(recover, token);
+      connection = await this.config.connectWorkspace(recover);
     } catch (error) {
       this.assertConnectionLifetime(token);
       throw error;
@@ -464,12 +490,15 @@ export class MobileRpcClient implements Pick<
           if (current()) this.setStatus(status);
         }),
       );
-      const stopProgress = connection.transport.onReconnectProgress?.(
-        (progress) => {
+      subscriptions.push(
+        connection.transport.onReconnectProgress((progress) => {
           if (current()) this.emitReconnectProgress(progress);
-        },
+        }),
+        connection.session.onClosed((closed) => {
+          if (current() && closed.reason === "trust-revoked")
+            this.handleTrustRevoked(closed.message);
+        }),
       );
-      if (stopProgress) subscriptions.push(stopProgress);
       for (const event of this.eventSubscriptions.keys())
         events.set(event, this.subscribeToRpcEvent(rpc, event));
       this.assertConnectionLifetime(token);
@@ -489,118 +518,6 @@ export class MobileRpcClient implements Pick<
     this.setStatus(connection.session.status());
     smokePhase("workspace-iroh-connected", { callerId: connection.callerId });
     return this.rpc;
-  }
-
-  private async restoreBootstrapSession(
-    onRecovery: (kind: RecoveryKind) => void | Promise<void>,
-    token: object,
-  ): Promise<IrohConnection> {
-    const stored = await loadShellCredential();
-    this.assertConnectionLifetime(token);
-    if (!stored) {
-      throw new Error("No stored Iroh shell credential — re-pair this device");
-    }
-    smokePhase("workspace-iroh-connect-start", {
-      phase: stored.phase,
-      endpointId:
-        stored.phase === "routed"
-          ? stored.workspacePairing.endpointId.slice(0, 12)
-          : stored.controlPairing.endpointId.slice(0, 12),
-    });
-    return reconnectMobileSession(
-      stored,
-      Platform.OS === "ios" ? "app-scheme" : "client-loopback",
-      onRecovery,
-    );
-  }
-
-  private async establishConnectionWithRetry(
-    token: object,
-    timeoutMs?: number | null,
-  ): Promise<RpcClient> {
-    const retry = this.config.initialConnectionRetry ?? {};
-    const startedAt = Date.now();
-    const maxMs =
-      typeof timeoutMs === "number"
-        ? timeoutMs
-        : typeof retry.maxMs === "number"
-          ? retry.maxMs
-          : 120_000;
-    const deadline = startedAt + maxMs;
-    const baseDelayMs =
-      typeof retry.delayMs === "number" && retry.delayMs >= 0
-        ? retry.delayMs
-        : 750;
-    const maxDelayMs =
-      typeof retry.maxDelayMs === "number" && retry.maxDelayMs >= 0
-        ? retry.maxDelayMs
-        : 5_000;
-    let attempt = 0;
-    let lastError: unknown = null;
-
-    while (Date.now() < deadline) {
-      this.assertConnectionLifetime(token);
-      attempt += 1;
-      this.emitReconnectProgress({
-        attempt,
-        phase: "connecting",
-        reason: attempt === 1 ? "initial connection" : "retry",
-      });
-      try {
-        const rpc = await this.establishConnection(token);
-        this.assertConnectionLifetime(token);
-        if (attempt > 1) {
-          smokePhase("workspace-iroh-retry-connected", { attempt });
-        }
-        return rpc;
-      } catch (error) {
-        this.assertConnectionLifetime(token);
-        // An intentional teardown (disconnect/dispose) landed
-        // mid-connect. Do NOT retry — that would resurrect a pipe the caller
-        // just asked to drop. Propagate so the awaiting init() unwinds.
-        if (error instanceof ConnectSupersededError) throw error;
-        lastError = error;
-        this.emitReconnectProgress({
-          attempt,
-          phase: "failed",
-          reason: error instanceof Error ? error.message : String(error),
-        });
-        // Setup owns and closes rejected attempts before they reach this loop.
-        // Failed cleanup is terminal: do not build another connection over it.
-        if (error instanceof MobileConnectionAggregateError) throw error;
-        this.assertConnectionLifetime(token);
-        const remainingMs = deadline - Date.now();
-        if (remainingMs <= 0) break;
-        const delayMs = Math.min(
-          baseDelayMs * 2 ** Math.max(0, attempt - 1),
-          maxDelayMs,
-          remainingMs,
-        );
-        smokePhase("workspace-iroh-retry", {
-          attempt,
-          delayMs,
-          message: errorMessage(error),
-        });
-        console.warn(
-          `[MobileRpcClient] Initial Iroh connection failed; retrying in ${delayMs}ms`,
-          error,
-        );
-        this.emitReconnectProgress({
-          attempt,
-          phase: "scheduled",
-          reason: errorMessage(error),
-          nextRetryInMs: delayMs,
-        });
-        await sleep(delayMs);
-      }
-    }
-
-    this.assertConnectionLifetime(token);
-    throw lastError instanceof Error
-      ? lastError
-      : new Error(
-          `Could not reach your workspace server after ${Math.round(maxMs / 1000)} seconds. It may be asleep or offline — retry, or re-pair only if the server was replaced.`,
-        );
   }
 
   private async teardown(): Promise<void> {
@@ -627,7 +544,7 @@ export class MobileRpcClient implements Pick<
   }
 
   private retireResources(
-    connection: IrohConnection | null,
+    connection: RemoteConnection | null,
     subscriptions: Array<() => void>,
   ): Promise<void> {
     if (!connection && subscriptions.length === 0)
@@ -657,7 +574,7 @@ export class MobileRpcClient implements Pick<
   }
 
   private async retireAttemptAndThrow(
-    connection: IrohConnection,
+    connection: RemoteConnection,
     error: unknown,
     subscriptions: Array<() => void> = [],
   ): Promise<never> {
@@ -714,6 +631,17 @@ export class MobileRpcClient implements Pick<
     for (const listener of this.statusListeners) listener(status);
   }
 
+  /** The host withdrew this client's trust: end the connection and never reopen it. */
+  private handleTrustRevoked(message: string): void {
+    this.trustRevoked ??= new ClientTrustRevokedError(message);
+    this.connectionToken = null;
+    this.connecting = null;
+    this.setStatus("disconnected");
+    void this.closeConnectionResources().catch((error) =>
+      this.reportTransportFailure("Trust-revoked teardown failed", error),
+    );
+  }
+
   /**
    * Fire the recovery listeners for `kind`. Driven by the Iroh session's
    * post-auth recovery signal: "resubscribe" on
@@ -753,16 +681,12 @@ class ConnectSupersededError extends Error {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 async function closeConnectionResources(
-  connection: IrohConnection | null,
+  connection: RemoteConnection | null,
   subscriptions: Array<() => void>,
 ): Promise<void> {
   const failures: unknown[] = [];

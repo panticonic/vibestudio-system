@@ -2,7 +2,7 @@ import {
   WorkspaceMembersCard,
   type WorkspaceMember,
 } from "./WorkspaceMembersCard";
-import type { MobileHubWorkspace } from "@vibestudio/mobile-iroh";
+import type { HubWorkspaceEntry as MobileHubWorkspace } from "@vibestudio/service-schemas/hubControl";
 import { workspaceName as displayWorkspaceName } from "../services/workspaceName";
 import { useEffect, useState } from "react";
 import {

@@ -7,6 +7,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BuildProviderInput } from "@vibestudio/shared/buildProvider";
 import { writeProjectedMetroConfig } from "./metroConfig.js";
 
+const mobileClient: BuildProviderInput["client"] = {
+  id: "browser",
+  runtime: "react-native",
+  hostAbi: "rn-host-6",
+  entry: "App.tsx",
+};
+
 const temporaryRoots: string[] = [];
 const require = createRequire(import.meta.url);
 
@@ -20,18 +27,10 @@ describe("React Native provider Metro projection", () => {
   it("uses only source and dependency paths supplied by Build V2", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "rn-metro-projection-"));
     temporaryRoots.push(root);
-    const sourcePath = path.join(root, "source", "apps", "mobile");
+    const sourcePath = path.join(root, "source", "clients", "mobile-browser");
     const outputPath = path.join(root, "output");
     fs.mkdirSync(sourcePath, { recursive: true });
     fs.mkdirSync(outputPath, { recursive: true });
-    fs.writeFileSync(
-      path.join(sourcePath, "native-module-policy.json"),
-      JSON.stringify({
-        blockedImports: {
-          "react-native-keychain": ["src/services/pushNotifications.ts"],
-        },
-      }),
-    );
     const input: BuildProviderInput = {
       target: "react-native",
       unitName: "@workspace-clients/mobile-browser",
@@ -44,13 +43,7 @@ describe("React Native provider Metro projection", () => {
         },
       },
       effectiveVersion: "ev-test",
-      manifest: {
-        app: {
-          target: "react-native",
-          renderer: "App.tsx",
-          nativeModulePolicy: "native-module-policy.json",
-        },
-      },
+      client: mobileClient,
     };
 
     const configPath = writeProjectedMetroConfig(input, outputPath);
@@ -63,6 +56,7 @@ describe("React Native provider Metro projection", () => {
       JSON.stringify(path.resolve("packages/mobile-iroh")),
     );
     expect(config).toContain("react-native-keychain");
+    expect(config).not.toContain("nativeModulePolicy");
     expect(config).not.toContain("process.cwd");
     expect(config).not.toContain("VIBESTUDIO_REPO_ROOT");
     expect(config).not.toContain("workspaceRoot");
@@ -105,7 +99,7 @@ describe("React Native provider Metro projection", () => {
         modules: { "@workspace-clients/mobile-browser": sourcePath },
       },
       effectiveVersion: "ev-test",
-      manifest: { app: { target: "react-native", renderer: "App.tsx" } },
+      client: mobileClient,
     };
 
     const configPath = writeProjectedMetroConfig(input, outputPath);
@@ -151,16 +145,12 @@ describe("React Native provider Metro projection", () => {
   it("lets Metro resolve exact projected package subpath exports", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "rn-metro-exports-"));
     temporaryRoots.push(root);
-    const sourcePath = path.join(root, "apps", "mobile");
+    const sourcePath = path.join(root, "clients", "mobile-browser");
     const runtimePath = path.join(root, "packages", "runtime");
     const outputPath = path.join(root, "output");
     fs.mkdirSync(sourcePath, { recursive: true });
     fs.mkdirSync(path.join(runtimePath, "src", "shared"), { recursive: true });
     fs.mkdirSync(outputPath, { recursive: true });
-    fs.writeFileSync(
-      path.join(sourcePath, "native-module-policy.json"),
-      '{"blockedImports":{}}',
-    );
     fs.writeFileSync(
       path.join(runtimePath, "package.json"),
       JSON.stringify({
@@ -184,7 +174,7 @@ describe("React Native provider Metro projection", () => {
           modules: { "@workspace/runtime": runtimePath },
         },
         effectiveVersion: "ev-test",
-        manifest: { app: { nativeModulePolicy: "native-module-policy.json" } },
+        client: mobileClient,
       },
       outputPath,
     );
@@ -216,7 +206,7 @@ describe("React Native provider Metro projection", () => {
     );
   });
 
-  it("keeps native imports with their exact platform initialization and session owners", () => {
+  it("blocks host-owned native modules from every importer", () => {
     const sourcePath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       "../../clients/mobile-browser",
@@ -238,13 +228,7 @@ describe("React Native provider Metro projection", () => {
           },
         },
         effectiveVersion: "ev-test",
-        manifest: {
-          app: {
-            target: "react-native",
-            renderer: "App.tsx",
-            nativeModulePolicy: "native-module-policy.json",
-          },
-        },
+        client: mobileClient,
       },
       outputPath,
     );
@@ -261,58 +245,46 @@ describe("React Native provider Metro projection", () => {
       };
     };
     const resolveRequest = vi.fn((_context, target) => target);
+    const from = (file: string) => ({
+      originModulePath: path.join(sourcePath, file),
+      resolveRequest,
+    });
 
+    // The transport-free Hermes polyfills stay importable; nothing else of the
+    // transport package does, from any file.
     expect(
       config.resolver.resolveRequest(
-        {
-          originModulePath: path.join(
-            sourcePath,
-            "src/services/workspaceDirectory.ts",
-          ),
-          resolveRequest,
-        },
-        "@vibestudio/mobile-iroh",
-        "android",
-      ),
-    ).toBe("@vibestudio/mobile-iroh");
-    expect(
-      config.resolver.resolveRequest(
-        {
-          originModulePath: path.join(sourcePath, "src/setupGlobals.ts"),
-          resolveRequest,
-        },
+        from("src/setupGlobals.ts"),
         "@vibestudio/mobile-iroh/polyfills",
         "android",
       ),
     ).toBe("@vibestudio/mobile-iroh/polyfills");
-    expect(() =>
+    for (const blocked of [
+      "@vibestudio/mobile-iroh",
+      "@vibestudio/mobile-iroh/connectLink",
+      "@vibestudio/mobile-iroh/bundleDelivery",
+      "react-native-keychain",
+      "@notifee/react-native",
+      "@react-native-firebase/messaging",
+      "@react-native-async-storage/async-storage",
+      "@react-native-clipboard/clipboard",
+    ]) {
+      for (const importer of ["App.tsx", "src/services/workspaceDirectory.ts"]) {
+        expect(() =>
+          config.resolver.resolveRequest(from(importer), blocked, "android"),
+        ).toThrow(
+          `Import of host-owned native module "${blocked}" from client code is blocked`,
+        );
+      }
+    }
+    // A client reaches those capabilities through the host API.
+    expect(
       config.resolver.resolveRequest(
-        {
-          originModulePath: path.join(
-            sourcePath,
-            "src/services/workspaceSelection.ts",
-          ),
-          resolveRequest,
-        },
-        "@vibestudio/mobile-iroh",
+        from("App.tsx"),
+        "@vibestudio/rn-client-api",
         "android",
       ),
-    ).toThrow('Direct import of native module "@vibestudio/mobile-iroh"');
-    expect(() =>
-      config.resolver.resolveRequest(
-        {
-          originModulePath: path.join(
-            sourcePath,
-            "src/services/workspaceSelection.ts",
-          ),
-          resolveRequest,
-        },
-        "@vibestudio/mobile-iroh/polyfills",
-        "android",
-      ),
-    ).toThrow(
-      'Direct import of native module "@vibestudio/mobile-iroh/polyfills"',
-    );
+    ).toBe("@vibestudio/rn-client-api");
 
     // No filesystem API is installed on mobile. Preserve the actual resolver
     // failure instead of masking the unsupported import with an empty stub.

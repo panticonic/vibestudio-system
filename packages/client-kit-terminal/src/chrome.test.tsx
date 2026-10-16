@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 // Ink reads CI at load time; the harness clears it first, so it is imported before anything that loads Ink.
 import { renderToText } from "./testing/renderToText.js";
 import type { WorkspaceModelState } from "@workspace/workspace-core";
-import { ClientUpdatePrompt, clientUpdateButtons } from "./ClientUpdatePrompt.js";
+import {
+  ClientUpdatePrompt,
+  clientUpdateButtons,
+  terminalPendingUpdate,
+} from "./ClientUpdatePrompt.js";
 import { ConnectionStatus, connectionStatusText } from "./ConnectionStatus.js";
 import { WorkspacePicker, workspacePickerItems } from "./WorkspacePicker.js";
 
@@ -91,5 +95,24 @@ describe("terminal update prompt", () => {
     expect(frame).toContain("Update ready");
     expect(frame).toContain("clients/chat-terminal v1 → v2 is ready to install.");
     expect(frame).toContain("[r] Restart now");
+  });
+
+  it("shows what a terminal host reports as ready, offering no rollback", () => {
+    const pending = terminalPendingUpdate(
+      { id: "browser", source: "clients/terminal-browser" },
+      { buildKey: "b3", effectiveVersion: "3" }
+    );
+    expect(pending).toEqual({
+      clientId: "browser",
+      source: "clients/terminal-browser",
+      runtime: "terminal",
+      buildKey: "b3",
+      toVersion: "3",
+      fromVersion: null,
+      canRollback: false,
+    });
+    expect(renderToText(<ClientUpdatePrompt update={pending} width={80} />)).toContain(
+      "browser v3 is ready to install."
+    );
   });
 });

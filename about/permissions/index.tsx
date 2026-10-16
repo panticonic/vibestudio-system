@@ -216,7 +216,7 @@ type ApprovalDecisionRecord = {
   granted: boolean;
   resolvedAt: number;
   resolvedBy: { handle: string; deviceLabel?: string };
-  resolvedVia?: "shell" | "mobile-notification" | "app" | "server";
+  resolvedVia?: "shell" | "mobile-notification" | "client" | "server";
   requestedBy: { callerId: string; callerKind?: string; repoPath?: string };
   resource?: { capability?: string; value?: string; key?: string };
   grantScopeStored?: string | null;

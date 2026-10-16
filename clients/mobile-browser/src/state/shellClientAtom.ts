@@ -1,7 +1,7 @@
 /**
  * Shell client atom -- Jotai atom holding the active ShellClient instance.
  *
- * Set by LoginScreen after successful connection, read by MainScreen
+ * Set by ConnectScreen after successful connection, read by MainScreen
  * and other components that need access to the PanelShell.
  */
 

@@ -15,12 +15,12 @@ describe("native dialog visibility", () => {
   beforeEach(() => {
     setShellOverlayActive.mockReset();
     Object.assign(globalThis, {
-      __vibestudioApp: { setShellOverlayActive },
+      __vibestudioClient: { setShellOverlayActive },
     });
   });
 
   afterEach(() => {
-    delete (globalThis as { __vibestudioApp?: unknown }).__vibestudioApp;
+    delete (globalThis as { __vibestudioClient?: unknown }).__vibestudioClient;
   });
 
   it("writes ordered compositor state directly through the desktop host", () => {

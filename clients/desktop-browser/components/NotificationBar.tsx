@@ -13,7 +13,7 @@ import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/wo
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Flex, Text, Button, Badge } from "@radix-ui/themes";
+import { Flex, Text, Button, Badge, TextField } from "@radix-ui/themes";
 import {
   InfoCircledIcon,
   CheckCircledIcon,
@@ -174,12 +174,17 @@ export function NotificationBar() {
   useDirectShellEvent("notification:dismiss", handleDismissRequest);
 
   const handleAction = useCallback(
-    async (notificationId: string, action: NonNullable<NotificationPayload["actions"]>[number]) => {
+    async (
+      notificationId: string,
+      action: NonNullable<NotificationPayload["actions"]>[number],
+      text?: string
+    ) => {
       const actionId = action.id;
       // Main-side actions can fail (updater unavailable, OAuth cancel while
       // disconnected). Keep the original notification visible in that case.
       try {
-        await notification.reportAction(notificationId, actionId);
+        if (text === undefined) await notification.reportAction(notificationId, actionId);
+        else await notification.reportAction(notificationId, actionId, text);
       } catch (err) {
         showOperationError(notificationId, err);
         return;
@@ -349,11 +354,18 @@ function ToastNotification({
   queuedNotifications: NotificationPayload[];
   expanded: boolean;
   onToggleExpanded: (id: string) => void;
-  onAction: (id: string, action: NonNullable<NotificationPayload["actions"]>[number]) => void;
+  onAction: (
+    id: string,
+    action: NonNullable<NotificationPayload["actions"]>[number],
+    text?: string
+  ) => void;
   onDismiss: (id: string) => void;
   operationError?: string;
   onFix: (notification: NotificationPayload) => void;
 }) {
+  // An action that takes reply text opens a field here; the reply is reported with the action.
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
   const multilineMessage = notification.message?.includes("\n") ? notification.message : null;
   const summaryMessage = firstLine(notification.message);
   const hasExpandableContent =
@@ -417,16 +429,43 @@ function ToastNotification({
               Details
             </Button>
           )}
-          {notification.actions?.map((action) => (
-            <Button
-              key={action.id}
-              size="1"
-              variant={action.variant ?? "soft"}
-              onClick={() => onAction(notification.id, action)}
-            >
-              {action.label}
-            </Button>
-          ))}
+          {notification.actions?.map((action) =>
+            action.input === "text" && replyingTo === action.id ? (
+              <form
+                key={action.id}
+                style={{ display: "flex", gap: 4 }}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (replyText.trim()) onAction(notification.id, action, replyText);
+                }}
+              >
+                <TextField.Root
+                  size="1"
+                  autoFocus
+                  aria-label={action.label}
+                  placeholder={action.label}
+                  value={replyText}
+                  onChange={(event) => setReplyText(event.target.value)}
+                />
+                <Button size="1" type="submit" disabled={!replyText.trim()}>
+                  Send
+                </Button>
+              </form>
+            ) : (
+              <Button
+                key={action.id}
+                size="1"
+                variant={action.variant ?? "soft"}
+                onClick={() =>
+                  action.input === "text"
+                    ? setReplyingTo(action.id)
+                    : onAction(notification.id, action)
+                }
+              >
+                {action.label}
+              </Button>
+            )
+          )}
           <Button
             size="1"
             variant="ghost"

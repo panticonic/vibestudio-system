@@ -1,4 +1,4 @@
-import type { MobileHubWorkspace } from "@vibestudio/mobile-iroh";
+import type { HubWorkspaceEntry as MobileHubWorkspace } from "@vibestudio/service-schemas/hubControl";
 import type { MobileWorkspaceDirectory } from "./workspaceDirectory";
 
 export interface MobileWorkspaceSelectionDependencies {

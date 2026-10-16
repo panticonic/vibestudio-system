@@ -1,18 +1,18 @@
 import type { SettingsSection } from "@vibestudio/shared/shellSurface";
 import { createStackNavigator } from "@workspace/mobile-navigation";
-import { LoginScreen } from "../components/LoginScreen";
+import { ConnectScreen } from "../components/ConnectScreen";
 
 declare const require: (moduleName: string) => unknown;
 
 export type RootStackParamList = {
-  Login: undefined;
+  Connect: undefined;
   Main: undefined;
   Settings: { workspaceId?: string; section?: SettingsSection } | undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
 
-// Login is the first-paint route. React Navigation's getComponent boundary
+// Connect is the first-paint route. React Navigation's getComponent boundary
 // keeps the much larger authenticated shell (drawer, WebViews, panel bridge)
 // and settings screen from being evaluated until the user actually opens them.
 const getMainNavigator = () =>
@@ -31,10 +31,10 @@ const getSettingsScreen = () =>
 export function RootNavigator() {
   return (
     <Stack.Navigator
-      initialRouteName="Login"
+      initialRouteName="Connect"
       screenOptions={{ headerShown: false }}
     >
-      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Connect" component={ConnectScreen} />
       <Stack.Screen name="Main" getComponent={getMainNavigator} />
       <Stack.Screen name="Settings" getComponent={getSettingsScreen} />
     </Stack.Navigator>

@@ -50,7 +50,7 @@ export interface TerminalSettingsStore {
 
 const SESSIONS_CHANGED_EVENT = "terminal-apps:sessions-changed";
 
-export function createTerminalSessions(rpc: RpcClient): TerminalSessions & TerminalSettingsStore {
+export function createTerminalSessions(rpc: RpcClient): TerminalSessions {
   const events = new EventsClient(rpc);
   let listeners = 0;
   let admission: Promise<void> = Promise.resolve();
@@ -59,9 +59,6 @@ export function createTerminalSessions(rpc: RpcClient): TerminalSessions & Termi
     launch: (request) => rpc.call("main", mainRpcMethods["terminalApps.launch"], [request]),
     resume: (request) => rpc.call("main", mainRpcMethods["terminalApps.resume"], [request]),
     close: (sessionId) => rpc.call("main", mainRpcMethods["terminalApps.close"], [sessionId]),
-    getSettings: () => rpc.call("main", mainRpcMethods["terminalApps.getSettings"], []),
-    setSettings: (settings) =>
-      rpc.call("main", mainRpcMethods["terminalApps.setSettings"], [settings]),
     onChange(listener) {
       const stop = events.on(SESSIONS_CHANGED_EVENT, (payload) => listener(payload.sessions));
       listeners += 1;

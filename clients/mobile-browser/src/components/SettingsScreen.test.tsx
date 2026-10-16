@@ -1,13 +1,12 @@
 import { workspaceDirectoryAtom } from "../state/workspaceDirectoryAtom";
-import { Alert, NativeModules, ScrollView } from "react-native";
+import { Alert, ScrollView } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
-import Clipboard from "@react-native-clipboard/clipboard";
+import { installClientApi } from "@workspace/client-kit-native/host";
 import {
-  clearShellCredential,
-  loadShellCredential,
-  persistStoredMobileConnection,
-} from "@vibestudio/mobile-iroh";
+  createFakeClientHost,
+  type FakeClientHost,
+} from "@workspace/client-kit-native/testing";
 import { SettingsScreen } from "./SettingsScreen";
 import { BrowserKitProvider } from "../state/BrowserKitProvider";
 import { connectionStatusAtom } from "../state/connectionAtoms";
@@ -17,18 +16,11 @@ import {
   mobileWorkspaceSelectionDependencies,
   selectMobileWorkspace,
 } from "../services/workspaceSelection";
-import { setApprovedAppCapabilities } from "../services/appCapabilities";
 
 jest.mock("../services/workspaceSelection", () => ({
   listMobileWorkspaces: jest.fn(),
   mobileWorkspaceSelectionDependencies: jest.fn((control) => ({ control })),
   selectMobileWorkspace: jest.fn(),
-}));
-
-jest.mock("@vibestudio/mobile-iroh", () => ({
-  clearShellCredential: jest.fn(async () => undefined),
-  loadShellCredential: jest.fn(),
-  persistStoredMobileConnection: jest.fn(async () => undefined),
 }));
 
 jest.mock("./WorkspaceConnectionsSection", () => ({
@@ -49,19 +41,7 @@ const dependenciesMock =
   mobileWorkspaceSelectionDependencies as jest.MockedFunction<
     typeof mobileWorkspaceSelectionDependencies
   >;
-const clearCredentialMock = clearShellCredential as jest.MockedFunction<
-  typeof clearShellCredential
->;
-const loadCredentialMock = loadShellCredential as jest.MockedFunction<
-  typeof loadShellCredential
->;
-const persistCredentialMock =
-  persistStoredMobileConnection as jest.MockedFunction<
-    typeof persistStoredMobileConnection
-  >;
-const nativeHost = NativeModules["VibestudioMobileHost"] as {
-  resetToNativeBootstrap: jest.Mock;
-};
+let host: FakeClientHost;
 
 const workspaces = [
   {
@@ -149,44 +129,12 @@ function renderSettings(section?: "devices" | "connection") {
 }
 
 describe("SettingsScreen workspace selector", () => {
-  beforeEach(() => {
-    setApprovedAppCapabilities(["clipboard"]);
-    (Clipboard.getString as jest.Mock).mockReset().mockResolvedValue("");
-    (Clipboard.hasImage as jest.Mock).mockReset().mockResolvedValue(false);
+  beforeEach(async () => {
+    host = await createFakeClientHost({ granted: ["device-session", "clipboard"] });
+    installClientApi(host.api);
     listMock.mockReset().mockResolvedValue(workspaces);
     selectMock.mockReset().mockResolvedValue({} as never);
     dependenciesMock.mockClear();
-    clearCredentialMock.mockReset().mockResolvedValue(undefined);
-    loadCredentialMock.mockReset().mockResolvedValue({
-      schemaVersion: 5,
-      transport: "iroh",
-      phase: "routed",
-      endpointIdentityId: "identity-1",
-      credential: {
-        deviceId: `dev_${"d".repeat(24)}`,
-        refreshToken: "r".repeat(43),
-      },
-      controlPairing: {
-        endpointId: "aa".repeat(32),
-        relays: ["https://relay.example/"],
-        v: 5,
-      },
-      workspacePairing: {
-        endpointId: "bb".repeat(32),
-        relays: ["https://relay.example/"],
-        v: 5,
-      },
-      selectedWorkspaceId: "ws-a",
-      pairedAt: 123,
-    });
-    persistCredentialMock.mockReset().mockResolvedValue(undefined);
-    nativeHost.resetToNativeBootstrap
-      .mockReset()
-      .mockResolvedValue({ reloading: true });
-  });
-
-  afterEach(() => {
-    setApprovedAppCapabilities([]);
   });
 
   it.each(["devices", "connection"] as const)(
@@ -229,27 +177,12 @@ describe("SettingsScreen workspace selector", () => {
     expect(view.getByText("Profile saved.")).toBeTruthy();
   });
 
-  it("sets a new avatar from the clipboard and previews it before save", async () => {
-    const avatar = `data:image/png;base64,${"A".repeat(32)}`;
-    (Clipboard.getString as jest.Mock).mockResolvedValueOnce(avatar);
+  it("offers no clipboard avatar paste: the host API cannot read the clipboard", async () => {
     const view = renderSettings();
     await waitFor(() =>
-      expect(view.getByLabelText("Paste profile avatar")).toBeTruthy(),
+      expect(view.getByLabelText("Display name")).toBeTruthy(),
     );
-
-    fireEvent.press(view.getByLabelText("Paste profile avatar"));
-    await waitFor(() =>
-      expect(
-        view.getByLabelText("Profile avatar preview").props.source,
-      ).toEqual({ uri: avatar }),
-    );
-    fireEvent.press(view.getByTestId("profile-save"));
-
-    await waitFor(() =>
-      expect(view.shellClient.updateAccountProfile).toHaveBeenCalledWith(
-        expect.objectContaining({ avatar }),
-      ),
-    );
+    expect(view.queryByLabelText("Paste profile avatar")).toBeNull();
   });
 
   it("keeps the profile form usable when server validation rejects a save", async () => {
@@ -339,8 +272,10 @@ describe("SettingsScreen workspace selector", () => {
     ).toBeTruthy();
 
     fireEvent.press(view.getByText("Copy link"));
-    expect(Clipboard.setString).toHaveBeenCalledWith(
-      "https://vibestudio.app/p#device-invite",
+    await waitFor(() =>
+      expect(host.callsOf("clipboard.setString")).toEqual([
+        ["https://vibestudio.app/p#device-invite"],
+      ]),
     );
 
     await waitFor(() =>
@@ -381,8 +316,7 @@ describe("SettingsScreen workspace selector", () => {
     expect(listMock).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the live workspace intact when secure disconnect cannot commit", async () => {
-    clearCredentialMock.mockRejectedValueOnce(new Error("keychain locked"));
+  it("asks the host to forget the pairing, then releases the live workspace", async () => {
     const alert = jest
       .spyOn(Alert, "alert")
       .mockImplementation(() => undefined);
@@ -397,19 +331,21 @@ describe("SettingsScreen workspace selector", () => {
         ?.onPress?.();
     });
 
-    await waitFor(() => expect(clearCredentialMock).toHaveBeenCalledTimes(1));
-    expect(nativeHost.resetToNativeBootstrap).not.toHaveBeenCalled();
-    expect(view.shellClient.dispose).not.toHaveBeenCalled();
-    expect(alert.mock.calls[1]?.[0]).toBe("Could not disconnect securely");
+    await waitFor(() => expect(view.shellClient.dispose).toHaveBeenCalledTimes(1));
+    expect(host.callsOf("device.reset")).toHaveLength(1);
     alert.mockRestore();
   });
 
-  it("restores the current credential when native reset fails", async () => {
-    nativeHost.resetToNativeBootstrap.mockRejectedValueOnce(
-      new Error("reload unavailable"),
-    );
-    const previous = await loadCredentialMock();
-    loadCredentialMock.mockResolvedValueOnce(previous);
+  it("keeps the live workspace intact when the host cannot reset the device", async () => {
+    host = await createFakeClientHost({
+      granted: ["device-session"],
+      handlers: {
+        "device.reset": () => {
+          throw new Error("the host could not clear the pairing");
+        },
+      },
+    });
+    installClientApi(host.api);
     const alert = jest
       .spyOn(Alert, "alert")
       .mockImplementation(() => undefined);
@@ -425,10 +361,10 @@ describe("SettingsScreen workspace selector", () => {
     });
 
     await waitFor(() =>
-      expect(persistCredentialMock).toHaveBeenCalledWith(previous),
+      expect(alert.mock.calls[1]?.[0]).toBe("Could not disconnect securely"),
     );
+    expect(alert.mock.calls[1]?.[1]).toBe("the host could not clear the pairing");
     expect(view.shellClient.dispose).not.toHaveBeenCalled();
-    expect(alert.mock.calls[1]?.[0]).toBe("Could not open pairing");
     alert.mockRestore();
   });
 });

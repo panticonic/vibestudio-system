@@ -7,7 +7,7 @@ import {
   type RpcConnectionStatus,
   type RpcEnvelope,
 } from "@vibestudio/rpc";
-import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
+import type { RemoteSession } from "@vibestudio/rn-client-api";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { HOST_COMMAND_CONTRIBUTION_EVENT } from "@vibestudio/shared/hostCommands";
 
@@ -30,8 +30,8 @@ function createAdapter(
 }
 
 function makePanelSession(
-  overrides: Partial<IrohClientSession> = {},
-): IrohClientSession {
+  overrides: Partial<RemoteSession> = {},
+): RemoteSession {
   return {
     callerId: jest.fn(() => "panel:runtime-a"),
     isClosed: jest.fn(() => false),
@@ -40,7 +40,7 @@ function makePanelSession(
     send: jest.fn(async () => undefined),
     status: jest.fn(() => "connected" as RpcConnectionStatus),
     ...overrides,
-  } as unknown as IrohClientSession;
+  } as unknown as RemoteSession;
 }
 
 function panelRequestEnvelope(requestId: string): RpcEnvelope {
@@ -452,7 +452,7 @@ describe("bridgeAdapter upload streams", () => {
 
   function makeUploadFixture(overrides?: {
     streamReadable?: jest.Mock;
-    session?: Partial<IrohClientSession>;
+    session?: Partial<RemoteSession>;
   }) {
     const seen: { body?: Uint8Array; envelope?: RpcEnvelope } = {};
     const streamReadable =
@@ -889,7 +889,7 @@ describe("bridgeAdapter native app navigation", () => {
 
   it("does not navigate or reply into a replacement after session validation awaits", async () => {
     const f = fixture();
-    let resolve!: (session: IrohClientSession) => void;
+    let resolve!: (session: RemoteSession) => void;
     f.openPanelSession.mockImplementationOnce(
       () =>
         new Promise((done) => {

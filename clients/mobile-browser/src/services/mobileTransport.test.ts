@@ -7,39 +7,16 @@ import type {
   RpcEventContext,
 } from "@vibestudio/rpc";
 import type { RecoveryKind } from "@vibestudio/rpc/protocol/recoveryCoordinator";
-import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
+import type { RemoteConnection, RemoteSession } from "@vibestudio/rn-client-api";
 import {
-  loadShellCredential,
-  MobileConnectionAggregateError,
-  reconnectMobileSession,
-  type StoredRoutedMobileConnection,
-  type IrohConnection,
-} from "@vibestudio/mobile-iroh";
-import {
+  ClientTrustRevokedError,
   isTransientMobileTransportFailure,
+  MobileConnectionAggregateError,
   MobileRpcClient,
   type ReconnectProgress,
 } from "./mobileTransport";
 
-jest.mock("@vibestudio/mobile-iroh", () => ({
-  loadShellCredential: jest.fn(),
-  MobileConnectionAggregateError: class MobileConnectionAggregateError extends Error {
-    errors: readonly unknown[];
-    constructor(errors: readonly unknown[], message: string) {
-      super(message);
-      this.errors = errors;
-    }
-  },
-  reconnectMobileSession: jest.fn(),
-}));
-
-const mockLoadShellCredential = loadShellCredential as jest.MockedFunction<
-  typeof loadShellCredential
->;
-const mockReconnectMobileSession =
-  reconnectMobileSession as jest.MockedFunction<typeof reconnectMobileSession>;
 const DEVICE_ID = `dev_${"d".repeat(24)}`;
-const REFRESH_TOKEN = "r".repeat(43);
 
 describe("isTransientMobileTransportFailure", () => {
   it("recognizes structured connection and Iroh response timeout failures", () => {
@@ -78,26 +55,6 @@ describe("isTransientMobileTransportFailure", () => {
   });
 });
 
-const storedCredential: StoredRoutedMobileConnection = {
-  schemaVersion: 5,
-  transport: "iroh",
-  phase: "routed",
-  endpointIdentityId: "identity-1",
-  credential: { deviceId: DEVICE_ID, refreshToken: REFRESH_TOKEN },
-  controlPairing: {
-    endpointId: "aa".repeat(32),
-    relays: ["https://relay.example/"],
-    v: 5,
-  },
-  workspacePairing: {
-    endpointId: "bb".repeat(32),
-    relays: ["https://relay.example/"],
-    v: 5,
-  },
-  selectedWorkspaceId: "ws-a",
-  pairedAt: 123,
-};
-
 // Overrides are test doubles, not RpcClients: `call` and `stream` are generic
 // in their result, which no jest.fn can satisfy. Key names stay checked so a
 // typo is still an error, and the result is cast once, below.
@@ -116,9 +73,7 @@ function makeRpc(
   } as unknown as RpcClient;
 }
 
-function makeSession(
-  overrides: Partial<IrohClientSession> = {},
-): IrohClientSession {
+function makeSession(overrides: Partial<RemoteSession> = {}): RemoteSession {
   return {
     callerId: jest.fn(() => `shell:${DEVICE_ID}`),
     isClosed: jest.fn(() => false),
@@ -130,15 +85,16 @@ function makeSession(
     stream: jest.fn(),
     streamReadable: jest.fn(),
     ready: jest.fn(async () => undefined),
+    onClosed: jest.fn(() => jest.fn()),
     ...overrides,
-  } as unknown as IrohClientSession;
+  } as unknown as RemoteSession;
 }
 
 // Overrides are doubles, so they are accepted by key name and the assembled
 // connection is cast once — the same contract as makeRpc above.
 function makeConnection(
-  overrides: Partial<Record<keyof IrohConnection, unknown>> = {},
-): IrohConnection {
+  overrides: Partial<Record<keyof RemoteConnection, unknown>> = {},
+): RemoteConnection {
   const session = overrides.session ?? makeSession();
   return {
     callerId: `shell:${DEVICE_ID}`,
@@ -150,19 +106,31 @@ function makeConnection(
       overrides.transport ??
       ({
         openSession: jest.fn(),
-      } as unknown as IrohConnection["transport"]),
+        onReconnectProgress: jest.fn(() => jest.fn()),
+      } as unknown as RemoteConnection["transport"]),
     close: jest.fn(async () => undefined),
     ...overrides,
-  } as unknown as IrohConnection;
+  } as unknown as RemoteConnection;
 }
 
-describe("MobileRpcClient Iroh transport", () => {
+/** A client whose account opens `connections` in order (the last one repeats). */
+function clientOver(...connections: RemoteConnection[]): {
+  client: MobileRpcClient;
+  factory: jest.Mock;
+} {
+  let next = 0;
+  const factory = jest.fn(
+    async () => connections[Math.min(next++, connections.length - 1)]!,
+  );
+  return { client: new MobileRpcClient({ connectWorkspace: factory }), factory };
+}
+
+describe("MobileRpcClient host transport", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockLoadShellCredential.mockResolvedValue(storedCredential);
   });
 
-  it("loads the stored Iroh credential, reconnects, and delegates RPC calls", async () => {
+  it("opens the account's workspace session and delegates RPC calls", async () => {
     const call = jest.fn(
       async (
         _target: string,
@@ -174,18 +142,11 @@ describe("MobileRpcClient Iroh transport", () => {
     const rpc = makeRpc({
       call,
     });
-    const connection = makeConnection({ rpc });
-    mockReconnectMobileSession.mockResolvedValue(connection);
-    const client = new MobileRpcClient({});
+    const { client, factory } = clientOver(makeConnection({ rpc }));
 
     await client.connectAndWait();
 
-    expect(mockLoadShellCredential).toHaveBeenCalledTimes(1);
-    expect(mockReconnectMobileSession).toHaveBeenCalledWith(
-      storedCredential,
-      expect.stringMatching(/^(app-scheme|client-loopback)$/),
-      expect.any(Function),
-    );
+    expect(factory).toHaveBeenCalledTimes(1);
     expect(client.selfId).toBe(`shell:${DEVICE_ID}`);
     expect(client.status).toBe("connected");
     await expect(
@@ -216,10 +177,7 @@ describe("MobileRpcClient Iroh transport", () => {
       rpc: secondRpc,
       hubControlRpc: accountRpc,
     });
-    mockReconnectMobileSession
-      .mockResolvedValueOnce(firstConnection)
-      .mockResolvedValueOnce(secondConnection);
-    const client = new MobileRpcClient({});
+    const { client } = clientOver(firstConnection, secondConnection);
     const handler = jest.fn(async () => undefined);
 
     client.expose("mobileBrowserPrivacyPresentation.open", handler);
@@ -251,7 +209,7 @@ describe("MobileRpcClient Iroh transport", () => {
   });
 
   it("rejects duplicate exposed shell methods instead of replacing live authority", () => {
-    const client = new MobileRpcClient({});
+    const { client } = clientOver(makeConnection());
     client.expose(
       "mobileBrowserPrivacyPresentation.open",
       async () => undefined,
@@ -284,13 +242,12 @@ describe("MobileRpcClient Iroh transport", () => {
         _options?: unknown,
       ) => ({ hub: true }),
     );
-    mockReconnectMobileSession.mockResolvedValue(
+    const { client } = clientOver(
       makeConnection({
         rpc: makeRpc({ call: workspaceCall }),
         hubControlRpc: makeRpc({ call: hubCall }),
       }),
     );
-    const client = new MobileRpcClient({});
 
     await client.connectAndWait();
 
@@ -333,26 +290,35 @@ describe("MobileRpcClient Iroh transport", () => {
     ).toBe(true);
   });
 
-  it("retries transient initial Iroh reconnect failures", async () => {
-    const warnSpy = jest
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
-    const connection = makeConnection();
-    mockReconnectMobileSession
+  it("makes a failed open one terminal job: reported once, never retried by the client", async () => {
+    const error = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const factory = jest
+      .fn()
       .mockRejectedValueOnce(new Error("relay warming up"))
-      .mockResolvedValueOnce(connection);
-    const client = new MobileRpcClient({
-      initialConnectionRetry: { maxMs: 1_000, delayMs: 1, maxDelayMs: 1 },
-    });
+      .mockResolvedValueOnce(makeConnection());
+    const client = new MobileRpcClient({ connectWorkspace: factory });
+    const progress = jest.fn();
+    client.onReconnectProgress(progress);
 
     try {
-      await expect(client.connectAndWait()).resolves.toBeUndefined();
-    } finally {
-      warnSpy.mockRestore();
-    }
+      await expect(client.connectAndWait()).rejects.toThrow("relay warming up");
+      await expect(client.call("main", testRpcMethods.read, [])).rejects.toThrow(
+        "relay warming up",
+      );
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(client.status).toBe("disconnected");
+      expect(
+        progress.mock.calls.filter(([entry]) => entry.phase === "failed"),
+      ).toHaveLength(2);
 
-    expect(mockReconnectMobileSession).toHaveBeenCalledTimes(2);
-    expect(client.status).toBe("connected");
+      // Only an explicit new intent opens another session.
+      client.reconnect();
+      await client.connectAndWait();
+      expect(factory).toHaveBeenCalledTimes(2);
+      expect(client.status).toBe("connected");
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("forwards transport reconnect progress when that optional hook is available", async () => {
@@ -363,9 +329,8 @@ describe("MobileRpcClient Iroh transport", () => {
         emitProgress = listener;
         return jest.fn();
       }),
-    } as unknown as IrohConnection["transport"];
-    mockReconnectMobileSession.mockResolvedValue(makeConnection({ transport }));
-    const client = new MobileRpcClient({});
+    } as unknown as RemoteConnection["transport"];
+    const { client } = clientOver(makeConnection({ transport }));
     const listener = jest.fn();
     client.onReconnectProgress(listener);
 
@@ -393,8 +358,7 @@ describe("MobileRpcClient Iroh transport", () => {
         return jest.fn();
       }),
     });
-    mockReconnectMobileSession.mockResolvedValue(makeConnection({ session }));
-    const client = new MobileRpcClient({});
+    const { client } = clientOver(makeConnection({ session }));
     await client.connectAndWait();
 
     const recovered = client.waitUntilConnected(1_000);
@@ -415,8 +379,7 @@ describe("MobileRpcClient Iroh transport", () => {
         },
       ),
     });
-    mockReconnectMobileSession.mockResolvedValue(makeConnection({ rpc }));
-    const client = new MobileRpcClient({});
+    const { client } = clientOver(makeConnection({ rpc }));
     const listener = jest.fn();
 
     const unsubscribe = client.on("shell-approval:pending-changed", listener);
@@ -432,10 +395,9 @@ describe("MobileRpcClient Iroh transport", () => {
     expect(activeUnsub).toHaveBeenCalledTimes(1);
   });
 
-  it("opens panel sessions over the existing pipe with fresh grant tokens", async () => {
-    let openedOptions:
-      | Parameters<IrohConnection["transport"]["openSession"]>[0]
-      | null = null;
+  it("opens panel sessions through the connection with fresh grant tokens", async () => {
+    let openedOptions: Parameters<RemoteConnection["transport"]["openSession"]>[0] | null =
+      null;
     let tokenSeenByReady = "";
     const call = jest.fn(
       async (
@@ -445,9 +407,6 @@ describe("MobileRpcClient Iroh transport", () => {
         _options?: unknown,
       ) => ({ token: "panel-grant-123" }),
     );
-    const rpc = makeRpc({
-      call,
-    });
     const panelSession = makeSession({
       ready: jest.fn(async () => {
         tokenSeenByReady = await openedOptions!.getToken();
@@ -458,25 +417,21 @@ describe("MobileRpcClient Iroh transport", () => {
         openedOptions = options;
         return panelSession;
       }),
-    } as unknown as IrohConnection["transport"];
-    mockReconnectMobileSession.mockResolvedValue(
-      makeConnection({ rpc, transport }),
+      onReconnectProgress: jest.fn(() => jest.fn()),
+    } as unknown as RemoteConnection["transport"];
+    const { client } = clientOver(
+      makeConnection({ rpc: makeRpc({ call }), transport }),
     );
-    const client = new MobileRpcClient({});
 
     await expect(
-      client.openPanelSession(
-        "panel:runtime-1" as PanelEntityId,
-        "panel-conn-1",
-      ),
+      client.openPanelSession("panel:runtime-1" as PanelEntityId, "panel-conn-1"),
     ).resolves.toBe(panelSession);
 
-    expect(transport.openSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connectionId: "panel-conn-1",
-        clientPlatform: "mobile",
-      }),
-    );
+    expect(transport.openSession).toHaveBeenCalledWith({
+      label: "panel panel:runtime-1",
+      connectionId: "panel-conn-1",
+      getToken: expect.any(Function),
+    });
     expect(
       call.mock.calls.some(
         ([target, method, args, options]) =>
@@ -492,17 +447,14 @@ describe("MobileRpcClient Iroh transport", () => {
   it("closes the pipe (no leak) when disconnect() races an in-flight connect", async () => {
     // Handshake that only resolves when we let it — models a disconnect landing
     // mid-connect (background / dispose-during-connect).
-    let resolveConnect!: (connection: IrohConnection) => void;
+    let resolveConnect!: (connection: RemoteConnection) => void;
     const connection = makeConnection();
-    mockReconnectMobileSession.mockImplementation(
-      () =>
-        new Promise<IrohConnection>((resolve) => (resolveConnect = resolve)),
-    );
-    const client = new MobileRpcClient({});
+    const client = new MobileRpcClient({
+      connectWorkspace: () =>
+        new Promise<RemoteConnection>((resolve) => (resolveConnect = resolve)),
+    });
 
-    client.connect(); // fire-and-forget; handshake now pending
-    // Let establishConnection() await loadShellCredential and reach the
-    // (still-pending) reconnectMobileSession handshake.
+    client.connect(); // fire-and-forget; session open now pending
     await new Promise((r) => setTimeout(r, 0));
     client.disconnect(); // teardown lands before the handshake resolves
     resolveConnect(connection);
@@ -525,8 +477,7 @@ describe("MobileRpcClient Iroh transport", () => {
         );
       }),
     });
-    mockReconnectMobileSession.mockResolvedValue(connection);
-    const client = new MobileRpcClient({});
+    const { client } = clientOver(connection);
     const progress = jest.fn();
     client.onReconnectProgress(progress);
 
@@ -552,13 +503,12 @@ describe("MobileRpcClient Iroh transport", () => {
     let emitRecovery:
       | ((kind: RecoveryKind) => void | Promise<void>)
       | undefined;
-    mockReconnectMobileSession.mockImplementation(
-      async (_stored, _callbackMode, onRecovery) => {
+    const client = new MobileRpcClient({
+      connectWorkspace: async (onRecovery) => {
         emitRecovery = onRecovery;
         return makeConnection();
       },
-    );
-    const client = new MobileRpcClient({});
+    });
     const observed = jest.fn();
     client.onRecovery((kind) => observed(kind));
 
@@ -573,13 +523,12 @@ describe("MobileRpcClient Iroh transport", () => {
 
   it("isolates synchronous recovery observer failures without blocking the Iroh owner", async () => {
     let recover!: (kind: RecoveryKind) => void | Promise<void>;
-    mockReconnectMobileSession.mockImplementation(
-      async (_stored, _mode, onRecovery) => {
-        recover = onRecovery!;
+    const client = new MobileRpcClient({
+      connectWorkspace: async (onRecovery) => {
+        recover = onRecovery;
         return makeConnection();
       },
-    );
-    const client = new MobileRpcClient({});
+    });
     const failure = new Error("Subscription replay failed");
     const asyncFailure = new Error("Async observer failed");
     const log = jest.spyOn(console, "error").mockImplementation(() => {});
@@ -634,7 +583,7 @@ describe("MobileRpcClient session ownership", () => {
             progresses[index] = listener;
             return stops[1]!;
           },
-        } as unknown as IrohConnection["transport"],
+        } as unknown as RemoteConnection["transport"],
         rpc: makeRpc({
           on: (_name: string, listener: (event: RpcEventContext) => void) => {
             events[index] = listener;
@@ -699,10 +648,10 @@ describe("MobileRpcClient session ownership", () => {
   });
 
   it("does not clear a newer in-flight connection when a retired handshake completes", async () => {
-    const pending: Array<(connection: IrohConnection) => void> = [];
+    const pending: Array<(connection: RemoteConnection) => void> = [];
     const factory = jest.fn(
       () =>
-        new Promise<IrohConnection>((resolve) => {
+        new Promise<RemoteConnection>((resolve) => {
           pending.push(resolve);
         }),
     );
@@ -737,7 +686,7 @@ describe("MobileRpcClient connect lifetime boundaries", () => {
       .fn()
       .mockImplementationOnce(
         () =>
-          new Promise<IrohConnection>((_resolve, reject) => {
+          new Promise<RemoteConnection>((_resolve, reject) => {
             rejectFirst = reject;
           }),
       )
@@ -756,41 +705,6 @@ describe("MobileRpcClient connect lifetime boundaries", () => {
     expect(client.status).toBe("connected");
     expect(factory).toHaveBeenCalledTimes(2);
     await client.close();
-  });
-
-  it("does not retry after disconnect during initial connection backoff", async () => {
-    jest.useFakeTimers();
-    const warn = jest
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
-    const factory = jest.fn(async () => {
-      throw new Error("temporarily offline");
-    });
-    const client = new MobileRpcClient({
-      connectWorkspace: factory,
-      initialConnectionRetry: { delayMs: 500, maxMs: 2000 },
-    });
-    let scheduled!: () => void;
-    const retryScheduled = new Promise<void>((resolve) => {
-      scheduled = resolve;
-    });
-    client.onReconnectProgress((progress) => {
-      if (progress.phase === "scheduled") scheduled();
-    });
-    try {
-      const connecting = client.connectAndWait();
-      const retired = expect(connecting).rejects.toThrow("superseded");
-      await retryScheduled;
-      client.disconnect();
-      await jest.advanceTimersByTimeAsync(500);
-      await retired;
-      expect(factory).toHaveBeenCalledTimes(1);
-      expect(client.status).toBe("disconnected");
-    } finally {
-      await client.close();
-      warn.mockRestore();
-      jest.useRealTimers();
-    }
   });
 
   it("does not reconnect after its requested lifetime is canceled while old close is pending", async () => {
@@ -826,7 +740,7 @@ describe("MobileRpcClient connect lifetime boundaries", () => {
       transport: {
         openSession: jest.fn(),
         onReconnectProgress: () => stopProgress,
-      } as unknown as IrohConnection["transport"],
+      } as unknown as RemoteConnection["transport"],
       rpc: makeRpc({ on: () => stopEvent }),
     });
     const client = new MobileRpcClient({
@@ -846,52 +760,38 @@ describe("MobileRpcClient connect lifetime boundaries", () => {
 });
 
 describe("MobileRpcClient shared initial connection job", () => {
-  it("shares one complete retry job and executes a waiting user mutation only once", async () => {
-    jest.useFakeTimers();
-    const warn = jest
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
+  it("shares one open session between concurrent callers and executes a waiting user mutation only once", async () => {
     const mutation = jest.fn(async () => "saved");
-    const ready = makeConnection({ rpc: makeRpc({ call: mutation }) });
-    const factory = jest
-      .fn()
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce(ready);
-    const client = new MobileRpcClient({
-      connectWorkspace: factory,
-      initialConnectionRetry: { delayMs: 500, maxMs: 2000 },
-    });
-    let scheduled!: () => void;
-    const backoff = new Promise<void>((resolve) => {
-      scheduled = resolve;
-    });
-    client.onReconnectProgress((progress) => {
-      if (progress.phase === "scheduled") scheduled();
-    });
+    let finishOpen!: (connection: RemoteConnection) => void;
+    const factory = jest.fn(
+      () =>
+        new Promise<RemoteConnection>((resolve) => {
+          finishOpen = resolve;
+        }),
+    );
+    const client = new MobileRpcClient({ connectWorkspace: factory });
     try {
       const first = client.connectAndWait();
-      await backoff;
-      const second = client.connectAndWait(1);
+      const second = client.connectAndWait();
       const write = client.call("main", testRpcMethods.write, ["value"]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(factory).toHaveBeenCalledTimes(1);
       expect(mutation).not.toHaveBeenCalled();
-      await jest.advanceTimersByTimeAsync(500);
+      finishOpen(makeConnection({ rpc: makeRpc({ call: mutation }) }));
       await Promise.all([first, second]);
       await expect(write).resolves.toBe("saved");
-      expect(factory).toHaveBeenCalledTimes(2);
+      expect(factory).toHaveBeenCalledTimes(1);
       expect(mutation).toHaveBeenCalledTimes(1);
     } finally {
       await client.close();
-      warn.mockRestore();
-      jest.useRealTimers();
     }
   });
 
   it.each(["missing-control", "expose", "listener"] as const)(
-    "never publishes an invalid %s connection and waits for exact cleanup before retry",
+    "never publishes an invalid %s connection and finishes its exact cleanup before another job",
     async (phase) => {
-      const warn = jest
-        .spyOn(console, "warn")
+      const error = jest
+        .spyOn(console, "error")
         .mockImplementation(() => undefined);
       let finishClose!: () => void;
       let closing!: () => void;
@@ -928,42 +828,95 @@ describe("MobileRpcClient shared initial connection job", () => {
         }),
       });
       const mutation = jest.fn(async () => "current");
-      const factory = jest
-        .fn()
-        .mockResolvedValueOnce(invalid)
-        .mockResolvedValueOnce(
-          makeConnection({ rpc: makeRpc({ call: mutation }) }),
-        );
-      const client = new MobileRpcClient({
-        connectWorkspace: factory,
-        initialConnectionRetry: { delayMs: 0, maxMs: 2000 },
-      });
+      const { client, factory } = clientOver(
+        invalid,
+        makeConnection({ rpc: makeRpc({ call: mutation }) }),
+      );
       client.expose("owned-handler", async () => undefined);
       client.on("owned-event", () => undefined);
       try {
         const request = client.call("main", testRpcMethods.write, []);
+        const rejected = expect(request).rejects.toThrow();
         await closeStarted;
-        const connected = client.connectAndWait();
         expect(factory).toHaveBeenCalledTimes(1);
         expect(invalidRpc.call).not.toHaveBeenCalled();
         expect(client.status).toBe("connecting");
         finishClose();
-        await connected;
-        await expect(request).resolves.toBe("current");
+        await rejected;
         expect(invalid.close).toHaveBeenCalledTimes(1);
         if (phase === "listener") expect(stopStatus).toHaveBeenCalledTimes(1);
+        expect(mutation).not.toHaveBeenCalled();
+
+        client.reconnect();
+        await client.connectAndWait();
+        await expect(client.call("main", testRpcMethods.write, [])).resolves.toBe(
+          "current",
+        );
+        expect(factory).toHaveBeenCalledTimes(2);
         expect(mutation).toHaveBeenCalledTimes(1);
       } finally {
         await client.close();
-        warn.mockRestore();
+        error.mockRestore();
       }
     },
   );
 });
 
-it("ignores recovery before adoption and from a failed initial attempt during the same retry lifetime", async () => {
+describe("MobileRpcClient trust revocation", () => {
+  it("is terminal: the connection closes and no call or reconnect opens another session", async () => {
+    const log = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    let closed!: (closed: { reason: string; message: string }) => void;
+    const session = makeSession({
+      onClosed: jest.fn((listener) => {
+        closed = listener;
+        return jest.fn();
+      }) as unknown as RemoteSession["onClosed"],
+    });
+    const connection = makeConnection({ session });
+    const { client, factory } = clientOver(connection);
+    try {
+      await client.connectAndWait();
+      expect(client.status).toBe("connected");
+
+      closed({ reason: "trust-revoked", message: "trust withdrawn by the owner" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(client.status).toBe("disconnected");
+      expect(connection.close).toHaveBeenCalledTimes(1);
+      await expect(client.call("main", testRpcMethods.read, [])).rejects.toBeInstanceOf(
+        ClientTrustRevokedError,
+      );
+      client.reconnect();
+      await expect(client.connectAndWait()).rejects.toThrow("trust withdrawn by the owner");
+      expect(factory).toHaveBeenCalledTimes(1);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("treats other session endings as an ordinary closed session, not revocation", async () => {
+    let closed!: (closed: { reason: string; message: string }) => void;
+    const session = makeSession({
+      onClosed: jest.fn((listener) => {
+        closed = listener;
+        return jest.fn();
+      }) as unknown as RemoteSession["onClosed"],
+    });
+    const { client, factory } = clientOver(makeConnection({ session }));
+    await client.connectAndWait();
+
+    closed({ reason: "server-closed", message: "credential revoked" });
+    client.reconnect();
+    await client.connectAndWait();
+
+    expect(factory).toHaveBeenCalledTimes(2);
+    await client.close();
+  });
+});
+
+it("ignores recovery before adoption and from a failed attempt after an explicit reconnect", async () => {
   const callbacks: Array<(kind: RecoveryKind) => void | Promise<void>> = [];
-  const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+  const error = jest.spyOn(console, "error").mockImplementation(() => undefined);
   const factory = jest.fn(
     async (recover: (kind: RecoveryKind) => void | Promise<void>) => {
       callbacks.push(recover);
@@ -972,15 +925,14 @@ it("ignores recovery before adoption and from a failed initial attempt during th
       return makeConnection();
     },
   );
-  const client = new MobileRpcClient({
-    connectWorkspace: factory,
-    initialConnectionRetry: { delayMs: 0, maxMs: 2000 },
-  });
+  const client = new MobileRpcClient({ connectWorkspace: factory });
   const recovered = jest.fn();
   client.onRecovery((kind) => {
     if (kind === "resubscribe") recovered(kind);
   });
   try {
+    await expect(client.connectAndWait()).rejects.toThrow("first handshake failed");
+    client.reconnect();
     await client.connectAndWait();
     expect(factory).toHaveBeenCalledTimes(2);
     expect(recovered).not.toHaveBeenCalled();
@@ -990,16 +942,13 @@ it("ignores recovery before adoption and from a failed initial attempt during th
     expect(recovered).toHaveBeenCalledTimes(1);
   } finally {
     await client.close();
-    warn.mockRestore();
+    error.mockRestore();
   }
 });
 
 it("makes every reconnect caller await retirement and preserves failed cleanup for later close", async () => {
   const logged = jest
     .spyOn(console, "error")
-    .mockImplementation(() => undefined);
-  const warned = jest
-    .spyOn(console, "warn")
     .mockImplementation(() => undefined);
   let failClose!: (error: Error) => void;
   const connection = makeConnection({
@@ -1041,7 +990,6 @@ it("makes every reconnect caller await retirement and preserves failed cleanup f
     expect(client.status).toBe("disconnected");
   } finally {
     logged.mockRestore();
-    warned.mockRestore();
   }
 });
 

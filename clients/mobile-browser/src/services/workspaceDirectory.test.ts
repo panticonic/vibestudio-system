@@ -3,13 +3,15 @@ import {
   workspaceReadinessAtom,
 } from "../state/connectionAtoms";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
-import { MobileWorkspaceDirectory } from "./workspaceDirectory";
+import {
+  createMobileWorkspaceDirectory,
+  MobileWorkspaceDirectory,
+} from "./workspaceDirectory";
 import { activePanelIdAtom } from "../state/navigationAtoms";
 import { shellClientAtom } from "../state/shellClientAtom";
-import type {
-  StoredMobileConnection,
-  MobileWorkspaceAccount,
-} from "@vibestudio/mobile-iroh";
+import type { RemoteAccount, RnClientApi } from "@vibestudio/rn-client-api";
+import { installClientApi } from "@workspace/client-kit-native/host";
+import { createFakeClientHost } from "@workspace/client-kit-native/testing";
 
 const mockClients: Array<{ config: Record<string, any>; client: any }> = [];
 const mockOpening = new Map<string, Promise<void>>();
@@ -29,9 +31,6 @@ jest.mock("./shellClient", () => ({
       transport: {
         status: "connected",
         serverId: "srv_aaaaaaaaaaaaaaaaaaaaaaaa",
-      },
-      hostLaunch: config["appSourceClient"]?.hostLaunch ?? {
-        source: "clients/mobile-browser",
       },
       events: {
         subscribe: jest.fn(async () => undefined),
@@ -81,10 +80,6 @@ jest.mock("./shellClient", () => ({
     mockClients.push({ config, client });
     return client;
   }),
-}));
-jest.mock("@vibestudio/mobile-iroh", () => ({
-  connectMobileAccount: jest.fn(),
-  MobileConnectionAggregateError: AggregateError,
 }));
 jest.mock("@vibestudio/service-schemas/clients/eventsClient", () => ({
   EventsClient: jest.fn().mockImplementation(() => ({
@@ -138,6 +133,8 @@ function workspace(privateRole: "personal" | "system") {
 function fixture() {
   const account = {
     control: {
+      serverId: "A".repeat(64),
+      deviceId: "device-a",
       rpc: {
         call: jest.fn(async (_target, method: { name: string }) => {
           if (method.name === "hubControl.ensureUserWorkspaces")
@@ -155,18 +152,14 @@ function fixture() {
     ),
     close: jest.fn(async () => undefined),
   };
-  const stored = {
-    controlPairing: { endpointId: "a".repeat(64) },
-    credential: { deviceId: "device-a" },
-  };
   const directory = new MobileWorkspaceDirectory(
-    account as unknown as MobileWorkspaceAccount,
-    stored as StoredMobileConnection,
+    account as unknown as RemoteAccount,
   );
   return { directory, account };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  installClientApi((await createFakeClientHost()).api);
   mockClients.length = 0;
   mockOpening.clear();
   mockRecoveryHandlers.clear();
@@ -381,7 +374,7 @@ describe("mobile workspace directory", () => {
     await directory.dispose();
   });
 
-  it("keeps the System app source separate from lazily opened workspace clients", async () => {
+  it("keeps System's device surfaces separate from lazily opened workspace clients", async () => {
     const { directory, account } = fixture();
     await directory.init();
     expect(account.openWorkspace.mock.calls.map(([id]) => id)).toEqual([
@@ -390,10 +383,12 @@ describe("mobile workspace directory", () => {
     ]);
     const system = directory.sessions.get("system")!;
     const personal = directory.sessions.get("personal")!;
-    expect(
-      mockClients.find(({ config }) => config["workspaceId"] === "personal")
-        ?.config["appSourceClient"],
-    ).toBe(system.client);
+    const exposes = (workspaceId: string) =>
+      mockClients.find(({ config }) => config["workspaceId"] === workspaceId)
+        ?.config["exposesDeviceSurfaces"];
+    expect(exposes("system")).toBe(true);
+    expect(exposes("personal")).toBe(false);
+    expect(system.client).toBeDefined();
     expect(personal.store.get(shellClientAtom)).toBe(personal.client);
     expect(directory.presented.has("system")).toBe(false);
     await directory.toggleExpanded("project");
@@ -966,7 +961,7 @@ it("does not reopen a dismissed shared queue when an earlier exact selection fin
   await directory.dispose();
 });
 
-it("opens Personal alongside System while retaining System's app-source owner", async () => {
+it("opens Personal alongside System, which alone carries the device surfaces", async () => {
   let resolveSystem!: () => void;
   mockOpening.set(
     "system",
@@ -984,9 +979,11 @@ it("opens Personal alongside System while retaining System's app-source owner", 
     const personal = mockClients.find(
       ({ config }) => config["workspaceId"] === "personal",
     )!;
-    expect(personal.config["appSourceClient"]).toBe(
-      directory.sessions.get("system")!.client,
-    );
+    expect(personal.config["exposesDeviceSurfaces"]).toBe(false);
+    expect(
+      mockClients.find(({ config }) => config["workspaceId"] === "system")
+        ?.config["exposesDeviceSurfaces"],
+    ).toBe(true);
     await starting;
     expect(directory.activeWorkspaceId).toBe("personal");
     expect(directory.sessions.get("personal")?.state).toBe("ready");
@@ -1049,4 +1046,41 @@ it("surfaces a retained System startup failure without retracting Personal", asy
     error: "System workspace unavailable",
   });
   await directory.dispose();
+});
+
+describe("opening the directory through the host", () => {
+  const apiOver = (account: unknown) =>
+    ({ session: { openAccount: jest.fn(async () => account) } }) as unknown as RnClientApi;
+
+  it("builds the directory on the account session the host opened", async () => {
+    const { account } = fixture();
+    const directory = await createMobileWorkspaceDirectory(apiOver(account));
+    try {
+      expect(directory.account).toBe(account);
+      expect(directory.deviceId).toBe("device-a");
+      expect(directory.serverEndpointId).toBe("a".repeat(64));
+      expect(directory.activeWorkspaceId).toBe("personal");
+    } finally {
+      await directory.dispose();
+    }
+  });
+
+  it("closes an account whose connection reports no server and device identity", async () => {
+    const { account } = fixture();
+    account.control.serverId = null as never;
+    await expect(createMobileWorkspaceDirectory(apiOver(account))).rejects.toThrow(
+      "did not report its server and device identity",
+    );
+    expect(account.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("disposes the directory when the connection is cancelled mid-open", async () => {
+    const { account } = fixture();
+    const abort = new AbortController();
+    abort.abort();
+    await expect(
+      createMobileWorkspaceDirectory(apiOver(account), abort.signal),
+    ).rejects.toThrow("Connection cancelled");
+    expect(account.close).toHaveBeenCalled();
+  });
 });

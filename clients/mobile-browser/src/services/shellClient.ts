@@ -109,11 +109,6 @@ import { MobileBrowserImportProvider } from "./mobileBrowserImportProvider";
 export type { MobileBrowserPrivacySection } from "./browserPrivacyPresentation";
 
 import { type UserNotification } from "@vibestudio/shared/userNotifications";
-import type { PendingUnitInstallReviewApproval } from "@vibestudio/shared/approvals";
-import {
-  HostLaunchClient,
-  type HostLaunchResult,
-} from "@vibestudio/service-schemas/clients/hostLaunchClient";
 import {
   MobileAccountProfileClient,
   type MobileAccountProfile,
@@ -167,9 +162,13 @@ export interface ShellClientConfig {
   serverEndpointId: string;
   workspaceId?: string;
   workspaceName?: string;
-  connectWorkspace?: MobileRpcClientConfig["connectWorkspace"];
-  /** App source remains in System while panel services use this workspace. */
-  appSourceClient?: ShellClient;
+  connectWorkspace: MobileRpcClientConfig["connectWorkspace"];
+  /**
+   * This session carries the device's presentation surfaces the server calls
+   * into (workspace readiness, browser privacy, browser import). Exactly one
+   * session of an account does: the System workspace's.
+   */
+  exposesDeviceSurfaces: boolean;
   onTreeInvalidated?: (event: PanelTreeInvalidation) => void;
   onPanelsChanged?: () => void;
   onStatusChange?: (status: ConnectionStatus) => void;
@@ -248,18 +247,6 @@ type PushClient = ReturnType<typeof createPushClient>;
 type QuickfireRpcClient = ReturnType<typeof createQuickfireClient>;
 type WorkspaceRpcClient = ReturnType<typeof createWorkspaceRpcClient>;
 type WorkspaceInfo = Awaited<ReturnType<WorkspaceClient["getInfo"]>>;
-
-export class MobileHostTargetApprovalRequiredError extends Error {
-  readonly approvals: PendingUnitInstallReviewApproval[];
-
-  constructor(
-    launch: Extract<HostLaunchResult, { status: "approval-required" }>,
-  ) {
-    super("Approve the workspace mobile app before opening panels.");
-    this.name = "MobileHostTargetApprovalRequiredError";
-    this.approvals = launch.approvals;
-  }
-}
 
 /** The UI layer's handle on its live panel WebViews. */
 export interface MobilePanelWebViewSink {
@@ -1229,7 +1216,6 @@ export class ShellClient {
     list(): ReturnType<QuickfireRpcClient["list"]>;
     loadModelCatalog(): Promise<ModelSettingsSnapshot["catalog"]>;
   };
-  readonly hostLaunch: HostLaunchClient;
   readonly browserPrivacy: ReturnType<typeof createShellBrowserPrivacyClient>;
   readonly recovery: RecoveryCoordinator;
   readonly userNotifications: {
@@ -1410,31 +1396,29 @@ export class ShellClient {
     this.onReadinessChange = config.onReadinessChange;
     this.serverUrl = MOBILE_SERVER_LOOPBACK_ORIGIN;
     this.recovery = createRecoveryCoordinator();
-    // Remote RPC uses the stored Iroh endpoint identity and device credential.
+    // The session is the account's: the host owns the credential and the connection.
     this.transport = new MobileRpcClient({
-      connectWorkspace: config.connectWorkspace
-        ? (onRecovery) =>
-            config.connectWorkspace!(async (kind) => {
-              onRecovery(kind);
-              await this.recovery.run(kind);
-              smokePhase("workspace-recovery-complete", { kind });
-              this.emitRecoveryComplete(kind);
-            })
-        : undefined,
+      connectWorkspace: (onRecovery) =>
+        config.connectWorkspace(async (kind) => {
+          onRecovery(kind);
+          await this.recovery.run(kind);
+          smokePhase("workspace-recovery-complete", { kind });
+          this.emitRecoveryComplete(kind);
+        }),
     });
-    this.browserImportProvider = config.appSourceClient
-      ? null
-      : new MobileBrowserImportProvider(
+    this.browserImportProvider = config.exposesDeviceSurfaces
+      ? new MobileBrowserImportProvider(
           this.transport,
           config.credentials.deviceId,
-        );
+        )
+      : null;
     this.browserImportProvider?.expose();
-    if (!config.appSourceClient && config.getWorkspaceReadiness) {
+    if (config.exposesDeviceSurfaces && config.getWorkspaceReadiness) {
       this.transport.expose("mobileWorkspace.readiness", () =>
         config.getWorkspaceReadiness!(),
       );
     }
-    if (!config.appSourceClient) {
+    if (config.exposesDeviceSurfaces) {
       this.transport.expose(
         "mobileBrowserPrivacyPresentation.open",
         ({ args }) => this.browserPrivacyPresentation.accept(args[0]),
@@ -1551,11 +1535,6 @@ export class ShellClient {
       promote: (slotId) => quickfireClient.promote({ slotId }),
       list: () => quickfireClient.list(),
     };
-    this.hostLaunch =
-      config.appSourceClient?.hostLaunch ??
-      new HostLaunchClient((service, method, args) =>
-        this.transport.call("main", mainRpcMethod(`${service}.${method}`), args),
-      );
     this.browserPrivacy = createShellBrowserPrivacyClient(this.transport);
     this.events.on("panel:runtimeLeaseChanged", (event) => {
       this.panels.handleRuntimeLeaseChanged(
@@ -1803,7 +1782,7 @@ export class ShellClient {
   private async connectWorkspace(): Promise<WorkspaceInfo> {
     if (this.workspaceInfo) return this.workspaceInfo;
     smokePhase("workspace-shell-init-start", { serverUrl: this.serverUrl });
-    await this.transport.connectAndWait(null);
+    await this.transport.connectAndWait();
     smokePhase("workspace-ws-authenticated");
     const info = await this.workspaces.getInfo();
     if (
@@ -1831,15 +1810,12 @@ export class ShellClient {
         [
           PromiseSettledResult<MobileAccountProfile>,
           PromiseSettledResult<void>,
-          PromiseSettledResult<void>,
         ]
       > | null = null;
       try {
         deferredResults = Promise.allSettled([
           this.refreshAccountProfile(),
-          this.ensureReactNativeHostTargetReady(signal),
-          // Keep the first usable tree durable even if host launch needs a
-          // review. This cache write belongs to reconciliation, not first paint.
+          // This cache write belongs to reconciliation, not first paint.
           refreshTree
             ? Promise.resolve()
             : this.persistStartupSnapshot(info.config.id),
@@ -1861,7 +1837,7 @@ export class ShellClient {
           return;
         }
         this.registerPanelRecoveryHandlers();
-        const [profile, host, snapshot] = await deferredResults;
+        const [profile, snapshot] = await deferredResults;
         if (this.disposed || signal.aborted) return;
         if (profile.status === "rejected") {
           console.warn(
@@ -1875,7 +1851,6 @@ export class ShellClient {
             snapshot.reason,
           );
         }
-        if (host.status === "rejected") throw host.reason;
         await this.persistStartupSnapshot(info.config.id);
         if (this.disposed || signal.aborted) return;
         smokePhase("workspace-reconciled");
@@ -1950,41 +1925,6 @@ export class ShellClient {
       ...snapshot,
     };
     await saveMobileShellStartupSnapshot(record);
-  }
-
-  private async ensureReactNativeHostTargetReady(
-    signal: AbortSignal,
-  ): Promise<void> {
-    const deadline = Date.now() + 120_000;
-    for (;;) {
-      if (signal.aborted) return;
-      const launch = await this.hostLaunch.launch("react-native");
-      if (signal.aborted) return;
-      if (launch.status === "ready") {
-        smokePhase("workspace-host-target-ready", {
-          target: launch.target,
-          appId: launch.entity.identity.entityId,
-          source: launch.entity.source,
-        });
-        return;
-      }
-      if (launch.status === "approval-required") {
-        smokePhase("workspace-host-target-approval-required", {
-          target: launch.target,
-          count: launch.approvals.length,
-        });
-        throw new MobileHostTargetApprovalRequiredError(launch);
-      }
-      if (launch.status === "preparing") {
-        smokePhase("workspace-host-target-preparing", {
-          target: launch.target,
-        });
-        if (Date.now() >= deadline) throw new Error(launch.reason);
-        if (!(await delayUnlessAborted(1_000, signal))) return;
-        continue;
-      }
-      throw new Error(launch.reason);
-    }
   }
 
   reconnect(): void {

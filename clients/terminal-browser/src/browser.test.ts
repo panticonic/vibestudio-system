@@ -7,11 +7,11 @@ import { schemaRpcClientMock } from "@vibestudio/rpc/test-utils";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { encodeEventWatchRecord } from "@vibestudio/shared/events";
 import type {
-  TerminalBrowserExit,
-  TerminalBrowserHost,
+  TerminalClientExit,
+  TerminalClientHost,
+  TerminalClientUpdate,
   TerminalServerConnectionState,
-} from "@vibestudio/shell-core/terminal/terminalBrowserHost";
-import { TERMINAL_BROWSER_HOST_CONTRACT_VERSION } from "@vibestudio/shell-core/terminal/terminalBrowserHost";
+} from "@vibestudio/shell-core/terminal/terminalClientHost";
 import { TerminalBrowser } from "./browser.js";
 import { run } from "./index.js";
 import type { TerminalSessionEntry } from "./sessions/launcher.js";
@@ -28,7 +28,7 @@ function withUnicode11<T extends InstanceType<typeof Terminal>>(terminal: T): T 
 }
 
 const ECHO = "terminal-apps/echo";
-const APP_ID = "app:clients/terminal-browser:dev-1";
+const APP_ID = "client:browser:terminal:dev-1";
 const SHELL_EXTENSION = "@workspace-extensions/shell";
 
 const SOURCE_TREE = {
@@ -323,12 +323,41 @@ function setup(
   const listeners = new Set<(state: TerminalServerConnectionState) => void>();
   const opened: string[] = [];
   const cancellation = new AbortController();
-  const host: TerminalBrowserHost = {
-    contractVersion: TERMINAL_BROWSER_HOST_CONTRACT_VERSION,
+  const updateListeners = new Set<(update: TerminalClientUpdate) => void>();
+  let pendingUpdate: TerminalClientUpdate | null = null;
+  const restarts: string[] = [];
+  const stored: { settings: Record<string, unknown> } = { settings: {} };
+  const host: TerminalClientHost = {
+    client: {
+      id: "browser",
+      source: "clients/terminal-browser",
+      buildKey: "build-1",
+      grantedCapabilities: ["device-session", "clipboard", "notifications", "local-files"],
+    },
+    intent: null,
     signal: cancellation.signal,
-    files: { upload: vi.fn(), download: vi.fn(), saveText: vi.fn() },
+    files: { upload: vi.fn(), download: vi.fn(), saveText: vi.fn(), read: vi.fn() },
+    clipboard: { write: vi.fn((text: string) => {
+      tty.stdout.write(`\x1b]52;c;${Buffer.from(text, "utf8").toString("base64")}\x07`);
+    }) },
+    notify: { notify: vi.fn() },
+    state: {
+      get: async () => stored.settings,
+      set: async (settings) => {
+        stored.settings = settings;
+      },
+    },
+    update: {
+      pending: () => pendingUpdate,
+      onUpdate: (listener) => {
+        updateListeners.add(listener);
+        return () => updateListeners.delete(listener);
+      },
+      restartAtSafePoint: () => {
+        restarts.push("restart");
+      },
+    },
     rpc: systemRpc,
-    appId: APP_ID,
     system: { id: "ws-system", name: "System" },
     workspace: { id: "ws-1", name: "Personal" },
     workspaceRpc: workspace.rpc(),
@@ -348,7 +377,7 @@ function setup(
       opened.push(url);
     },
   };
-  let exit: TerminalBrowserExit | null = null;
+  let exit: TerminalClientExit | null = null;
   const done = new TerminalBrowser(host, { sessions, settings: sessions }).run().then((result) => {
     exit = result;
     return result;
@@ -367,7 +396,15 @@ function setup(
     tty,
     done,
     opened,
-    files: host.files,
+    files: host.files!,
+    clipboard: host.clipboard!,
+    notify: host.notify!,
+    stored,
+    restarts,
+    announceUpdate(update: TerminalClientUpdate) {
+      pendingUpdate = update;
+      for (const listener of [...updateListeners]) listener(update);
+    },
     cancellation,
     latestPty,
     exit: () => exit,
@@ -1676,15 +1713,34 @@ describe("terminal browser", () => {
     tty.type("\x1dq");
   });
 
+  it("offers a ready update in the command palette and restarts only when the person asks", async () => {
+    const app = start();
+    await until(() => app.tty.text().includes("Echo"), "launcher");
+    app.announceUpdate({ buildKey: "build-2", effectiveVersion: "2", previousBuildKey: "build-1" });
+    await until(() => app.tty.text().includes("Update ready"), "update notice");
+    expect(app.restarts).toEqual([]);
+    expect(app.tty.text()).toContain("command palette");
+    app.tty.type(`${PREFIX}k`);
+    await until(() => app.tty.text().includes("Commands"), "palette");
+    app.tty.type("Restart into");
+    await until(() => app.tty.text().includes("Restart into the update"), "update entry");
+    app.tty.type("\r");
+    await until(() => app.tty.text().includes("ready to install"), "update prompt");
+    expect(app.restarts).toEqual([]);
+    app.tty.type("r");
+    await until(() => app.restarts.length === 1, "restart at the person's request");
+  });
+
   it("refuses to run without a terminal", async () => {
     const tty = new FakeTty();
     (tty.stdout as { isTTY: boolean }).isTTY = false;
     const host = {
-      contractVersion: TERMINAL_BROWSER_HOST_CONTRACT_VERSION,
+      client: { id: "browser", source: "clients/terminal-browser", buildKey: "b", grantedCapabilities: [] },
+      intent: null,
       signal: new AbortController().signal,
-      files: { upload: vi.fn(), download: vi.fn(), saveText: vi.fn() },
+      state: { get: vi.fn(), set: vi.fn() },
+      update: { pending: () => null, onUpdate: () => () => {}, restartAtSafePoint: vi.fn() },
       rpc: systemRpc,
-      appId: APP_ID,
       system: { id: "ws-system", name: "System" },
       workspace: { id: "ws", name: "Personal" },
       workspaceRpc: new FakeWorkspace(new FakeShell()).rpc(),
@@ -1695,8 +1751,7 @@ describe("terminal browser", () => {
       onConnectionState: () => () => {},
       listWorkspaces: vi.fn(),
       openExternal: vi.fn(),
-      readLocalFile: vi.fn(),
-    } as unknown as TerminalBrowserHost;
+    } as unknown as TerminalClientHost;
     await expect(run(host)).rejects.toThrow(/interactive terminal/);
     expect(tty.written).toEqual([]);
   });

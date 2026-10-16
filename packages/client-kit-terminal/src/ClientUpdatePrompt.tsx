@@ -4,6 +4,25 @@ import { clientUpdateMessage, type PendingClientUpdate } from "@workspace/client
 import { ButtonRow, type Button } from "./clickable.js";
 
 /**
+ * The pending update a terminal host reports (`host.update`), in the shape the
+ * prompt shows. The terminal host holds no rollback targets, so none is offered.
+ */
+export function terminalPendingUpdate(
+  client: { id: string; source: string },
+  update: { buildKey: string; effectiveVersion: string | null }
+): PendingClientUpdate {
+  return {
+    clientId: client.id,
+    source: client.source,
+    runtime: "terminal",
+    buildKey: update.buildKey,
+    toVersion: update.effectiveVersion,
+    fromVersion: null,
+    canRollback: false,
+  };
+}
+
+/**
  * The update prompt a terminal client offers at a safe point: what is ready, and
  * the two answers. A terminal client cannot swap its running build mid-session,
  * so the answers are "restart now" (the host relaunches into the new build) and

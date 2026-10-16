@@ -5,23 +5,26 @@ import "react-native-gesture-handler";
 import "./src/setupGlobals";
 import { workspaceDirectoryAtom } from "./src/state/workspaceDirectoryAtom";
 import { useEffect, useRef, useState } from "react";
-import { AppRegistry, Appearance, Linking, StatusBar } from "react-native";
+import { AppRegistry, Appearance, StatusBar, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BrowserKitProvider } from "./src/state/BrowserKitProvider";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { NavigationContainer } from "@workspace/mobile-navigation";
 import { Provider as JotaiProvider, useAtomValue, useSetAtom } from "jotai";
-import { APP_CAPABILITIES_BY_NATIVE_HOST } from "@vibestudio/shared/unitManifest";
+import {
+  CLIENT_ROOT_COMPONENT,
+  type RnClientApi,
+} from "@vibestudio/rn-client-api";
+import { connectNativeClientApi } from "@vibestudio/rn-client-api/native";
+import { clientApi, installClientApi } from "@workspace/client-kit-native/host";
 import { BrowserPrivacyManager } from "./src/components/BrowserPrivacyManager";
 import type { MobileBrowserPrivacySection } from "./src/services/shellClient";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 import { ErrorBoundary } from "./src/components/ErrorBoundary";
 import { Toast } from "./src/components/Toast";
-import { setApprovedAppCapabilities } from "./src/services/appCapabilities";
-import { registerBackgroundHandlers } from "./src/services/backgroundHandlers";
-import { setupOAuthHandler } from "./src/services/oauthHandler";
-import { setupNotificationCategories } from "./src/services/notificationCategories";
-import { registerForPushNotifications } from "./src/services/pushNotifications";
+import { useHostUpdates } from "./src/hooks/useHostUpdates";
+import { observePanelLinks } from "./src/services/panelIntents";
+import { registerForPushNotifications } from "./src/services/pushRegistration";
 import {
   hydrateThemePreferenceAtom,
   isDarkModeAtom,
@@ -36,9 +39,6 @@ import {
   parsePanelLocationLink,
   type PanelLocation,
 } from "@vibestudio/shared/panelLocation";
-
-setApprovedAppCapabilities(APP_CAPABILITIES_BY_NATIVE_HOST["react-native"]);
-registerBackgroundHandlers();
 
 function AppContent() {
   const shellClient = useAtomValue(shellClientAtom);
@@ -57,6 +57,8 @@ function AppContent() {
   const pushToast = useSetAtom(pushToastAtom);
   const consumedPanelLinks = useRef(new Set<string>());
 
+  useHostUpdates();
+
   useEffect(() => {
     void hydrateThemePreference();
   }, [hydrateThemePreference]);
@@ -72,13 +74,6 @@ function AppContent() {
     );
     return () => subscription.remove();
   }, [setSystemColorScheme]);
-
-  // Set up OAuth deep link handler when the shell client is available
-  useEffect(() => {
-    if (!shellClient) return;
-    const cleanup = setupOAuthHandler(shellClient);
-    return cleanup;
-  }, [shellClient]);
 
   useEffect(() => {
     if (!shellClient) return;
@@ -99,13 +94,7 @@ function AppContent() {
         });
       });
     };
-    void Linking.getInitialURL().then((url) => {
-      if (url) handleUrl(url);
-    });
-    const subscription = Linking.addEventListener("url", ({ url }) =>
-      handleUrl(url),
-    );
-    return () => subscription.remove();
+    return observePanelLinks(clientApi(), handleUrl);
   }, [pushToast, shellClient, directory]);
 
   useEffect(() => {
@@ -113,44 +102,37 @@ function AppContent() {
     let cleanup: (() => void) | null = null;
     let disposed = false;
 
-    void setupNotificationCategories()
-      .then(() =>
-        registerForPushNotifications(shellClient, {
-          resolveWorkspace: async (scope) => {
-            if (!directory) throw new Error("Your account is not connected");
-            return (await directory.resolveNotificationWorkspace(scope)).client;
-          },
-          onApprovalDeepLink: (target) => {
-            void directory?.openApproval(target).catch((error: unknown) =>
-              pushToast({
-                title: "Could not open approval",
-                message: String(error),
-                tone: "danger",
-              }),
-            );
-          },
-          onInboxDeepLink: (payload) => {
-            if (!directory) return;
-            void directory
-              .resolveNotificationWorkspace(payload)
-              .then(async (session) => {
-                await directory.activate(payload.workspaceId);
-                session.store.set(inboxDeepLinkAtom, {
-                  ...payload,
-                  sequence: (inboxDeepLinkSequence.current += 1),
-                });
-              })
-              .catch((error: unknown) =>
-                pushToast({
-                  title: "Could not open message",
-                  message: String(error),
-                  tone: "danger",
-                }),
-              );
-          },
-          onToast: (toast) => pushToast(toast),
-        }),
-      )
+    registerForPushNotifications(clientApi(), shellClient, {
+      onApprovalDeepLink: (target) => {
+        void directory?.openApproval(target).catch((error: unknown) =>
+          pushToast({
+            title: "Could not open approval",
+            message: String(error),
+            tone: "danger",
+          }),
+        );
+      },
+      onInboxDeepLink: (payload) => {
+        if (!directory) return;
+        void directory
+          .resolveNotificationWorkspace(payload)
+          .then(async (session) => {
+            await directory.activate(payload.workspaceId);
+            session.store.set(inboxDeepLinkAtom, {
+              ...payload,
+              sequence: (inboxDeepLinkSequence.current += 1),
+            });
+          })
+          .catch((error: unknown) =>
+            pushToast({
+              title: "Could not open message",
+              message: String(error),
+              tone: "danger",
+            }),
+          );
+      },
+      onToast: (toast) => pushToast(toast),
+    })
       .then((nextCleanup) => {
         if (disposed) {
           nextCleanup();
@@ -158,7 +140,7 @@ function AppContent() {
         }
         cleanup = nextCleanup;
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.warn("[App] Failed to initialize push notifications:", error);
         pushToast({
           durationMs: 7000,
@@ -199,7 +181,10 @@ function AppContent() {
   );
 }
 
-function App() {
+/** The client UI over an injected host API; tests supply a fake. */
+export function ClientRoot({ api }: { api: RnClientApi }) {
+  // Everything below reads the host API from the installed instance.
+  useState(() => installClientApi(api));
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -213,6 +198,33 @@ function App() {
   );
 }
 
-AppRegistry.registerComponent("Vibestudio", () => App);
+function App() {
+  const [host, setHost] = useState<
+    { api: RnClientApi } | { error: string } | null
+  >(null);
+  useEffect(() => {
+    let active = true;
+    connectNativeClientApi().then(
+      (api) => active && setHost({ api }),
+      (error: unknown) =>
+        active &&
+        setHost({ error: error instanceof Error ? error.message : String(error) }),
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+  if (!host) return null;
+  if ("error" in host) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", padding: 24 }}>
+        <Text>{host.error}</Text>
+      </View>
+    );
+  }
+  return <ClientRoot api={host.api} />;
+}
+
+AppRegistry.registerComponent(CLIENT_ROOT_COMPONENT, () => App);
 
 export default App;

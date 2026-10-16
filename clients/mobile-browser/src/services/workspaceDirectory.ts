@@ -33,16 +33,10 @@ import {
   selectApprovalPresentation,
   stepApprovalPresentation,
 } from "@vibestudio/shared/approvalPresentation";
-import { drainBackgroundActionQueue } from "./backgroundActionQueue";
 import { createStore } from "jotai";
-import { Platform } from "react-native";
-import {
-  connectMobileAccount,
-  MobileConnectionAggregateError,
-  type MobileWorkspaceAccount,
-  type StoredMobileConnection,
-  type MobileHubWorkspace,
-} from "@vibestudio/mobile-iroh";
+import type { HubWorkspaceEntry as MobileHubWorkspace } from "@vibestudio/service-schemas/hubControl";
+import type { RemoteAccount, RnClientApi } from "@vibestudio/rn-client-api";
+import { MobileConnectionAggregateError } from "./mobileTransport";
 import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
@@ -281,10 +275,20 @@ export class MobileWorkspaceDirectory {
   private disposed = false;
   private closing: Promise<void> | null = null;
 
-  constructor(
-    readonly account: MobileWorkspaceAccount,
-    private readonly stored: StoredMobileConnection,
-  ) {
+  /** The account server's Endpoint ID the host authenticated (lower-case). */
+  readonly serverEndpointId: string;
+  /** This device's identity on that server. */
+  readonly deviceId: string;
+
+  constructor(readonly account: RemoteAccount) {
+    const { serverId, deviceId } = account.control;
+    if (!serverId || !deviceId) {
+      throw new Error(
+        "The account connection did not report its server and device identity",
+      );
+    }
+    this.serverEndpointId = serverId.toLowerCase();
+    this.deviceId = deviceId;
     this.hubControl = createTypedRpcServiceClient(
       account.control.rpc,
       { targetId: "main", namespace: "hubControl" },
@@ -335,8 +339,8 @@ export class MobileWorkspaceDirectory {
     );
     await this.hubApproval.events.subscribe("hub:workspace-catalog-changed");
     await this.refresh();
-    // open() publishes the System owner synchronously. Personal captures that
-    // same app-source client while both workspace connections become ready.
+    // System owns the device surfaces the server calls into (readiness,
+    // browser privacy, browser import); it opens alongside the selection.
     const system = this.open(this.systemWorkspaceId);
     const selected = this.entries.some((entry) => entry.workspaceId === saved)
       ? saved!
@@ -346,9 +350,9 @@ export class MobileWorkspaceDirectory {
         await session.client.refreshAccountProfile();
       }),
     );
-    // The selected workspace owns first presentation. System remains the
-    // canonical app-source owner, but its independent initialization and
-    // profile read cannot withhold an already restored selected workspace.
+    // The selected workspace owns first presentation. System's independent
+    // initialization and profile read cannot withhold an already restored
+    // selected workspace.
     await this.activate(selected);
   }
 
@@ -492,7 +496,7 @@ export class MobileWorkspaceDirectory {
   }
 
   private get selectionKey(): string {
-    return `vibestudio:active-workspace:${this.stored.controlPairing.endpointId}:${this.stored.credential.deviceId}`;
+    return `vibestudio:active-workspace:${this.serverEndpointId}:${this.deviceId}`;
   }
 
   async refresh(): Promise<void> {
@@ -625,17 +629,13 @@ export class MobileWorkspaceDirectory {
       : Promise.resolve();
     const store = createStore();
     const client = new ShellClient({
-      credentials: { deviceId: this.stored.credential.deviceId },
-      serverEndpointId: this.stored.controlPairing.endpointId,
+      credentials: { deviceId: this.deviceId },
+      serverEndpointId: this.serverEndpointId,
       workspaceId,
       workspaceName: displayWorkspaceName(entry),
       connectWorkspace: (onRecovery) =>
         this.account.openWorkspace(workspaceId, onRecovery),
-      ...(workspaceId !== this.systemWorkspaceId
-        ? {
-            appSourceClient: this.sessions.get(this.systemWorkspaceId)?.client,
-          }
-        : {}),
+      exposesDeviceSurfaces: workspaceId === this.systemWorkspaceId,
       getWorkspaceReadiness: () => this.phoneSetupReadiness(),
       onStatusChange: (status) => {
         store.set(connectionStatusAtom, status);
@@ -643,13 +643,6 @@ export class MobileWorkspaceDirectory {
       },
       onReadinessChange: (readiness) => {
         store.set(workspaceReadinessAtom, readiness);
-        if (readiness === "reconciled")
-          void drainBackgroundActionQueue(client).catch((error) =>
-            console.warn(
-              "[WorkspaceDirectory] Unable to send queued approval",
-              error,
-            ),
-          );
       },
       onTreeInvalidated: (event) =>
         store.set(panelTreeRevisionAtom, event.revision),
@@ -707,7 +700,6 @@ export class MobileWorkspaceDirectory {
                 `Approval observation is unavailable for ${workspaceId}`,
               );
             await controller.refresh("manual");
-            await drainBackgroundActionQueue(client);
           });
         };
         const stopResubscribe = client.recovery.registerResubscribeHandler(
@@ -907,7 +899,7 @@ export class MobileWorkspaceDirectory {
       throw new Error("You no longer have access to this workspace");
     }
     await clearWorkspaceCookies(
-      `${this.stored.controlPairing.endpointId.toLowerCase()}:${this.stored.credential.deviceId}`,
+      `${this.serverEndpointId}:${this.deviceId}`,
       workspaceId,
     );
   }
@@ -1090,15 +1082,19 @@ export class MobileWorkspaceDirectory {
   }
 }
 
+/** Open this client's account through the host and bring its directory up. */
 export async function createMobileWorkspaceDirectory(
-  stored: StoredMobileConnection,
+  api: RnClientApi,
   signal?: AbortSignal,
 ): Promise<MobileWorkspaceDirectory> {
-  const account = await connectMobileAccount(
-    stored,
-    Platform.OS === "ios" ? "app-scheme" : "client-loopback",
-  );
-  const directory = new MobileWorkspaceDirectory(account, stored);
+  const account = await api.session.openAccount();
+  let directory: MobileWorkspaceDirectory;
+  try {
+    directory = new MobileWorkspaceDirectory(account);
+  } catch (error) {
+    await account.close();
+    throw error;
+  }
   const onAbort = () => {
     void directory
       .dispose()

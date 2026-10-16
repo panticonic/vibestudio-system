@@ -23,7 +23,7 @@ import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
  *    hit costs zero pipe bytes and `writeStoredAsset` sends the body without
  *    materializing it in Hermes. Build-pinned entries are immutable; unpinned
  *    developer entries remain `no-store` and never enter the store.
- *  - A stable loopback port persisted in AsyncStorage and re-bound across launches,
+ *  - A stable loopback port persisted in the host-kept client state and re-bound across launches,
  *    so the webview's own HTTP cache (keyed by origin) survives app restarts.
  *
  * The only client is the in-app webview (loopback, one request per connection),
@@ -83,7 +83,7 @@ export interface PanelAssetFacade {
 }
 
 // --------------------------------------------------------------------------
-// Persisted port (AsyncStorage — a stable loopback origin keeps the webview
+// Persisted port (host-kept client state — a stable loopback origin keeps the webview
 // HTTP cache warm across app launches).
 // --------------------------------------------------------------------------
 

@@ -3,10 +3,11 @@ import { withRpcAbortSignal, isRpcAbortedBy } from "@vibestudio/rpc";
 import { Box, Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type {
-  TerminalBrowserExit,
-  TerminalBrowserHost,
+  TerminalClientExit,
+  TerminalClientHost,
+  TerminalClientUpdate,
   TerminalServerConnectionState,
-} from "@vibestudio/shell-core/terminal/terminalBrowserHost";
+} from "@vibestudio/shell-core/terminal/terminalClientHost";
 import {
   applyInstallReviewNav,
   applyTaskRulesNav,
@@ -40,6 +41,7 @@ import {
 } from "@workspace/workspace-core";
 import {
   ApprovalsOverlay,
+  ClientUpdatePrompt,
   ClickRegions,
   ClickRegionsProvider,
   ListOverlay,
@@ -54,6 +56,7 @@ import {
   listWindow,
   type ClickAction,
   type ListItem,
+  terminalPendingUpdate,
 } from "@workspace/client-kit-terminal";
 import { Compositor } from "./compositor/compositor.js";
 import { InkLayer } from "./compositor/inkLayer.js";
@@ -179,6 +182,7 @@ type Overlay =
   | { kind: "settings"; selected: number; error: string | null }
   | ({ kind: "workspaces"; model: WorkspaceModel } & ListState)
   | { kind: "confirm-close"; sessionId: string }
+  | { kind: "update" }
   | ({ kind: "links"; tabTitle: string; urls: string[] } & ListState)
   | { kind: "open-url"; tabTitle: string; url: string };
 
@@ -207,11 +211,11 @@ interface Layout {
   status: Rect;
 }
 
-/** The browser's server-side services; the launch service by default. */
+/** The browser's services: the launch service and the host's client state by default. */
 export interface TerminalBrowserServices {
   /** The person's terminal sessions in the shown workspace. */
   sessions: TerminalSessions;
-  /** The person's browser settings (kept in System). */
+  /** The person's browser settings (the host keeps them for this client on this device). */
   settings: TerminalSettingsStore;
 }
 
@@ -270,6 +274,8 @@ export class TerminalBrowser {
   private copy: CopyState | null = null;
   private lastSearch = "";
   private notice: string | null = null;
+  /** A newer build of this client is ready; the person decides when to restart into it. */
+  private pendingUpdate: TerminalClientUpdate | null = null;
   /** Requests already shown by themselves: each is presented once. */
   private readonly presented = new Set<string>();
   private readonly logs: LogLine[] = [];
@@ -285,14 +291,14 @@ export class TerminalBrowser {
   private chromeScheduled = false;
   private finished = false;
   private settle!: {
-    resolve: (exit: TerminalBrowserExit) => void;
+    resolve: (exit: TerminalClientExit) => void;
     reject: (error: unknown) => void;
   };
   private readonly cleanups: Array<() => void | Promise<void>> = [];
   private console: CapturedConsole | null = null;
 
   constructor(
-    private readonly host: TerminalBrowserHost,
+    private readonly host: TerminalClientHost,
     services?: TerminalBrowserServices
   ) {
     this.terminal = new TerminalOwnership({
@@ -300,12 +306,15 @@ export class TerminalBrowser {
       stdout: host.stdout,
     });
     this.router = new KeyRouter(this.settings.prefixKey);
-    // Settings live in System (the browser's app principal); the workspace it
-    // shows owns the apps, the person's sessions and their approvals, reached
-    // as this device's session there.
+    // Settings are the host's client state; the workspace the browser shows
+    // owns the apps, the person's sessions and their approvals, reached as
+    // this device's session there.
     this.services = services ?? {
       sessions: createTerminalSessions(withRpcAbortSignal(host.workspaceRpc, this.lifetime.signal)),
-      settings: createTerminalSessions(withRpcAbortSignal(host.rpc, this.lifetime.signal)),
+      settings: {
+        getSettings: () => host.state.get(),
+        setSettings: (settings) => host.state.set(settings),
+      },
     };
     this.shell = shellClient(withRpcAbortSignal(host.workspaceRpc, this.lifetime.signal));
     this.approvalsClient = createApprovalsClient(
@@ -330,7 +339,7 @@ export class TerminalBrowser {
   }
 
   /** Run until the user quits, switches workspace, or the server is gone. */
-  run(): Promise<TerminalBrowserExit> {
+  run(): Promise<TerminalClientExit> {
     const { stdin, stdout } = this.host;
     if (!stdin.isTTY || !stdout.isTTY) {
       return Promise.reject(
@@ -339,7 +348,7 @@ export class TerminalBrowser {
         )
       );
     }
-    const done = new Promise<TerminalBrowserExit>((resolve, reject) => {
+    const done = new Promise<TerminalClientExit>((resolve, reject) => {
       this.settle = { resolve, reject };
     });
     try {
@@ -381,6 +390,10 @@ export class TerminalBrowser {
     this.cleanups.push(
       this.host.onConnectionState((state) => this.guard(() => this.onConnectionState(state)))
     );
+    this.pendingUpdate = this.host.update.pending();
+    this.cleanups.push(
+      this.host.update.onUpdate((update) => this.guard(() => this.onUpdate(update)))
+    );
 
     // Explicit termination requests end the browser like quitting does.
     const onSignal = () => this.finish({ kind: "quit" });
@@ -412,7 +425,7 @@ export class TerminalBrowser {
         this.applyApprovals([...state.pending]);
       })
     );
-    void this.approvalQueue.start();
+    void this.own(this.approvalQueue.start()).catch((error) => this.fail(error));
     this.cleanups.push(() => {
       stopObserving();
       return this.approvalQueue.stop(this.lifetime.signal.reason);
@@ -468,7 +481,7 @@ export class TerminalBrowser {
   }
 
   /** Settle `run` exactly once and hand the terminal back. */
-  private finish(exit: TerminalBrowserExit, error?: unknown): void {
+  private finish(exit: TerminalClientExit, error?: unknown): void {
     if (this.finished) return;
     this.finished = true;
     this.lifetime.abort(error ?? new Error("Terminal browser closed"));
@@ -579,6 +592,19 @@ export class TerminalBrowser {
       this.log("warn", `Connection interrupted: ${state.cause}`);
     }
     this.changed();
+  }
+
+  /**
+   * The host announced a newer build. Restarting is the person's choice at a
+   * moment that suits them, so it is offered in the command palette rather than
+   * taking the keys they are typing; their sessions keep running either way.
+   */
+  private onUpdate(update: TerminalClientUpdate): void {
+    this.pendingUpdate = update;
+    this.log("info", `A newer terminal browser build is ready (${update.buildKey})`);
+    this.setNotice(
+      `Update ready: choose "Restart into the update" in the command palette (${this.prefix()} k).`
+    );
   }
 
   private onResize(): void {
@@ -1273,6 +1299,32 @@ export class TerminalBrowser {
           click: listClick(items, overlay.selected, rect.height),
         };
       }
+      case "update": {
+        const update = this.pendingUpdate;
+        if (!update) return null;
+        const rect = this.centered(layout, Math.min(68, body.width - 4), 6);
+        return {
+          rect,
+          element: (
+            <Box
+              flexDirection="column"
+              width={rect.width}
+              height={rect.height}
+              borderStyle="round"
+              borderColor="cyan"
+              paddingX={1}
+            >
+              <ClientUpdatePrompt
+                update={terminalPendingUpdate(this.host.client, update)}
+                width={rect.width - 4}
+              />
+              <Text dimColor wrap="wrap">
+                Your sessions keep running; the browser reopens on the new version.
+              </Text>
+            </Box>
+          ),
+        };
+      }
       case "confirm-close": {
         const session = this.sessions.find((s) => s.sessionId === overlay.sessionId);
         const running = session?.entry.running ?? false;
@@ -1559,10 +1611,13 @@ export class TerminalBrowser {
         const message = this.sessionMessage(focused);
         this.openDetail(message.title, message.lines.join("\n"));
       });
-      action("export-scrollback", "Save retained terminal output to a local file", () =>
-        this.saveTextPrompt(`Export ${focused.title}`, focused.grid.retainedText())
-      );
-      if (focused.entry.contextId) {
+      if (this.host.files) {
+        action("export-scrollback", "Save retained terminal output to a local file", () =>
+          this.saveTextPrompt(`Export ${focused.title}`, focused.grid.retainedText())
+        );
+      }
+      const files = this.host.files;
+      if (files && focused.entry.contextId) {
         const contextId = focused.entry.contextId;
         action("upload", "Upload a local file to this session context", () =>
           this.filePrompt(
@@ -1570,7 +1625,7 @@ export class TerminalBrowser {
             ["Local source path", "Workspace destination path"],
             "Upload and replace workspace destination",
             async ([localPath, workspacePath], signal) => {
-              const result = await this.host.files.upload(
+              const result = await files.upload(
                 {
                   contextId,
                   localPath: localPath!,
@@ -1588,7 +1643,7 @@ export class TerminalBrowser {
             ["Workspace source path", "Local destination path"],
             "Download to a new local file",
             async ([workspacePath, localPath], signal) => {
-              const result = await this.host.files.download(
+              const result = await files.download(
                 {
                   contextId,
                   workspacePath: workspacePath!,
@@ -1626,6 +1681,11 @@ export class TerminalBrowser {
         `${prefix} r`
       );
       action("close", `End ${focused.title}`, () => this.command({ kind: "close" }), `${prefix} x`);
+    }
+    if (this.pendingUpdate) {
+      action("update", "Restart into the update (a newer version is ready)", () => {
+        this.overlay = { kind: "update" };
+      });
     }
     action("logs", "Browser log", () => this.command({ kind: "logs" }), `${prefix} l`);
     action("log-search", "Search and inspect browser log entries", () => {
@@ -2138,6 +2198,15 @@ export class TerminalBrowser {
       case "settings":
         this.onSettingsKey(overlay, event);
         break;
+      case "update":
+        if (event.kind === "key" && event.name === "r") {
+          this.overlay = null;
+          // Sessions live on the server and reattach on the next entry: now is a safe point.
+          this.host.update.restartAtSafePoint();
+        } else if (event.kind === "key" && (event.name === "l" || event.name === "escape")) {
+          this.overlay = null;
+        }
+        break;
       case "confirm-close":
         if (event.kind === "key" && (event.name === "y" || event.name === "Y")) {
           this.overlay = null;
@@ -2569,8 +2638,9 @@ export class TerminalBrowser {
       bell: (session: ShellSessionTab) => this.guard(() => this.onBell(session)),
       copy: (session: ShellSessionTab, text: string) =>
         this.guard(() => {
-          this.copyToClipboard(text);
-          this.setNotice(`Copied ${characters(text)} from ${session.title}`);
+          if (this.copyToClipboard(text)) {
+            this.setNotice(`Copied ${characters(text)} from ${session.title}`);
+          }
         }),
       log: (level: "info" | "warn" | "error", message: string) => this.log(level, message),
     };
@@ -2754,7 +2824,12 @@ export class TerminalBrowser {
   private onBell(session: ShellSessionTab): void {
     // The focused tab's bell reaches the real terminal, as in any terminal;
     // a background tab's only when the person asked for that.
-    if (session === this.focusedSession() || this.settings.bell) this.terminal.write("\x07");
+    if (session === this.focusedSession()) this.terminal.write("\x07");
+    else if (this.settings.bell) {
+      const { notify } = this.host;
+      if (notify) notify.notify({ title: session.title, body: "wants your attention" });
+      else this.terminal.write("\x07");
+    }
   }
 
   // ── links & clipboard ──────────────────────────────────────────────────────
@@ -2790,9 +2865,20 @@ export class TerminalBrowser {
     }
   }
 
-  /** Put text on the person's clipboard through their terminal (OSC 52). */
-  private copyToClipboard(text: string): void {
-    this.terminal.write(`\x1b]52;c;${Buffer.from(text, "utf8").toString("base64")}\x07`);
+  /** Put text on the person's clipboard through the host (which owns the terminal escape). */
+  private copyToClipboard(text: string): boolean {
+    const { clipboard } = this.host;
+    if (!clipboard) {
+      this.setNotice("This client was not granted the clipboard.");
+      return false;
+    }
+    try {
+      clipboard.write(text);
+      return true;
+    } catch (error) {
+      this.setNotice(`Could not copy: ${describeError(error)}`);
+      return false;
+    }
   }
 
   // ── copy mode ──────────────────────────────────────────────────────────────
@@ -2916,11 +3002,13 @@ export class TerminalBrowser {
       case "y":
       case "enter": {
         const text = selectedText(grid, copy);
-        this.copyToClipboard(text);
+        const copied = this.copyToClipboard(text);
         this.copy = null;
-        this.setNotice(
-          `Copied ${characters(text)} to your clipboard (if your terminal allows OSC 52)`
-        );
+        if (copied) {
+          this.setNotice(
+            `Copied ${characters(text)} to your clipboard (if your terminal allows OSC 52)`
+          );
+        }
         return;
       }
       case "q":
@@ -2977,12 +3065,17 @@ export class TerminalBrowser {
   }
 
   private saveTextPrompt(title: string, text: string): void {
+    const files = this.host.files;
+    if (!files) {
+      this.setNotice("This client was not granted access to local files, so it cannot save one.");
+      return;
+    }
     this.filePrompt(
       title,
       ["New local output path"],
       "Save text to a new local file",
       async ([localPath], signal) => {
-        const result = await this.host.files.saveText({ localPath: localPath!, text }, { signal });
+        const result = await files.saveText({ localPath: localPath!, text }, { signal });
         return `Saved ${result.path} (${result.size} bytes)`;
       }
     );

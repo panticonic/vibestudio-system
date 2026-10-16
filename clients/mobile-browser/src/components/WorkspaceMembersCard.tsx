@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import { useAtomValue, useSetAtom } from "jotai";
-import type { MobileHubWorkspace } from "@vibestudio/mobile-iroh";
+import type { HubWorkspaceEntry as MobileHubWorkspace } from "@vibestudio/service-schemas/hubControl";
 import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
 import { workspaceName } from "../services/workspaceName";
 import { themeColorsAtom } from "../state/themeAtoms";

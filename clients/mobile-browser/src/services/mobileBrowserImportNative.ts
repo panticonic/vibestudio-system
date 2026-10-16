@@ -1,50 +1,16 @@
-import { NativeModules, Platform } from "react-native";
+import { Platform } from "react-native";
 import { base64ToBytes } from "@vibestudio/rpc";
-import { requireApprovedAppCapability } from "./appCapabilities";
+import type { BrowserImportArchiveHandle } from "@vibestudio/rn-client-api";
+import { clientApi } from "@workspace/client-kit-native/host";
 
-export interface NativeBrowserImportEntry {
-  name: string;
-  size: number;
-}
-
-export interface NativeBrowserImportArchive {
-  handle: string;
-  displayName: string;
-  mimeType?: string;
-  size: number;
-  entries: NativeBrowserImportEntry[];
-}
-
-interface NativeBrowserImportHost {
-  openSafariBrowserDataExport(): Promise<{
-    opened: boolean;
-    unavailableReason?: string;
-  }>;
-  pickBrowserImportArchive(): Promise<NativeBrowserImportArchive | null>;
-  readBrowserImportEntry(
-    handle: string,
-    name: string,
-    offset: number,
-    maximumBytes: number,
-  ): Promise<{ dataBase64: string; eof: boolean }>;
-  releaseBrowserImportArchive(handle: string): Promise<void>;
-}
+export type NativeBrowserImportArchive = BrowserImportArchiveHandle;
 
 const READ_CHUNK_BYTES = 256 * 1024;
 const MAX_JS_ENTRY_BYTES = 64 * 1024 * 1024;
 const MAX_JS_ARCHIVE_BYTES = 256 * 1024 * 1024;
 
-function nativeHost(): NativeBrowserImportHost {
-  requireApprovedAppCapability("browser-import", "browser export import");
-  const host = NativeModules["VibestudioMobileHost"] as
-    | NativeBrowserImportHost
-    | undefined;
-  if (!host)
-    throw new Error(
-      "Browser export import is unavailable in this mobile app version.",
-    );
-  return host;
-}
+// The host holds the staged archives and enforces `browser-import` on each call.
+const browserImport = () => clientApi().browserImport;
 
 export async function openSafariBrowserDataExport(): Promise<string> {
   if (Platform.OS !== "ios") {
@@ -52,7 +18,7 @@ export async function openSafariBrowserDataExport(): Promise<string> {
       "Safari browser export is available only on iPhone and iPad.",
     );
   }
-  const result = await nativeHost().openSafariBrowserDataExport();
+  const result = await browserImport().openSafariExport();
   if (!result.opened) {
     throw new Error(
       result.unavailableReason ?? "Safari browser export is unavailable.",
@@ -62,7 +28,7 @@ export async function openSafariBrowserDataExport(): Promise<string> {
 }
 
 export function pickBrowserImportArchive(): Promise<NativeBrowserImportArchive | null> {
-  return nativeHost().pickBrowserImportArchive();
+  return browserImport().pickArchive();
 }
 
 export async function readBrowserImportArchive(
@@ -85,7 +51,7 @@ export async function readBrowserImportArchive(
     const bytes = new Uint8Array(entry.size);
     let offset = 0;
     while (offset < entry.size) {
-      const chunk = await nativeHost().readBrowserImportEntry(
+      const chunk = await browserImport().readEntry(
         archive.handle,
         entry.name,
         offset,
@@ -114,5 +80,5 @@ export async function readBrowserImportArchive(
 }
 
 export function releaseBrowserImportArchive(handle: string): Promise<void> {
-  return nativeHost().releaseBrowserImportArchive(handle);
+  return browserImport().releaseArchive(handle);
 }

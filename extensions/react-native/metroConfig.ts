@@ -3,9 +3,32 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { BuildProviderInput } from "@vibestudio/shared/buildProvider";
 
-interface NativeModulePolicy {
-  blockedImports: Record<string, string[]>;
-}
+/**
+ * Device-owned native modules a client bundle may not import (host ABI
+ * rn-host-6). The host runtime owns the credential, the Iroh connection, push
+ * and storage; a client reaches them only through `@vibestudio/rn-client-api`,
+ * and the host does not register these modules in a client's React Native
+ * instance at all. Blocking the import here fails the build with the reason
+ * instead of failing the client at startup.
+ *
+ * Each entry lists the exact specifiers that stay importable (a package's
+ * side-effect-free entry points); every other specifier equal to the key or
+ * below it is blocked from every importer, the client's own code and its
+ * dependencies alike.
+ */
+export const HOST_OWNED_NATIVE_IMPORTS: Readonly<Record<string, readonly string[]>> =
+  Object.freeze({
+    "react-native-keychain": [],
+    "@react-native-firebase/app": [],
+    "@react-native-firebase/messaging": [],
+    "@notifee/react-native": [],
+    "@react-native-async-storage/async-storage": [],
+    "@react-native-clipboard/clipboard": [],
+    "react-native-vision-camera": [],
+    // The transport package links the Keychain and the native Iroh module. A
+    // client takes only the Hermes polyfills its transport-free code needs.
+    "@vibestudio/mobile-iroh": ["@vibestudio/mobile-iroh/polyfills"],
+  });
 
 export function writeProjectedMetroConfig(
   input: BuildProviderInput,
@@ -17,11 +40,6 @@ export function writeProjectedMetroConfig(
       "React Native builds require a Build V2 dependency projection",
     );
   }
-  const app = appManifest(input);
-  const policy = readNativeModulePolicy(
-    input.sourcePath,
-    app["nativeModulePolicy"],
-  );
   // Metro is the build provider's tool, not an application runtime dependency.
   // Resolve it from this extension's exact dependency environment so a mobile
   // app does not have to duplicate the provider's implementation dependency.
@@ -46,7 +64,7 @@ export function writeProjectedMetroConfig(
     sourcePath: input.sourcePath,
     nodeModulesPath,
     modules: input.dependencyProjection.modules,
-    policy,
+    hostOwnedImports: HOST_OWNED_NATIVE_IMPORTS,
     metroConfigPackage,
     providerNodeModulesPath,
     babelTransformerPath,
@@ -137,46 +155,6 @@ module.exports = {
   return transformerPath;
 }
 
-function appManifest(input: BuildProviderInput): Record<string, unknown> {
-  return input.manifest["app"] && typeof input.manifest["app"] === "object"
-    ? (input.manifest["app"] as Record<string, unknown>)
-    : input.manifest;
-}
-
-function readNativeModulePolicy(
-  sourcePath: string,
-  declaration: unknown,
-): NativeModulePolicy {
-  if (typeof declaration !== "string" || declaration.length === 0) {
-    return { blockedImports: {} };
-  }
-  const appRoot = path.resolve(sourcePath);
-  const policyPath = path.resolve(appRoot, declaration);
-  if (!policyPath.startsWith(`${appRoot}${path.sep}`)) {
-    throw new Error("React Native nativeModulePolicy escapes the app source");
-  }
-  const parsed = JSON.parse(
-    fs.readFileSync(policyPath, "utf8"),
-  ) as Partial<NativeModulePolicy>;
-  if (!parsed.blockedImports || typeof parsed.blockedImports !== "object") {
-    throw new Error(
-      "React Native nativeModulePolicy must declare blockedImports",
-    );
-  }
-  for (const [moduleName, importers] of Object.entries(parsed.blockedImports)) {
-    if (
-      !moduleName ||
-      !Array.isArray(importers) ||
-      importers.some((item) => typeof item !== "string")
-    ) {
-      throw new Error(
-        "React Native nativeModulePolicy contains an invalid blocked import",
-      );
-    }
-  }
-  return { blockedImports: parsed.blockedImports };
-}
-
 function metroConfigSource(data: string): string {
   return `
 const fs = require("node:fs");
@@ -184,31 +162,17 @@ const path = require("node:path");
 const data = ${data};
 const { getDefaultConfig, mergeConfig } = require(data.metroConfigPackage);
 const normalize = (value) => path.resolve(value).replace(/\\\\/g, "/");
-const allowedByModule = new Map(
-  Object.entries(data.policy.blockedImports).map(([moduleName, importers]) => [
-    moduleName,
-    new Set(importers.map((importer) => normalize(path.join(data.sourcePath, importer)))),
-  ]),
-);
-const mobileIroh = data.modules["@vibestudio/mobile-iroh"];
-if (mobileIroh) {
-  allowedByModule.get("react-native-keychain")?.add(normalize(path.join(mobileIroh, "src/connect.ts")));
-  allowedByModule.get("@react-native-async-storage/async-storage")?.add(
-    normalize(path.join(mobileIroh, "src/connectLink.ts")),
-  );
-}
 const blockedImportFor = (moduleName) =>
-  Object.keys(data.policy.blockedImports).find(
+  Object.keys(data.hostOwnedImports).find(
     (blocked) => moduleName === blocked || moduleName.startsWith(blocked + "/"),
   );
 const guardNativeImport = (moduleName, originModulePath) => {
   const blocked = blockedImportFor(moduleName);
-  if (!blocked) return;
-  const origin = originModulePath ? normalize(originModulePath) : "";
-  if (allowedByModule.get(blocked)?.has(origin)) return;
+  if (!blocked || data.hostOwnedImports[blocked].includes(moduleName)) return;
   throw new Error(
-    'Direct import of native module "' + moduleName + '" from workspace app code is blocked. ' +
-      'Importer: ' + (origin || "unknown") + '. Use the Vibestudio platform-owned wrapper for this native surface.',
+    'Import of host-owned native module "' + moduleName + '" from client code is blocked. ' +
+      'Importer: ' + (originModulePath ? normalize(originModulePath) : "unknown") + '. ' +
+      'The host runtime owns this device capability; use @vibestudio/rn-client-api.',
   );
 };
 const polyfills = {

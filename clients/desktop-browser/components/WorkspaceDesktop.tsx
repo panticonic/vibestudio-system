@@ -624,14 +624,14 @@ export function WorkspaceDesktop({
           openWorkspace,
           inspectWorkspaceFolder: (
             globalThis as unknown as {
-              __vibestudioApp?: {
+              __vibestudioClient?: {
                 inspectWorkspaceFolder(): Promise<
                   | import("@vibestudio/service-schemas/templates").TemplateInspection
                   | null
                 >;
               };
             }
-          ).__vibestudioApp?.inspectWorkspaceFolder,
+          ).__vibestudioClient?.inspectWorkspaceFolder,
         }}
       >
         <div className="workspace-desktop">

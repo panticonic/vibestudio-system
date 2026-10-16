@@ -6,10 +6,14 @@
   "description": "React Native client chrome built on the headless cores: approval sheet, connection bar, workspace list, client-update prompt",
   "exports": {
     ".": "./src/index.ts",
-    "./ui": "./src/ui/index.ts"
+    "./ui": "./src/ui/index.ts",
+    "./testing": "./src/testing/index.ts",
+    "./host": "./src/host/index.ts"
   },
   "dependencies": {
+    "@vibestudio/rn-client-api": "workspace:*",
     "@vibestudio/shared": "workspace:*",
+    "@vibestudio/workspace-contracts": "workspace:*",
     "@workspace/approvals-core": "workspace:*",
     "@workspace/client-update-core": "workspace:*",
     "@workspace/connection-core": "workspace:*",

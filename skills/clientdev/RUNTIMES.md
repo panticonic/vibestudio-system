@@ -173,9 +173,9 @@ Behavior:
   params, `files` (local, consent per path), `clipboard`, `notify` and
   client-scoped `state`. `run` resolves with `quit`, `switch-workspace`, or
   `connection-lost`.
-- When stdin or stdout is not a TTY and the intent is a background intent, the
-  host runs `clients.invokeIntent` and streams the result to stdout without
-  loading any client module.
+- A background intent never loads the client: the host runs
+  `clients.invokeIntent`, with piped stdin as the intent's one `text`
+  parameter, and prints the handler's text to stdout.
 
 `clients/terminal-browser` is the reference terminal client.
 
@@ -227,8 +227,8 @@ subcommands). `open` is implicit for every client.
   `{intent, params}` through the host ABI; a running client receives it as an
   event. Optional `accepts` lists MIME patterns for share-in.
 - `kind: "background"`: runs **server-side**, never as client code. It names a
-  workspace service method as `handler` (subject to the client principal's
-  authority) and a `result` of `text` or `text-stream`. The host calls
+  Durable Object-backed workspace service method as `handler` (subject to the
+  client principal's authority) that returns text once it has finished. The host calls
   `clients.invokeIntent({ id, intent, params })` and renders the result with
   platform UI.
 - `dynamic` names a service method listing small dynamic entries (recent
