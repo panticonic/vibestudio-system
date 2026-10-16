@@ -1,22 +1,21 @@
-apps:
-  - source: apps/shell
-  - source: apps/mobile
-  - source: apps/terminal-browser
+clientDefaults:
+  android: clients/mobile-browser
+  desktop: clients/desktop-browser
+  ios: clients/mobile-browser
+  terminal: clients/terminal-browser
+clients:
+  - source: clients/desktop-browser
+  - source: clients/mobile-browser
+  - source: clients/terminal-browser
 extensions:
   - source: extensions/typecheck-service
   - source: extensions/mobile-debug
   - source: extensions/react-native
   - source: extensions/local-models
-hostTargets:
-  electron:
-    app: apps/shell
-  react-native:
-    app: apps/mobile
-    requiresExtensions:
-      - extensions/react-native
-  terminal:
-    app: apps/terminal-browser
 minimumAppVersion: 0.1.105
+runtimeExtensions:
+  react-native:
+    - extensions/react-native
 services:
   - name: phone.provisioning
     source: workers/phone-provisioning
@@ -36,6 +35,7 @@ template:
   description: Your private client applications and device settings.
   name: System
 trust:
-  chromeApps:
-    - apps/shell
-    - apps/mobile
+  clients:
+    - clients/desktop-browser
+    - clients/terminal-browser
+    - clients/mobile-browser

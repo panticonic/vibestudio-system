@@ -12,7 +12,7 @@ import { activate, integrityForFile } from "./index.js";
 function input(rnHostAbi: unknown): BuildProviderInput {
   return {
     target: "react-native",
-    unitName: "apps/mobile",
+    unitName: "clients/mobile-browser",
     sourcePath: "/nonexistent",
     dependencyProjection: { nodeModulesPath: null, modules: {} },
     effectiveVersion: "ev",

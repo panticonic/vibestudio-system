@@ -34,12 +34,12 @@ describe("React Native provider Metro projection", () => {
     );
     const input: BuildProviderInput = {
       target: "react-native",
-      unitName: "@workspace-apps/mobile",
+      unitName: "@workspace-clients/mobile-browser",
       sourcePath,
       dependencyProjection: {
         nodeModulesPath: path.resolve("node_modules"),
         modules: {
-          "@workspace-apps/mobile": sourcePath,
+          "@workspace-clients/mobile-browser": sourcePath,
           "@vibestudio/mobile-iroh": path.resolve("packages/mobile-iroh"),
         },
       },
@@ -66,7 +66,7 @@ describe("React Native provider Metro projection", () => {
     expect(config).not.toContain("process.cwd");
     expect(config).not.toContain("VIBESTUDIO_REPO_ROOT");
     expect(config).not.toContain("workspaceRoot");
-    expect(config).not.toContain("apps/mobile/metro.config.js");
+    expect(config).not.toContain("clients/mobile-browser/metro.config.js");
     const loaded = require(configPath) as {
       resolver: {
         nodeModulesPaths: string[];
@@ -82,7 +82,7 @@ describe("React Native provider Metro projection", () => {
         "..",
       ),
     ]);
-    expect(loaded.resolver.extraNodeModules["@workspace-apps/mobile"]).toBe(
+    expect(loaded.resolver.extraNodeModules["@workspace-clients/mobile-browser"]).toBe(
       sourcePath,
     );
     expect(config).not.toContain("packageExportTarget");
@@ -93,16 +93,16 @@ describe("React Native provider Metro projection", () => {
     // an app-authored babel.config.js would not resolve. Without these two the
     // failure is silent: Metro's first-require guard turns the module factory
     // throw into `undefined`, and the app dies on an unrelated property read.
-    const sourcePath = path.resolve("apps/mobile");
+    const sourcePath = path.resolve("clients/mobile-browser");
     const outputPath = fs.mkdtempSync(path.join(os.tmpdir(), "metro-babel-"));
     temporaryRoots.push(outputPath);
     const input: BuildProviderInput = {
       target: "react-native",
-      unitName: "@workspace-apps/mobile",
+      unitName: "@workspace-clients/mobile-browser",
       sourcePath,
       dependencyProjection: {
         nodeModulesPath: path.resolve("node_modules"),
-        modules: { "@workspace-apps/mobile": sourcePath },
+        modules: { "@workspace-clients/mobile-browser": sourcePath },
       },
       effectiveVersion: "ev-test",
       manifest: { app: { target: "react-native", renderer: "App.tsx" } },
@@ -177,7 +177,7 @@ describe("React Native provider Metro projection", () => {
     const configPath = writeProjectedMetroConfig(
       {
         target: "react-native",
-        unitName: "@workspace-apps/mobile",
+        unitName: "@workspace-clients/mobile-browser",
         sourcePath,
         dependencyProjection: {
           nodeModulesPath: path.resolve("node_modules"),
@@ -219,7 +219,7 @@ describe("React Native provider Metro projection", () => {
   it("keeps native imports with their exact platform initialization and session owners", () => {
     const sourcePath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
-      "../../apps/mobile",
+      "../../clients/mobile-browser",
     );
     const outputPath = fs.mkdtempSync(
       path.join(os.tmpdir(), "metro-native-policy-"),
@@ -228,12 +228,12 @@ describe("React Native provider Metro projection", () => {
     const configPath = writeProjectedMetroConfig(
       {
         target: "react-native",
-        unitName: "@workspace-apps/mobile",
+        unitName: "@workspace-clients/mobile-browser",
         sourcePath,
         dependencyProjection: {
           nodeModulesPath: path.resolve("node_modules"),
           modules: {
-            "@workspace-apps/mobile": sourcePath,
+            "@workspace-clients/mobile-browser": sourcePath,
             "@vibestudio/mobile-iroh": path.resolve("packages/mobile-iroh"),
           },
         },

@@ -1,0 +1,51 @@
+{
+  "name": "@workspace-clients/terminal-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "displayName": "Vibestudio Terminal",
+    "icon": "./assets/icon.svg",
+    "client": {
+      "id": "browser",
+      "runtime": "terminal",
+      "hostAbi": "terminal-host-1",
+      "entry": "src/index.ts",
+      "title": "Vibestudio Terminal",
+      "capabilities": {
+        "required": [
+          "device-session",
+          "terminal-app-hosting",
+          "approval-surface"
+        ],
+        "optional": [
+          "clipboard",
+          "notifications",
+          "local-files",
+          "open-external"
+        ]
+      }
+    },
+    "authority": {
+      "provides": [],
+      "requests": []
+    },
+    "description": "Start terminal apps and shells, resume your running sessions and answer approvals from any terminal."
+  },
+  "dependencies": {
+    "@vibestudio/extension": "workspace:*",
+    "@vibestudio/rpc": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@vibestudio/shell-core": "workspace:*",
+    "@workspace/pty-stream": "workspace:*",
+    "@xterm/addon-unicode11": "^0.9.0",
+    "@xterm/headless": "^5.5.0",
+    "ink": "^6.8.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@workspace-extensions/shell": "workspace:*",
+    "vitest": "^3.2.7"
+  }
+}

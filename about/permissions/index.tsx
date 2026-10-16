@@ -197,8 +197,8 @@ type AuthorityRow = {
 };
 type BuildUnitCatalogEntry = {
   name: string;
-  kind: "panel" | "worker" | "extension" | "app";
-  target: "electron" | "react-native" | "terminal" | null;
+  kind: "panel" | "worker" | "extension" | "client";
+  runtime: "web" | "react-native" | "terminal" | null;
   isAgent: boolean;
   source: string;
   displayName: string;
@@ -322,7 +322,7 @@ const CELL_META: Record<
 };
 
 const UNIT_KIND_META: Record<
-  "agent" | "worker" | "panel" | "app" | "extension",
+  "agent" | "worker" | "panel" | "client" | "extension",
   { plural: string; singular: string; icon: LucideIcon; blurb: string }
 > = {
   agent: {
@@ -343,11 +343,11 @@ const UNIT_KIND_META: Record<
     icon: PanelsTopLeft,
     blurb: "Screens you open. They act only while you are looking at them.",
   },
-  app: {
-    plural: "Apps",
-    singular: "app",
+  client: {
+    plural: "Clients",
+    singular: "client",
     icon: AppWindow,
-    blurb: "Whole applications installed into this workspace.",
+    blurb: "Trusted programs that run on your devices, such as the browsers.",
   },
   extension: {
     plural: "Extensions",
@@ -1397,7 +1397,7 @@ function UnitCard({
               <DataList.Label minWidth="120px">Kind</DataList.Label>
               <DataList.Value>
                 {group.singular}
-                {unit.target ? ` · runs on ${unit.target}` : ""}
+                {unit.runtime ? ` · runs on ${unit.runtime}` : ""}
               </DataList.Value>
             </DataList.Item>
             <DataList.Item>
@@ -2427,7 +2427,7 @@ function PermissionsPage() {
 
             <Tabs.Content value="catalog">
               <Flex direction="column" gap="4">
-                {(["agent", "worker", "panel", "app", "extension"] as const).map((group) => {
+                {(["agent", "worker", "panel", "client", "extension"] as const).map((group) => {
                   const matching = visibleUnits.filter((unit) => unitGroup(unit) === group);
                   if (matching.length === 0) return null;
                   const meta = UNIT_KIND_META[group];
