@@ -79,6 +79,7 @@ const session = {
   clientId: "client:chat:web:dev-1",
   rpc: { marker: "rpc" },
   events: { marker: "events" },
+  images: { marker: "images" },
 } as unknown as ChatSession;
 
 function mount(overrides: Partial<React.ComponentProps<typeof ChatPane>> = {}) {
@@ -122,11 +123,25 @@ describe("ChatPane", () => {
       channelName: "chan-1",
       contextId: "ctx-1",
       config: { clientId: "client:chat:web:dev-1", rpc: session.rpc },
-      features: [],
+      features: ["feedback", "inline-ui", "action-bar", "client-eval"],
       theme: "light",
       heightMode: "container",
     });
     await waitFor(() => expect(props.onChannel).toHaveBeenCalledWith("chan-1"));
+  });
+
+  it("gives the chat the image and problem-report ports of its routed session, and an import loader", async () => {
+    mount();
+    const [controller] = store.controllers;
+    expect(controller!.ports.images).toBe(session.images);
+    expect(controller!.ports.problemReports.report).toEqual(expect.any(Function));
+    await screen.findByTestId("chat");
+    // The chat UI consumes the same ports the controller runs on.
+    expect(lastChat().hostServices).toEqual({
+      problemReports: controller!.ports.problemReports,
+      images: session.images,
+    });
+    expect(lastChat().importLoader).toEqual(expect.any(Function));
   });
 
   it("starts a new chat from the context it was given, with its seed, and reports the minted channel", async () => {

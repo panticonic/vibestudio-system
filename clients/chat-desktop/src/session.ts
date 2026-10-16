@@ -3,7 +3,8 @@ import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
 import { createApprovalsClient, type ApprovalsClient } from "@workspace/approvals-core";
-import type { RpcOwners } from "./ownerRpc";
+import type { OwnerRpcs } from "@workspace/client-kit-web";
+import { createImagesClient, type ImagesClient } from "@workspace/runtime/images";
 
 /**
  * The chat's live connection: this device's session in the account's Personal
@@ -18,6 +19,8 @@ export interface ChatSession {
   readonly rpc: RpcClient;
   readonly events: EventsClient;
   readonly approvals: ApprovalsClient;
+  /** Authenticated, workspace-scoped image reads, over the same routed session. */
+  readonly images: ImagesClient;
   close(): void;
 }
 
@@ -27,7 +30,7 @@ export interface ChatSession {
  * unchanged.
  */
 export async function openChatSession(
-  owners: RpcOwners,
+  owners: OwnerRpcs,
   identity: { runtimeId: string }
 ): Promise<ChatSession> {
   const hub = owners.open({ kind: "hub" });
@@ -50,6 +53,7 @@ export async function openChatSession(
     rpc: workspace.rpc,
     events: new EventsClient(workspace.rpc),
     approvals: createApprovalsClient(workspace.rpc),
+    images: createImagesClient(workspace.rpc),
     close: () => workspace.close(),
   };
 }

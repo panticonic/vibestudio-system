@@ -37,6 +37,7 @@ for native code.
 | ------------------------------------------------------------- | ------------------------------------------------------------------- |
 | Package, manifest, source, dependencies, panel commands       | [AUTHORING.md](AUTHORING.md#hosting-panel-contributed-commands)     |
 | External dependencies, overrides, and patches                 | [workspace dependency resolution](../workspace-dev/DEPENDENCIES.md) |
+| Background intent handlers (service recipe)                   | [AUTHORING.md](AUTHORING.md#background-intent-handlers)             |
 | Web, React Native, or terminal runtime contracts              | [RUNTIMES.md](RUNTIMES.md)                                          |
 | Capability catalog, required vs optional, `trust.clients`     | [CAPABILITIES.md](CAPABILITIES.md)                                  |
 | Develop and deploy a client with no restart, diagnostics      | [DEV_LOOP.md](DEV_LOOP.md)                                          |

@@ -9,18 +9,44 @@ import {
   type RpcClient,
   type RpcConnectionStatus,
   type RpcDestination,
+  type RpcEnvelope,
 } from "@vibestudio/rpc";
 import { SESSION_CONNECTION_LOST_CODE } from "@vibestudio/rpc/protocol/remoteSession";
-import type { HostBridge } from "./hostBridge";
+import {
+  createNativeConnectionState,
+  type NativeWorkspaceConnectionBridge,
+} from "./nativeConnectionState";
+
+/** `window.__vibestudioTransport`: this client principal's envelope pipe to the routed sessions. */
+export interface OwnerTransport {
+  identity: { workspaceId: string; runtimeId: string };
+  send(envelope: RpcEnvelope): Promise<void>;
+  onMessage(handler: (envelope: RpcEnvelope) => void): () => void;
+  onRecovery?(
+    kind: "resubscribe" | "cold-recover",
+    handler: (workspaceId?: string) => void | Promise<void>
+  ): () => void;
+}
+
+/** What an owner needs from the desktop host: its transport and its single connection fact. */
+export interface OwnerRpcHost {
+  transport: OwnerTransport;
+  connection: NativeWorkspaceConnectionBridge;
+}
 
 /**
- * The window's RPC, one client per destination. The host routes an envelope by
- * its destination to this device's session in that workspace (or the hub), so a
- * chat window reaches the Personal workspace without the System one's help.
- *
- * Availability is the host's single connection fact; a window never invents its
- * own. Closing an owner settles its listeners and fails later calls, so a
- * retired conversation cannot keep talking.
+ * Work that must follow the RPC core's own recovery handling, in order (the
+ * browser's recovery coordinator resyncs workspace-owned state after it).
+ */
+export interface OwnerRecovery {
+  run(kind: "resubscribe" | "cold-recover"): void | Promise<void>;
+}
+
+/**
+ * One window's RPC to one destination. The host routes an envelope by its
+ * destination to this device's session in that workspace (or the hub).
+ * Closing an owner settles its listeners and fails later calls, so a retired
+ * conversation or workspace cannot keep talking.
  */
 export interface OwnerRpc {
   readonly rpc: RpcClient;
@@ -31,50 +57,15 @@ function connectionLost(message: string): RpcBoundaryError {
   return new RpcBoundaryError(message, "transport", SESSION_CONNECTION_LOST_CODE);
 }
 
-/** The host's availability fact as an RPC status, settled once from `getCurrent`. */
-function observeConnection(bridge: HostBridge["connection"]) {
-  let status: RpcConnectionStatus = "connecting";
-  let changed = false;
-  const listeners = new Set<(status: RpcConnectionStatus) => void>();
-  const publish = (next: RpcConnectionStatus) => {
-    if (status === next) return;
-    status = next;
-    for (const listener of [...listeners]) listener(next);
-  };
-  const apply = (phase: string) =>
-    publish(phase === "online" ? "connected" : phase === "ended" ? "disconnected" : "connecting");
-  const stop = bridge.onChange((state) => {
-    changed = true;
-    apply(state.phase);
-  });
-  const initialized = bridge.getCurrent().then((state) => {
-    if (!changed) apply(state.phase);
-  });
-  return {
-    status: () => status,
-    /** Wait only for the first authoritative fact, never for a later reconnection. */
-    async ready() {
-      if (!changed) await initialized;
-      if (status !== "connected") throw connectionLost("Workspace connection is unavailable");
-    },
-    onStatusChange(handler: (status: RpcConnectionStatus) => void) {
-      listeners.add(handler);
-      return () => {
-        listeners.delete(handler);
-      };
-    },
-    close() {
-      stop();
-      listeners.clear();
-    },
-  };
-}
+export type OwnerRpcs = ReturnType<typeof createOwnerRpcs>;
 
-export type RpcOwners = ReturnType<typeof createRpcOwners>;
-
-/** Open owners over one host bridge. Closing it closes every owner it handed out. */
-export function createRpcOwners(host: HostBridge) {
-  const connection = observeConnection(host.connection);
+/**
+ * Open owners over one host bridge. Availability is the host's single
+ * connection fact, observed once for every owner; a window never invents its
+ * own. Closing the set closes every owner it handed out.
+ */
+export function createOwnerRpcs(host: OwnerRpcHost) {
+  const connection = createNativeConnectionState(host.connection);
   // A refused first read surfaces on the first call through `ready()`.
   void connection.ready().catch(() => undefined);
   const owners = new Set<OwnerRpc>();
@@ -84,15 +75,15 @@ export function createRpcOwners(host: HostBridge) {
 
   return {
     /** The RPC of this device's session at `destination`. */
-    open(destination: RpcDestination): OwnerRpc {
+    open(destination: RpcDestination, options: { recovery?: OwnerRecovery } = {}): OwnerRpc {
       // A window that went away while a session was still opening must not leave one behind.
-      if (closed) throw connectionLost("Chat is closed");
+      if (closed) throw connectionLost("The window's RPC is closed");
       let retired = false;
       const lifetime = new AbortController();
       const releases = new Set<() => void>();
       const statuses = new Set<(status: RpcConnectionStatus) => void>();
       const guard = (): void => {
-        if (retired) throw connectionLost("Chat session is closed");
+        if (retired) throw connectionLost("This RPC session is closed");
       };
       const scoped = <T extends { destination?: RpcDestination }>(envelope: T): T => ({
         ...envelope,
@@ -157,11 +148,18 @@ export function createRpcOwners(host: HostBridge) {
             onRecovery.call(transport, kind, (workspaceId) => {
               if (retired || destination.kind !== "workspace" || destination.workspaceId !== workspaceId)
                 return;
+              // The RPC core settles its own recovery policy and publishes to client
+              // observers first; the owner's own recovery work follows in order.
               handler(kind);
+              return options.recovery?.run(kind);
             })
           );
+          for (const stop of stops) releases.add(stop);
           return () => {
-            for (const stop of stops) stop();
+            for (const stop of stops) {
+              releases.delete(stop);
+              stop();
+            }
           };
         },
         transport: rpcTransport,
@@ -173,7 +171,7 @@ export function createRpcOwners(host: HostBridge) {
           retired = true;
           owners.delete(owner);
           // Retires the endpoint: its listeners are released and calls still in flight settle.
-          lifetime.abort(connectionLost("Chat session is closed"));
+          lifetime.abort(connectionLost("This RPC session is closed"));
           for (const listener of [...statuses]) listener("disconnected");
           statuses.clear();
           for (const release of [...releases]) release();

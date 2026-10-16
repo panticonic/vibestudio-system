@@ -48,7 +48,7 @@ describe("hostChatFiles", () => {
   it("writes an export only to the destination the person confirmed", async () => {
     const files = fakeFiles();
     const chat = hostChatFiles(files, "/work");
-    await expect(chat.writeExport("out/chat.md", "# hi")).resolves.toBe("out/chat.md");
+    await expect(chat.writeExport("out/chat.md", "# hi")).resolves.toEqual({ path: "out/chat.md" });
     expect(files.saveText).toHaveBeenCalledWith(
       { localPath: "/work/out/chat.md", text: "# hi" },
       undefined

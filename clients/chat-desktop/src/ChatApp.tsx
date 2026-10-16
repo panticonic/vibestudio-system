@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Button, Flex, Spinner, Text, Theme } from "@radix-ui/themes";
-import { userFacingError } from "@workspace/client-kit-web";
+import { createOwnerRpcs, userFacingError } from "@workspace/client-kit-web";
 import { APP_THEME } from "@workspace/ui/theme";
 import { ChatWorkspace } from "./ChatWorkspace";
 import type { HostBridge } from "./hostBridge";
-import { createRpcOwners } from "./ownerRpc";
 import { openChatSession, type ChatSession } from "./session";
 
 type Connection =
@@ -21,7 +20,7 @@ function useChatSession(host: HostBridge): { connection: Connection; retry(): vo
   const [attempt, setAttempt] = useState(0);
   const [connection, setConnection] = useState<Connection>({ status: "opening" });
   useEffect(() => {
-    const owners = createRpcOwners(host);
+    const owners = createOwnerRpcs(host);
     let live = true;
     setConnection({ status: "opening" });
     openChatSession(owners, host.transport.identity).then(

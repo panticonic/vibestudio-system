@@ -1,6 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button, Callout, Flex, Spinner, Text } from "@radix-ui/themes";
-import type { AgenticChatFeature } from "@workspace/agentic-chat/features";
+import { FULL_AGENTIC_CHAT_FEATURES } from "@workspace/agentic-chat/features";
+import { createPanelImportLoader } from "@workspace/agentic-core/panel-import-loader";
 import type {
   AgenticChatActions,
   ForkNavHandlers,
@@ -16,19 +17,12 @@ import {
 } from "@workspace/agentic-core/chat-store";
 import type { ConversationRef } from "./conversations";
 import { conversationState } from "./conversationState";
+import { createChatProblemReports } from "./problemReports";
 import type { ChatSession } from "./session";
 
 const AgenticChat = lazy(() =>
   import("@workspace/agentic-chat/chat").then((module) => ({ default: module.AgenticChat }))
 );
-
-/**
- * Optional chat surfaces that run authored code against the panel runtime
- * (the action bar and client-side eval) or report through a panel (feedback,
- * inline UI). A client window is not a panel, so none is offered; the
- * transcript, composer, agents, forks and approvals are the stock chat.
- */
-export const CHAT_FEATURES: readonly AgenticChatFeature[] = [];
 
 let instanceSerial = 0;
 
@@ -50,8 +44,11 @@ export interface ChatPaneProps {
 export function ChatPane(props: ChatPaneProps) {
   const { session, conversation, theme, onChannel, onOpenConversation, onNewChat } = props;
   const [notice, setNotice] = useState<ChatHostNotification | null>(null);
+  // The ports are built once per conversation; the callback they use stays current.
+  const newChatRef = useRef(onNewChat);
+  newChatRef.current = onNewChat;
 
-  const { controller, state } = useMemo(() => {
+  const { controller, state, hostServices } = useMemo(() => {
     const state = conversationState({
       ...(conversation.channelName ? { channelName: conversation.channelName } : {}),
       ...(conversation.options?.agentConfig
@@ -65,8 +62,18 @@ export function ChatPane(props: ChatPaneProps) {
       state,
       events: session.events,
       notify: (next) => setNotice(next),
+      problemReports: createChatProblemReports({
+        rpc: session.rpc,
+        clientId: session.clientId,
+        startConversation: (prompt) => newChatRef.current({ seed: { openingRequest: prompt } }),
+      }),
+      images: session.images,
     });
-    return { controller: new ChatHostController(ports), state };
+    return {
+      controller: new ChatHostController(ports),
+      state,
+      hostServices: { problemReports: ports.problemReports, images: ports.images },
+    };
   }, [session, conversation]);
 
   useEffect(() => controller.retain(), [controller]);
@@ -80,6 +87,15 @@ export function ChatPane(props: ChatPaneProps) {
   useEffect(() => {
     if (channelName) onChannel(channelName);
   }, [channelName, onChannel]);
+
+  // Code a conversation authors imports its modules over the same routed session.
+  const importLoader = useMemo(
+    () =>
+      createPanelImportLoader(session.rpc, {
+        defaultWorkspaceRef: () => `ctx:${conversation.contextId}`,
+      }),
+    [session.rpc, conversation.contextId]
+  );
 
   const config = useMemo(
     () => ({ clientId: session.clientId, rpc: session.rpc }),
@@ -182,7 +198,9 @@ export function ChatPane(props: ChatPaneProps) {
             theme={theme}
             installedAgents={hostState.installedAgents ?? undefined}
             forkNav={forkNav}
-            features={CHAT_FEATURES}
+            features={FULL_AGENTIC_CHAT_FEATURES}
+            hostServices={hostServices}
+            importLoader={importLoader}
             connectionRetrySignal={host.connectionRetrySignal}
           />
         </Suspense>

@@ -34,7 +34,7 @@ describe("chat-desktop manifest", () => {
   it("asks only for the capabilities its code uses, all of them desktop's", () => {
     expect(block.capabilities).toEqual({
       required: ["device-session", "hub-control", "approval-surface"],
-      optional: ["native-menus"],
+      optional: ["native-menus", "global-shortcut", "integration.install"],
     });
     for (const capability of [
       ...(block.capabilities?.required ?? []),

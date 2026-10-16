@@ -1,25 +1,12 @@
-import {
-  createRecoveryCoordinator,
-  type RecoveryKind,
-} from "@vibestudio/shell-core/recoveryCoordinator";
+import { createRecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
 /** Stable startup client and exports used by shell entry points. */
+import type { RpcDestination, RpcClient } from "@vibestudio/rpc";
 import {
-  createRpcClient,
-  RpcBoundaryError,
-  rpcDestinationMatchesCaller,
-  type RpcDestination,
-  bridgeStreamSurfaceOf,
-  openBridgeStream,
-  openBridgeUploadStream,
-  type EnvelopeRpcTransport,
-  type RpcClient,
-  type RpcEnvelope,
-} from "@vibestudio/rpc";
-import { assertPresent } from "../utils/assertPresent";
-import {
-  createNativeConnectionState,
+  createOwnerRpcs,
   type NativeWorkspaceConnectionBridge,
-} from "./nativeConnectionState";
+  type OwnerTransport,
+} from "@workspace/client-kit-web";
+import { assertPresent } from "../utils/assertPresent";
 import {
   createNativePanelPresentation,
   desktopNativePanelBridge,
@@ -32,42 +19,13 @@ import {
 export * from "./workspaceClient";
 const g = globalThis as unknown as {
   __vibestudioWorkspaceConnection?: NativeWorkspaceConnectionBridge;
-  __vibestudioTransport?: {
-    onRecovery?: (
-      kind: RecoveryKind,
-      handler: (workspaceId?: string) => void | Promise<void>,
-    ) => () => void;
-    identity: { workspaceId: string; runtimeId: string };
-    send: (envelope: RpcEnvelope) => Promise<void>;
-    onMessage: (handler: (envelope: RpcEnvelope) => void) => () => void;
-  };
+  __vibestudioTransport?: OwnerTransport;
 };
 if (!g.__vibestudioTransport) throw new Error("Shell transport not available");
-const connection = createNativeConnectionState(
-  assertPresent(g.__vibestudioWorkspaceConnection),
-);
-const transport: EnvelopeRpcTransport = {
-  send: (envelope) => assertPresent(g.__vibestudioTransport).send(envelope),
-  onMessage: (handler) =>
-    assertPresent(g.__vibestudioTransport).onMessage(handler),
-  status: connection.status,
-  ready: connection.ready,
-  onStatusChange: connection.onStatusChange,
-};
-const streamSurface = bridgeStreamSurfaceOf(g.__vibestudioTransport);
-if (streamSurface) {
-  transport.stream = (envelope, signal, body) =>
-    openBridgeStream(streamSurface, envelope, signal ?? null, body ?? null);
-  transport.streamBody = (envelope, signal, body) => {
-    if (!body) return Promise.reject(new Error("An upload requires a body"));
-    return openBridgeUploadStream(
-      streamSurface,
-      envelope,
-      signal ?? null,
-      body,
-    );
-  };
-}
+const owners = createOwnerRpcs({
+  transport: g.__vibestudioTransport,
+  connection: assertPresent(g.__vibestudioWorkspaceConnection),
+});
 const systemOwner = createOwnerRpc({
   kind: "workspace",
   workspaceId: g.__vibestudioTransport.identity.workspaceId,
@@ -137,151 +95,9 @@ export const {
 
 /** One captured RPC owner; focus changes cannot retarget it. */
 function createOwnerRpc(destination: RpcDestination) {
-  let closed = false;
-  const releases = new Set<() => void>();
   const recoveryCoordinator = createRecoveryCoordinator();
-  const statuses = new Set<
-    (status: import("@vibestudio/rpc").RpcConnectionStatus) => void
-  >();
-  const scopedRpc = createRpcClient({
-    selfId: assertPresent(g.__vibestudioTransport).identity.runtimeId,
-    callerKind: "client",
-    workspaceId: assertPresent(g.__vibestudioTransport).identity.workspaceId,
-    authorityAcquisition: "wait",
-    onRecovery: (handler) => {
-      const stops = (["resubscribe", "cold-recover"] as const)
-        .map((kind) =>
-          g.__vibestudioTransport?.onRecovery?.(kind, (workspaceId) => {
-            if (
-              closed ||
-              destination.kind !== "workspace" ||
-              destination.workspaceId !== workspaceId
-            )
-              return;
-            // The RPC core settles its own recovery policy and synchronously
-            // publishes to client observers before workspace-owned resync work
-            // starts. Keep one native listener as the ordering boundary.
-            handler(kind);
-            return recoveryCoordinator.run(kind);
-          }),
-        )
-        .filter((stop): stop is () => void => Boolean(stop));
-      for (const stop of stops) releases.add(stop);
-      return () => {
-        for (const stop of stops) {
-          releases.delete(stop);
-          stop();
-        }
-      };
-    },
-    transport: {
-      ...(transport.stream
-        ? {
-            stream: ((envelope, signal, body) => {
-              if (closed)
-                return Promise.reject(
-                  new RpcBoundaryError(
-                    "Workspace UI is closed",
-                    "transport",
-                    "CONNECTION_LOST",
-                  ),
-                );
-              return transport.stream!(
-                {
-                  ...envelope,
-                  destination,
-                },
-                signal,
-                body,
-              );
-            }) satisfies NonNullable<EnvelopeRpcTransport["stream"]>,
-          }
-        : {}),
-      ...(transport.streamBody
-        ? {
-            streamBody: ((envelope, signal, body) => {
-              if (closed)
-                return Promise.reject(
-                  new RpcBoundaryError(
-                    "Workspace UI is closed",
-                    "transport",
-                    "CONNECTION_LOST",
-                  ),
-                );
-              return transport.streamBody!(
-                {
-                  ...envelope,
-                  destination,
-                },
-                signal,
-                body,
-              );
-            }) satisfies NonNullable<EnvelopeRpcTransport["streamBody"]>,
-          }
-        : {}),
-      send: (envelope) => {
-        if (closed)
-          return Promise.reject(
-            new RpcBoundaryError(
-              "Workspace UI is closed",
-              "transport",
-              "CONNECTION_LOST",
-            ),
-          );
-        return transport.send({
-          ...envelope,
-          destination,
-        });
-      },
-      onMessage: (handler) => {
-        const release = transport.onMessage((envelope) => {
-          if (
-            rpcDestinationMatchesCaller(destination, envelope.delivery.caller)
-          )
-            handler(envelope);
-        });
-        releases.add(release);
-        return () => {
-          releases.delete(release);
-          release();
-        };
-      },
-      status: () => (closed ? "disconnected" : connection.status()),
-      ready: async () => {
-        if (closed)
-          throw new RpcBoundaryError(
-            "Workspace UI is closed",
-            "transport",
-            "CONNECTION_LOST",
-          );
-        await connection.ready();
-      },
-      onStatusChange: (handler) => {
-        statuses.add(handler);
-        const release = connection.onStatusChange((status) => {
-          if (!closed) handler(status);
-        });
-        releases.add(release);
-        return () => {
-          statuses.delete(handler);
-          releases.delete(release);
-          release();
-        };
-      },
-    },
-  });
-  return {
-    rpc: scopedRpc,
-    recoveryCoordinator,
-    close() {
-      if (closed) return;
-      closed = true;
-      for (const listener of statuses) listener("disconnected");
-      statuses.clear();
-      for (const release of releases) release();
-      releases.clear();
-    },
-  };
+  const owner = owners.open(destination, { recovery: recoveryCoordinator });
+  return { rpc: owner.rpc, recoveryCoordinator, close: owner.close };
 }
 /** A captured target client. Desktop UI admission is enforced at the native IPC boundary. */
 export async function createWorkspaceShellClient(workspaceId: string) {

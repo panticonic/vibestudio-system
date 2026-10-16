@@ -34,7 +34,7 @@ export function hostChatFiles(files: TerminalClientFiles, cwd: string): ChatFile
     async writeExport(path, contents, options) {
       if (!path) throw new Error("Type the path to write the export to.");
       await files.saveText({ localPath: absolute(path), text: contents }, options);
-      return path;
+      return { path };
     },
   };
 }

@@ -64,6 +64,21 @@ Behavior:
 - Host capabilities are the granted set from the approved manifest and
   `trust.clients`; optional capabilities the host denies are reported in
   `deniedOptional`.
+- `__vibestudioClient` (`web-host-1`) is the whole host surface. Beyond
+  `describe()` (client id, principal, build, granted capabilities), the event
+  and info calls, it has:
+  - `update.pending()`, `update.onUpdate(handler)` and
+    `update.restartAtSafePoint()`: this client's own newest ready build; applying
+    it swaps this window's view to that build and touches nothing else;
+  - `state.get()` / `state.set(object)`: one bounded JSON object per client per
+    device, written atomically by the host;
+  - `intents.subscribe(handler)`: foreground intents (held until subscribed);
+  - `menu` (`native-menus`), `panelHost` (`panel-hosting`) and
+    `development.setMode(clientId, enabled)` (`device-session`);
+  - `integration.install({ id })` (`integration.install`): ask the host to add
+    a launcher for a client (a `.desktop` file on Linux, a Start-menu shortcut
+    on Windows, a launcher app on macOS). The host confirms in its own UI,
+    records what it wrote, and removes it when the client is retired.
 - Camera, microphone, and location requests need both the matching manifest
   capability and a site-origin permission approval.
 - Updates to an already-loaded client are prompted: the window keeps its loaded
@@ -119,6 +134,11 @@ Behavior:
   build is rejected.
 - Each client runs in its own React Native instance. An update prompts, then
   reloads only that client's instance.
+- `@vibestudio/rn-client-api` is the complete `rn-host-6` surface: `intent`
+  (`initial`, `onIntent`), `state` (`get/set/remove/keys` per client per
+  device), `updates` (`pending`, `onUpdate`, `restartAtSafePoint`, `rollback`)
+  and the capability-gated native modules. A client imports it and nothing
+  host-owned.
 
 ## Terminal Runtime
 
@@ -170,8 +190,12 @@ Behavior:
   `TerminalClientHost` (`terminal-host-1`): a client-principal `rpc` client for
   System, the shown `workspace` with `workspaceRpc`, `stdin`/`stdout`,
   connection state, workspace listing, `openExternal`, plus launch `intent`
-  params, `files` (local, consent per path), `clipboard`, `notify` and
-  client-scoped `state`. `run` resolves with `quit`, `switch-workspace`, or
+  params, `files` (local, consent per path), `clipboard`, `notify`,
+  client-scoped `state` (`get()` / `set(object)`, one JSON object per client per
+  device) and `update` (`pending()`, `onUpdate(listener)`,
+  `restartAtSafePoint()`; in development mode the host re-enters the client
+  itself, so keep state on the server or in `state`). `host.signal` is the
+  invocation's cancellation. `run` resolves with `quit`, `switch-workspace`, or
   `connection-lost`.
 - A background intent never loads the client: the host runs
   `clients.invokeIntent`, with piped stdin as the intent's one `text`
@@ -228,9 +252,11 @@ subcommands). `open` is implicit for every client.
   event. Optional `accepts` lists MIME patterns for share-in.
 - `kind: "background"`: runs **server-side**, never as client code. It names a
   Durable Object-backed workspace service method as `handler` (subject to the
-  client principal's authority) that returns text once it has finished. The host calls
-  `clients.invokeIntent({ id, intent, params })` and renders the result with
-  platform UI.
+  client principal's authority) that returns a string. The result is
+  `{ text }` and nothing else: there is no `result` field and no streaming
+  type. The host calls `clients.invokeIntent({ id, intent, params })` and
+  renders the text with platform UI (stdout, a notification, a Siri answer).
+  See [AUTHORING.md](AUTHORING.md#background-intent-handlers) for the handler.
 - `dynamic` names a service method listing small dynamic entries (recent
   conversations) for shortcut menus.
 - Deep links use `vibestudio://c/<id>/<intent>?…`; the host resolves `<id>` to

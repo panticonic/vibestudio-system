@@ -17,9 +17,14 @@ export function useClientUpdates(): ClientUpdateModel {
 }
 
 /**
- * This window's client updates: one model, fed by the server's
- * `supervision:changed` announcements (plus what the host persisted across a
- * restart), taken through the host bridge (`app.applyUpdate`).
+ * The client updates this browser manages: one model whose pending set is the
+ * desktop host's list (`app.listPendingUpdates`), read at start and again
+ * whenever the host announces a change (`client-updates-changed`), and taken
+ * through the host (`app.applyUpdate`). The host decides what is on offer
+ * (development mode, build verification); the browser never infers an offer from
+ * the server's announcements itself. The browser manages every client's update,
+ * so it uses this cross-client view; a client that manages only itself uses the
+ * self-scoped view of the same host state (`__vibestudioClient.update`).
  */
 export function DesktopClientUpdates({ children }: { children: ReactNode }) {
   const { app, supervisedUnits } = useShellWorkspaceClient();
@@ -66,7 +71,25 @@ export function DesktopClientUpdates({ children }: { children: ReactNode }) {
       console.warn("[DesktopClientUpdates] could not read pending updates:", error),
     );
   }, [seed]);
-  useShellEvent("supervision:changed", useCallback((change) => model.handleChange(change), [model]));
+  useShellEvent(
+    "client-updates-changed",
+    useCallback(() => {
+      void seed().catch((error: unknown) =>
+        console.warn("[DesktopClientUpdates] could not read pending updates:", error),
+      );
+    }, [seed]),
+  );
+  // Notices about a rejected build or a rollback come from the server; an
+  // `adopted` announcement is the host's to turn into an offer, not the model's.
+  useShellEvent(
+    "supervision:changed",
+    useCallback(
+      (change) => {
+        if (change.change !== "adopted") model.handleChange(change);
+      },
+      [model],
+    ),
+  );
   return <ClientUpdatesContext.Provider value={model}>{children}</ClientUpdatesContext.Provider>;
 }
 

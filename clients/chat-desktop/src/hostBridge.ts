@@ -50,6 +50,24 @@ export interface ClientStateBridge {
   set(value: Record<string, unknown>): Promise<void>;
 }
 
+/** `integration.install`: OS launchers for clients. The host confirms with the person. */
+export interface IntegrationBridge {
+  install(clientId: string): Promise<{ installed: boolean }>;
+  remove(clientId: string): Promise<void>;
+  installed(): Promise<string[]>;
+}
+
+/** `global-shortcut`: a system-wide chord that runs one of this client's intents. */
+export interface ShortcutBridge {
+  register(request: {
+    id: string;
+    accelerator: string;
+    intent: string;
+    params?: Record<string, string>;
+  }): Promise<void>;
+  unregister(id: string): Promise<void>;
+}
+
 /** `window.__vibestudioClient`: per-window services; each is gated by a capability. */
 export interface ClientBridge {
   update: ClientUpdateBridge;
@@ -59,6 +77,10 @@ export interface ClientBridge {
     set(model: MenuModel): Promise<void>;
     onAction(handler: (actionId: string) => void): () => void;
   };
+  /** `integration.install`. Present, but rejecting, when the host did not grant it. */
+  integration?: IntegrationBridge;
+  /** `global-shortcut`. Present, but rejecting, when the host did not grant it. */
+  shortcut?: ShortcutBridge;
   /** Foreground intents; the host holds those that arrived before the first subscription. */
   intents: {
     subscribe(handler: (intent: ClientIntentEvent) => void): () => void;

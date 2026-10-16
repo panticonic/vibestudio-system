@@ -103,6 +103,9 @@ export async function createFakeClientHost(
     "session.provideToken": () => undefined,
     "clipboard.setString": () => undefined,
     "openExternal.open": () => undefined,
+    "integration.install": () => ({ outcome: "requested" }),
+    "integration.list": () => [],
+    "integration.remove": () => undefined,
     "device.reset": () => undefined,
     "device.setDevelopmentMode": () => undefined,
   };

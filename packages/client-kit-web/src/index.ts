@@ -11,3 +11,5 @@ export * from "./ConnectionNotice.js";
 export * from "./ClientUpdatePrompt.js";
 export * from "./useSnapshot.js";
 export * from "./userFacingError.js";
+export * from "./nativeConnectionState.js";
+export * from "./ownerRpc.js";

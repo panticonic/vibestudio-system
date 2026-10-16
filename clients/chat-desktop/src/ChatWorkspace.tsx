@@ -7,6 +7,7 @@ import { ApprovalDock } from "./ApprovalDock";
 import { useChatUpdates } from "./update";
 import { ChatPane } from "./ChatPane";
 import { useChatMenu } from "./chatMenu";
+import { clientIdOf, useChatIntegration } from "./integration";
 import {
   listConversations,
   resolveTarget,
@@ -101,12 +102,18 @@ export function ChatWorkspace({
     (conversation: ChannelListing) => openChannel(conversation.channelId, conversation.contextId),
     [openChannel]
   );
+  const { launcher, toggleLauncher } = useChatIntegration(
+    host.client,
+    clientIdOf(host.transport.identity.runtimeId),
+    setMenuFailure
+  );
   useChatMenu(
     host.client,
     conversations,
     useMemo(
       () => ({
         newChat: () => newChat(),
+        toggleLauncher,
         openConversation: (channelId: string) => {
           const found = conversations.find((entry) => entry.channelId === channelId);
           openChannel(channelId, found?.contextId);
@@ -114,8 +121,9 @@ export function ChatWorkspace({
         failed: (action: string, error: unknown) =>
           setMenuFailure(`${action}: ${userFacingError(error)}`),
       }),
-      [conversations, newChat, openChannel]
-    )
+      [conversations, newChat, openChannel, toggleLauncher]
+    ),
+    launcher
   );
 
   const phase = useConnectionPhase(host.connection);

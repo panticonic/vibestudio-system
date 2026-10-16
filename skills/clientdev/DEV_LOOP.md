@@ -10,8 +10,9 @@ ref update. Builds are produced separately from source.
 ## Develop And Deploy With No Restart
 
 You can author a client in the System workspace, launch it on an
-already-running server and host, iterate on it live, and install it into the OS
-launcher, without restarting the server, the host process, or any other client.
+already-running server and host, iterate on it live, install it into the OS
+launcher, and retire it, without restarting the server, the host process, or
+any other client.
 
 This works as long as the client stays inside the ABI the host binary fixes:
 the runtime and `hostAbi` the host advertises, the host capability catalog it
@@ -20,71 +21,93 @@ that needs a new native capability or module needs a host release. That is
 reported as `unavailable` with the missing capability or ABI named, never a
 silent failure and never an offer to restart.
 
-Steps (the same for every runtime; per-runtime notes follow):
+The chat clients (`clients/chat-terminal`, `chat-desktop`, `chat-mobile`) are
+the worked examples: copy their manifest, intent and entry structure.
+
+### The eight steps
 
 1. **Create** `clients/<name>` with package name `@workspace-clients/<name>` and
-   a `vibestudio.client` block (see [AUTHORING.md](AUTHORING.md)). Give it the
-   `runtime` and `hostAbi` for the runtime you target, an `entry`, and any
-   `intents`.
-2. **Declare** it: add `- source: clients/<name>` under `clients:` in
-   `meta/vibestudio.yml`. If it needs device-level capabilities
-   (`device-session`, `panel-hosting`, `terminal-app-hosting`,
-   `approval-surface`, `hub-control`), also add it to `trust.clients`. That
-   edit is a trust change and needs one `critical` confirmation from the System
-   owner, with a card naming the client and the powers it gains. No standing
-   grant satisfies it. A client that needs no device-level capability never
-   meets this gate.
+   a `vibestudio.client` block ([AUTHORING.md](AUTHORING.md)): `id`, `runtime`,
+   `hostAbi`, `entry`, `capabilities`, and `intents`. A background intent also
+   needs a service handler ([AUTHORING.md](AUTHORING.md#background-intent-handlers)).
+2. **Declare** it: `- source: clients/<name>` under `clients:` in
+   `meta/vibestudio.yml` (and the handler's `services:` / `singletonObjects:`
+   entries). Add it to `trust.clients` only if it needs a device-level
+   capability; that edit is a trust change with one `critical` confirmation,
+   see [CAPABILITIES.md](CAPABILITIES.md#trustclients).
 3. **Publish** with `vcs.publish({ message })`. Manifest hot reload re-reads
-   `meta/vibestudio.yml`, the server reconciles the declarations, re-seeds
-   trust, and builds the unit. No restart.
-4. **Answer the review**: the unit install review and the client's capability
-   consent appear in the running browser's approval surface.
-5. **Launch** with `vibestudio open <id> --develop` (or "Develop" in a
-   browser's client list). Development mode is a host-side, per-client,
-   per-device setting, not a manifest field; it only changes the adoption
-   policy, so a published client cannot opt itself into unprompted reloads.
-   Integrity checks, admission and review are unchanged.
-6. **Edit and publish** again. A client in development mode adopts the rebuild
-   immediately and restarts only itself. Other clients keep running untouched.
-7. **Install a launcher**: `host.integration.install({ id })` (from a browser or
-   client with `integration.install`) writes the OS launcher artifact, or on the
-   terminal host run `vibestudio clients link <id> [--name <command>]`. The
-   host confirms in its own UI and records everything it wrote.
-8. **Retire** the client: remove it from `clients:` (and `trust.clients`) and
-   publish. The launcher is removed and running instances close with a stated
-   reason. Revoking trust closes device sessions with `trust-revoked`.
-
-The `clients:changed` event makes every host refresh its client index
-(launcher lists, the `vibestudio <command>` table, App Intents entities,
-dynamic shortcuts).
+   the manifest, the server reconciles the declarations, re-seeds trust, and
+   builds the unit. The `clients:changed` event makes every host refresh its
+   client index: the new client appears in `vibestudio clients list`, a
+   browser's client list, launcher menus and shortcut entries. No restart.
+4. **Review.** The unit install review (and a trust-change card, if any)
+   appears in the running browser's approval surface, or as a question in the
+   terminal when `vibestudio open` starts. Answer it. Until then the client is
+   `pending-approval` and the previous state keeps running.
+5. **Open it in development mode.** Development mode is a host-side,
+   per-client, per-device setting, not a manifest field, so a published client
+   cannot opt itself into unprompted reloads. Integrity checks, admission and
+   review are unchanged.
+6. **Edit and publish.** The server announces the new build on
+   `supervision:changed`; a client in development mode adopts it at once and
+   restarts only itself. Other clients, the host process and the server keep
+   running. Without development mode the host offers the update instead (see
+   "Update Errors And Rollback").
+7. **Install a launcher** so the OS can start the client.
+8. **Retire**: remove the client (and its handler service, and any
+   `trust.clients` entry) from the manifest and publish. The host removes the
+   launchers it wrote and closes the running instances with a stated reason
+   (`retired`; `trust-revoked` when only trust was withdrawn). It reconciles on
+   `clients:changed`; nothing scans on a timer.
 
 ### Per runtime
 
-**web (desktop host).** `vibestudio open <id> --develop` opens (or focuses) the
-client in its own window from the verified client cache. A rebuild reloads that
-window only. The desktop host process and its other client windows keep
-running.
+Steps 1 to 4 and 8 are identical; steps 5 to 7 differ.
 
-**terminal (terminal host).** `vibestudio open <id> --develop` loads the client
-module from the verified cache in the terminal. A rebuild re-enters the client
-at the next safe point. Background intents need no loaded module:
-`vibestudio open <id> <intent>` with no TTY streams the server-side result to
-stdout. `vibestudio clients link <id>` installs the `vibestudio <command>`
-shim.
+**terminal (`terminal-host-1`).**
+5. `vibestudio open <id> --develop` loads the module from the verified cache
+   (`--develop=false` ends the mode).
+6. A rebuild re-enters the client at the next safe point (`host.update`
+   `restartAtSafePoint()`; in development mode the host re-enters it). Keep
+   state in `host.state` or on the server. Without `--develop` the client sees
+   `host.update.pending()` and decides when to restart.
+7. `vibestudio clients link <id> [--name <command>]` writes a shim into
+   `~/.local/bin` (or a test-owned bin directory); `vibestudio clients unlink`
+   removes it. A client that declares `integration.terminal.command` is also
+   reachable as `vibestudio <command>`. A background intent needs no module:
+   `echo hi | vibestudio open <id> <intent>` prints the handler's text.
 
-**react-native (Android and iOS hosts).** `vibestudio open <id> --develop`, or
-the client list on the device, creates a new React Native instance for the
-client. A rebuild recreates only that client's instance. The host's own runtime
-and other clients are not reloaded. The host pins its launcher shortcut (Android)
-or refreshes App Intents (iOS).
+**web, desktop host (`web-host-1`).**
+5. Use "Develop" in the browser's client list, or `vibestudio open <id>
+   --develop` where the CLI is paired with the desktop. The client opens in its
+   own window from the verified cache.
+6. A rebuild reloads that window only; `__vibestudioClient.update` offers it
+   when the mode is off.
+7. A browser (or any client with `integration.install`) calls
+   `__vibestudioClient.integration.install({ id })`; the host confirms in its
+   own UI and writes the `.desktop` file (Linux), Start-menu shortcut (Windows)
+   or launcher app (macOS). Retiring removes it.
+
+**react-native, Android and iOS hosts (`rn-host-6`).**
+5. "Develop" in the on-device client list creates a new React Native instance
+   for the client.
+6. A rebuild recreates only that client's instance (`updates.restartAtSafePoint`);
+   the host runtime and other clients are not reloaded.
+7. The host pins a launcher shortcut (Android) or refreshes App Intents (iOS);
+   retiring unpins or refreshes.
 
 ### Proof
 
-The `client-dev-loop` system tests (one per runtime) run this exact scenario
-against a host started before the client exists. They assert the server boot id,
-host process id, and other clients' instance identities are unchanged, that a
-client requesting a capability the host does not implement gets `unavailable`
-naming it, and that a trust change produces a `confirm.critical` card.
+The system tests `client-dev-loop-terminal` and `client-dev-loop-desktop` run
+this exact scenario with an agent that follows this skill, against a host
+started before the client exists. They assert that the server boot id, the host
+process id and every other client's instance identity are unchanged; that a
+client requiring a capability the host does not implement gets `unavailable`
+naming it; and, on desktop, that a trust change produces a `confirm.critical`
+card, applies live, and revokes with `trust-revoked`. `client-launch-*`,
+`client-intent-background` and `client-update-swap` cover launch, background
+intents and the update swap on the template chat clients and a hello client.
+The Android variant is a `mobile-smoke` extension.
 
 ## Standard Loop
 

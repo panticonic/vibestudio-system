@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "//capabilities": "device-session, hub-control and approval-surface are the whole required set. device-session is how the window reaches the Personal workspace, where the conversation, its agents and its approvals live; hub-control is how it finds that workspace (the account's hub lists it); approval-surface is the right to answer the approvals those agents raise from inside the chat window. native-menus is optional: without it the window keeps its sidebar controls and only loses the File menu entries. There is no panel-hosting (the chat hosts no panels), and none of notifications, clipboard or open-external is asked for yet: nothing in this client calls them, and a capability is requested only with the code that uses it.",
+  "//capabilities": "device-session, hub-control and approval-surface are the whole required set. device-session is how the window reaches the Personal workspace, where the conversation, its agents and its approvals live; hub-control is how it finds that workspace (the account's hub lists it); approval-surface is the right to answer the approvals those agents raise from inside the chat window. native-menus is optional: without it the window keeps its sidebar controls and only loses the File menu entries. global-shortcut is optional: it registers the chord that opens the compact ask window (the ask intent). integration.install is optional: it adds the Add Chat to Applications entry, which asks the host to write an OS launcher. There is no panel-hosting (the chat hosts no panels), and none of notifications, clipboard or open-external is asked for yet: nothing in this client calls them, and a capability is requested only with the code that uses it.",
   "//intents": "open-conversation has no dynamic entries: no workspace service lists recent conversations yet, so a launcher offers a plain Chat entry and the conversation list lives inside the window. ask is the same background handler chat-terminal and chat-mobile declare.",
   "vibestudio": {
     "displayName": "Vibestudio Chat",
@@ -21,7 +21,9 @@
           "approval-surface"
         ],
         "optional": [
-          "native-menus"
+          "native-menus",
+          "global-shortcut",
+          "integration.install"
         ]
       },
       "intents": [
@@ -85,6 +87,7 @@
     "@workspace/approvals-core": "workspace:*",
     "@workspace/client-kit-web": "workspace:*",
     "@workspace/client-update-core": "workspace:*",
+    "@workspace/runtime": "workspace:*",
     "@workspace/ui": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

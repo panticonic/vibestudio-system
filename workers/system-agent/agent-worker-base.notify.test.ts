@@ -552,6 +552,7 @@ describe("notify", () => {
           channelId: "ch-home",
           channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-home",
           messageId: "say:call-push",
+          actions: [{ id: "reply", title: "Reply", input: "text" }],
         }),
       },
       {

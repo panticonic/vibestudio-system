@@ -9,6 +9,10 @@ import type { ChannelListing } from "./conversations";
  */
 
 export const NEW_CHAT_ACTION = "new-chat";
+export const TOGGLE_LAUNCHER_ACTION = "toggle-launcher";
+
+/** What the launcher entry offers: add Chat to the OS applications, or take it out again. */
+export type LauncherOffer = "install" | "remove" | null;
 const CONVERSATION_PREFIX = "conversation:";
 /** The menu lists the newest conversations; the sidebar lists them all. */
 const MENU_CONVERSATIONS = 12;
@@ -17,7 +21,10 @@ export function conversationAction(channelId: string): string {
   return `${CONVERSATION_PREFIX}${channelId}`;
 }
 
-export function buildChatMenu(conversations: readonly ChannelListing[]): MenuModel {
+export function buildChatMenu(
+  conversations: readonly ChannelListing[],
+  launcher: LauncherOffer = null
+): MenuModel {
   const newChat: MenuItem = { id: NEW_CHAT_ACTION, label: "New Chat", accelerator: "CmdOrCtrl+N" };
   const recent: MenuItem[] = conversations.slice(0, MENU_CONVERSATIONS).map((conversation) => ({
     id: conversationAction(conversation.channelId),
@@ -26,15 +33,25 @@ export function buildChatMenu(conversations: readonly ChannelListing[]): MenuMod
   const conversationsMenu: MenuItem[] = recent.length
     ? [{ label: "Conversations", submenu: recent }]
     : [];
+  const launcherMenu: MenuItem[] = launcher
+    ? [
+        { separator: true },
+        {
+          id: TOGGLE_LAUNCHER_ACTION,
+          label: launcher === "install" ? "Add Chat to Applications…" : "Remove Chat from Applications",
+        },
+      ]
+    : [];
   return {
-    menus: [{ label: "Chat", items: [newChat, ...conversationsMenu] }],
-    popup: [newChat, ...conversationsMenu],
+    menus: [{ label: "Chat", items: [newChat, ...conversationsMenu, ...launcherMenu] }],
+    popup: [newChat, ...conversationsMenu, ...launcherMenu],
   };
 }
 
 export interface ChatMenuActions {
   newChat(): void;
   openConversation(channelId: string): void;
+  toggleLauncher(): void;
   /** Tell the person a menu entry could not be carried out. */
   failed(action: string, error: unknown): void;
 }
@@ -43,6 +60,8 @@ export interface ChatMenuActions {
 export function runChatMenuAction(actionId: string, actions: ChatMenuActions): void {
   if (actionId === NEW_CHAT_ACTION) {
     actions.newChat();
+  } else if (actionId === TOGGLE_LAUNCHER_ACTION) {
+    actions.toggleLauncher();
   } else if (actionId.startsWith(CONVERSATION_PREFIX)) {
     actions.openConversation(actionId.slice(CONVERSATION_PREFIX.length));
   } else {
@@ -58,20 +77,21 @@ export function runChatMenuAction(actionId: string, actions: ChatMenuActions): v
 export function useChatMenu(
   bridge: Pick<ClientBridge, "menu">,
   conversations: readonly ChannelListing[],
-  actions: ChatMenuActions
+  actions: ChatMenuActions,
+  launcher: LauncherOffer = null
 ): void {
   const { menu } = bridge;
   useEffect(() => {
     if (!menu) return;
-    menu.set(buildChatMenu(conversations)).catch((error: unknown) => {
+    menu.set(buildChatMenu(conversations, launcher)).catch((error: unknown) => {
       console.warn("[chat-menu] the host did not take this client's menu:", error);
     });
-  }, [menu, conversations]);
-  const { newChat, openConversation, failed } = actions;
+  }, [menu, conversations, launcher]);
+  const { newChat, openConversation, toggleLauncher, failed } = actions;
   useEffect(() => {
     if (!menu) return;
     return menu.onAction((actionId) =>
-      runChatMenuAction(actionId, { newChat, openConversation, failed })
+      runChatMenuAction(actionId, { newChat, openConversation, toggleLauncher, failed })
     );
-  }, [menu, newChat, openConversation, failed]);
+  }, [menu, newChat, openConversation, toggleLauncher, failed]);
 }

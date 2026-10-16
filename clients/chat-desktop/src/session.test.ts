@@ -8,7 +8,7 @@ vi.mock("@vibestudio/shared/typedRpcServiceClient", () => ({
 vi.mock("@workspace/approvals-core", () => ({ createApprovalsClient: () => ({ marker: "approvals" }) }));
 
 import type { RpcDestination } from "@vibestudio/rpc";
-import type { RpcOwners } from "./ownerRpc";
+import type { OwnerRpcs } from "@workspace/client-kit-web";
 import { openChatSession } from "./session";
 
 function fakeOwners() {
@@ -25,7 +25,7 @@ function fakeOwners() {
       };
     },
     close: vi.fn(),
-  } as unknown as RpcOwners;
+  } as unknown as OwnerRpcs;
   return { owners, opened };
 }
 

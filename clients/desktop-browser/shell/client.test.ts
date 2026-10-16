@@ -122,9 +122,9 @@ it("binds System RPC identity before its first request and isolates destination 
   expect(systemEvent).toHaveBeenCalledOnce();
   expect(projectEvent).toHaveBeenCalledOnce();
   project.close();
+  // A closed owner's RPC client is retired: calls fail, in flight or later.
   await expect(state.clients[1]!.call("main", mainRpcMethods["workspace.getConfig"], [])).rejects.toMatchObject({
-    errorKind: "transport",
-    code: "CONNECTION_LOST",
+    message: expect.stringMatching(/retired/),
   });
   deliver("project");
   expect(projectEvent).toHaveBeenCalledOnce();

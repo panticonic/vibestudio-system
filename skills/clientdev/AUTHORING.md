@@ -157,6 +157,79 @@ The desktop browser's connection settings also have a Workspace apps section
 that lists pending updates, retained rollback versions, and recent update
 errors.
 
+## Background Intent Handlers
+
+A background intent (`"kind": "background"`) runs on the server. Its
+`handler` is `<protocol>#<method>`: a method of a **Durable Object-backed
+workspace service**. A handler is the one place a client needs a worker, so
+here is the complete recipe (worked example: `clients/chat-terminal`, whose
+`ask` is `vibestudio.quickfire.v1#ask` in the Base `workers/quickfire-service`).
+
+1. **The service.** A worker `workers/hello-echo` with a Durable Object class.
+   The method receives `{ params, principalId }` (the intent's declared
+   parameters and the calling client principal) and returns a **string**. It
+   must admit the `host` principal and nothing the client cannot reach:
+
+   ```ts
+   import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";
+
+   export class HelloEchoDO extends DurableObjectBase {
+     static override schemaVersion = 1;
+
+     @rpc({
+       website: { kind: "closed", reason: "Client background intents are invoked by the server for a paired device." },
+       principals: ["host"],
+       effect: { kind: "open" },
+       tier: "open",
+       sensitivity: "write",
+     })
+     async echo(input: { params: { text: string }; principalId: string }): Promise<string> {
+       return `echo: ${input.params.text}`;
+     }
+   }
+   ```
+
+2. **The service declaration** in the worker's `package.json`
+   (`vibestudio.kind: "worker"`, `vibestudio.durable.classes`) with a
+   `vibestudio.services` entry whose `protocols` contains the handler's
+   protocol (`"vibestudio.hello.v1"`), `authority.principals` including
+   `host`, and `durableObject.className`.
+
+3. **The selection and singleton** in the System `meta/vibestudio.yml`:
+
+   ```yaml
+   services:
+     - name: hello
+       source: workers/hello-echo
+   singletonObjects:
+     - className: HelloEchoDO
+       key: workspace-hello
+       source: workers/hello-echo
+   ```
+
+4. **The client's request.** The client declares the intent and asks for the
+   service, so the review shows it:
+
+   ```json
+   "intents": [{ "name": "echo", "kind": "background", "title": "Echo",
+                 "params": { "text": "text" }, "handler": "vibestudio.hello.v1#echo" }],
+   ```
+
+   ```json
+   "authority": {
+     "serviceRequests": [{ "protocol": "vibestudio.hello.v1", "availability": "required" }],
+     "requests": [{ "capability": "workspace-service:hello",
+                    "resource": { "kind": "exact", "key": "do:workers/hello-echo:HelloEchoDO:workspace-hello" },
+                    "tier": "gated", "evidence": "exact" }]
+   }
+   ```
+
+The host calls `clients.invokeIntent`; the server resolves the service as the
+client principal and dispatches to the method. The result on the wire is
+`{ text }` only. A declared parameter of type `text` receives free text (words
+after the intent, piped stdin); an undeclared parameter, an undeclared intent
+and a foreground intent are rejected.
+
 ## Client Data And Worker Services
 
 Clients do not host databases. When a client needs persistent workspace data,
