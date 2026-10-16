@@ -458,7 +458,9 @@ describe("ApprovalsOverlay — bounded height", () => {
       cardType: "confirm.critical",
       allowedDecisions: ["once", "deny"],
     } as PendingApproval;
-    const text = renderToText(<ApprovalsOverlay pending={[critical]} selectedIndex={0} height={14} />);
+    const text = renderToText(
+      <ApprovalsOverlay pending={[critical]} selectedIndex={0} height={14} />
+    );
     expect(text).toContain("[1] Confirm  [2] Cancel ");
     expect(text).not.toContain("[3]");
   });

@@ -111,9 +111,14 @@ describe("KeyRouter", () => {
     const router = new KeyRouter("C-space");
     const tokenizer = new InputTokenizer();
     router.route(tokenizer.push("\x00\x1b"));
-    expect(router.route(tokenizer.push("\x07"))).toEqual([{ kind: "prefix", pending: false }, { kind: "command", command: { kind: "cancel" } }]);
+    expect(router.route(tokenizer.push("\x07"))).toEqual([
+      { kind: "prefix", pending: false },
+      { kind: "command", command: { kind: "cancel" } },
+    ]);
     expect(router.pending).toBe(false);
-    expect(router.route(tokenizer.push("x"))).toEqual([{ kind: "input", event: { kind: "key", name: "x", seq: "x" } }]);
+    expect(router.route(tokenizer.push("x"))).toEqual([
+      { kind: "input", event: { kind: "key", name: "x", seq: "x" } },
+    ]);
   });
 
   it("passes every key but the prefix through to the focused target", () => {

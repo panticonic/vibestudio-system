@@ -6,7 +6,9 @@ export type PendingTaskRulesApproval = Extract<PendingApproval, { kind: "capabil
   cardType: "task.rules";
 };
 
-export type TaskRulesResolution = { decision: "accept"; selected: string[] } | { decision: "cancel" };
+export type TaskRulesResolution =
+  | { decision: "accept"; selected: string[] }
+  | { decision: "cancel" };
 
 /**
  * The host's cursor into a `task.rules` card: which offered row is focused and

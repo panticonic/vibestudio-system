@@ -43,7 +43,9 @@ function origin(overrides: Partial<InstallReviewOrigin> = {}): InstallReviewOrig
   };
 }
 
-function clearableRow(overrides: Partial<InstallReviewPermissionRow> = {}): InstallReviewPermissionRow {
+function clearableRow(
+  overrides: Partial<InstallReviewPermissionRow> = {}
+): InstallReviewPermissionRow {
   return {
     kind: "permission",
     key: overrides.key ?? "cap\0scope",
@@ -319,8 +321,12 @@ describe("routeApprovalDigit — where a keypress-decision goes", () => {
       approvalId: "runtime-capability",
       decision: "deny",
     });
-    expect(routeApprovalDigit(critical, 3, undefined, INITIAL_TASK_RULES_NAV)).toEqual({ via: "none" });
-    expect(routeApprovalDigit(critical, 0, undefined, INITIAL_TASK_RULES_NAV)).toEqual({ via: "none" });
+    expect(routeApprovalDigit(critical, 3, undefined, INITIAL_TASK_RULES_NAV)).toEqual({
+      via: "none",
+    });
+    expect(routeApprovalDigit(critical, 0, undefined, INITIAL_TASK_RULES_NAV)).toEqual({
+      via: "none",
+    });
   });
 
   it("resolves nothing when there is no focused approval", () => {

@@ -5,7 +5,10 @@ import { approvalRequestedBy } from "./approvalRequester.js";
 const APP = "app:terminal-apps/chat:1";
 const AGENT = "do:agents/chat:ChatAgent:1";
 
-function approval(callerId: string, requester?: Partial<ApprovalRequesterIdentity>): PendingApproval {
+function approval(
+  callerId: string,
+  requester?: Partial<ApprovalRequesterIdentity>
+): PendingApproval {
   return {
     kind: "capability",
     approvalId: "a",
