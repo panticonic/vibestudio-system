@@ -63,8 +63,12 @@ import {
   type MobilePanelForestRow,
 } from "../shellCore/panelForest";
 import { useVisibleAccountProfiles } from "../hooks/useVisibleAccountProfiles";
-import { hairline, radius, spacing, touchTarget, type } from "../design/tokens";
 import {
+  hairline,
+  radius,
+  spacing,
+  touchTarget,
+  type,
   Archive,
   Copy,
   CopyPlus,
@@ -76,7 +80,7 @@ import {
   Share2,
   X,
   type IconComponent,
-} from "../design/icons";
+} from "@workspace/client-kit-native/ui";
 
 interface PanelDrawerProps {
   /** Called when a panel is selected; parent should close the drawer */

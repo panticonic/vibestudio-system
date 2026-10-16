@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import type {
   MobileWorkspaceDirectory,
@@ -9,7 +9,10 @@ import {
   handleExternalOpen,
   type ExternalOpenPayload,
 } from "../services/oauthLoopback";
-import { handleMobileSupervisionChange } from "../services/appUpdatePrompt";
+import { Alert } from "react-native";
+import { presentClientUpdates } from "@workspace/client-kit-native";
+import type { ClientUpdateModel } from "@workspace/client-update-core";
+import { createMobileClientUpdateModel } from "../services/mobileClientUpdate";
 import type { ToastInput } from "../state/toastAtoms";
 
 /** Connected workspace events remain visible even before its panels are opened. */
@@ -24,7 +27,6 @@ export function WorkspaceSessionEffects({
   notify: (toast: ToastInput) => void;
   theme: "light" | "dark";
 }) {
-  const promptedAppUpdates = useRef(new Set<string>());
   useEffect(() => {
     void session.client.panels.updateTheme(theme).catch((error) => {
       console.warn("[WorkspaceSession] Failed to sync panel theme", error);
@@ -41,20 +43,33 @@ export function WorkspaceSessionEffects({
     void candidate.catch(() => undefined);
     const current = () =>
       active && directory.sessions.get(session.workspaceId) === session;
+    // The update model is made when the selected client is first known and is
+    // retired with this session; it asks once per ready build.
+    let updates: { model: ClientUpdateModel; stop: () => void } | undefined;
+    const updatesFor = (selected: { source: string; name: string }) => {
+      if (updates) return updates.model;
+      const model = createMobileClientUpdateModel({
+        shellClient: client,
+        selectedSource: selected.source,
+        selectedClientId: selected.name,
+      });
+      updates = {
+        model,
+        stop: presentClientUpdates(model, {
+          alert: Alert.alert,
+          notify: (toast) => {
+            if (current()) notify(toast);
+          },
+        }),
+      };
+      return model;
+    };
     const stopAppLifecycle = isAppSource
       ? client.events.on("supervision:changed", (change) => {
           void candidate
             .then((selected) => {
               if (!current() || !selected) return;
-              handleMobileSupervisionChange(change, {
-                shellClient: client,
-                pushToast: (toast) => {
-                  if (current()) notify(toast);
-                },
-                prompted: promptedAppUpdates.current,
-                selectedSource: selected.source,
-                selectedAppId: selected.name,
-              });
+              updatesFor(selected).handleChange(change);
             })
             .catch((error: unknown) => {
               if (current())
@@ -144,6 +159,7 @@ export function WorkspaceSessionEffects({
     return () => {
       active = false;
       stopAppLifecycle?.();
+      updates?.stop();
       void observation
         .stop()
         .catch((error: unknown) =>

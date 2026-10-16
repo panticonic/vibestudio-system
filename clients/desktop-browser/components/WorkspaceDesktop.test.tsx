@@ -106,7 +106,7 @@ const api = vi.hoisted(() => {
             getFocusedPanelId: async () => "destination-focused",
           },
           app: { openShellSurface: surface },
-          shellApproval: { listPending: async () => [] },
+          shellApproval: { list: async () => [] },
           events: {
             on: (
               event: string,

@@ -1,0 +1,16 @@
+{
+  "name": "@workspace/workspace-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless workspace list, filter, selection and switch shared by every client's workspace picker",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workspace/snapshot-store": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

@@ -1,4 +1,4 @@
-import { userFacingError } from "../../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { useShellWorkspaceClient } from "../workspaceContext";
 import { measureShellPhase } from "../startupPerformance";
 import { useEffect, useMemo, useState } from "react";

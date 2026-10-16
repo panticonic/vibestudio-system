@@ -27,9 +27,16 @@ import Animated, {
   Extrapolation,
 } from "react-native-reanimated";
 import ReactNativeHapticFeedback from "react-native-haptic-feedback";
-import type { ThemeColors } from "../state/themeAtoms";
-import { radius, spacing, type } from "../design/tokens";
-import { Archive, ChevronDown, ChevronRight, Pin } from "../design/icons";
+import {
+  type ThemeColors,
+  radius,
+  spacing,
+  type,
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  Pin,
+} from "@workspace/client-kit-native/ui";
 import { MobilePanelIcon } from "./MobilePanelIcon";
 import type { MobilePanelRowPresentation } from "../shellCore/panelForest";
 

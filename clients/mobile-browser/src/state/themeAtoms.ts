@@ -8,12 +8,13 @@
  * The palette is layered: `background` is the app canvas, `surface` sits on
  * top of it (bars, cards), `surfaceRaised` on top of that (sheets, menus,
  * toasts), and `surfaceSunken` recedes below (inputs, wells). Text has three
- * tiers; borders two. Metric tokens (spacing/type/radius) live in
- * ../design/tokens.
+ * tiers; borders two. The palette's shape (`ThemeColors`) and the metric tokens
+ * (spacing/type/radius) belong to @workspace/client-kit-native/ui.
  */
 
 import { atom } from "jotai";
 import { Appearance, type ColorSchemeName } from "react-native";
+import type { ThemeColors } from "@workspace/client-kit-native/ui";
 import { getNativeAppStorage } from "../services/nativeAppStorage";
 
 /** Current color scheme from the system ("light" | "dark" | null) */
@@ -65,43 +66,6 @@ export const isDarkModeAtom = atom((get) => {
   const scheme = get(colorSchemeAtom);
   return scheme !== "light"; // default to dark
 });
-
-export interface ThemeColors {
-  background: string;
-  surface: string;
-  /** Sheets, menus, toasts -- anything floating above surface. */
-  surfaceRaised: string;
-  /** Inputs, wells, inactive pills -- recedes below surface. */
-  surfaceSunken: string;
-  text: string;
-  textSecondary: string;
-  /** Faint metadata -- counts, timestamps, placeholder glyphs. */
-  textTertiary: string;
-  border: string;
-  /** Softer divider for internal separators. */
-  borderSubtle: string;
-  primary: string;
-  /** Text/icon color rendered on top of a `primary` fill. */
-  onPrimary: string;
-  accent: string;
-  accentSoft: string;
-  success: string;
-  successSoft: string;
-  warning: string;
-  warningSoft: string;
-  danger: string;
-  dangerSoft: string;
-  info: string;
-  infoSoft: string;
-  codeBackground: string;
-  /** Scrim behind sheets and dialogs. */
-  overlay: string;
-  /** Pass to shadowColor together with design/tokens shadow presets. */
-  shadow: string;
-  statusConnected: string;
-  statusConnecting: string;
-  statusDisconnected: string;
-}
 
 const darkColors: ThemeColors = {
   background: "#111419",

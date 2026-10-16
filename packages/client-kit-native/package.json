@@ -1,0 +1,28 @@
+{
+  "name": "@workspace/client-kit-native",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "React Native client chrome built on the headless cores: approval sheet, connection bar, workspace list, client-update prompt",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui/index.ts"
+  },
+  "dependencies": {
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/approvals-core": "workspace:*",
+    "@workspace/client-update-core": "workspace:*",
+    "@workspace/connection-core": "workspace:*",
+    "@workspace/provider-signin-core": "workspace:*",
+    "@workspace/snapshot-store": "workspace:*",
+    "@workspace/workspace-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "lucide-react-native": "^1.39.0",
+    "react": "~19.0.0",
+    "react-native": "^0.79.7",
+    "react-native-haptic-feedback": "^2.3.4",
+    "react-native-safe-area-context": "^5.7.0",
+    "react-native-svg": "^15.15.4"
+  }
+}

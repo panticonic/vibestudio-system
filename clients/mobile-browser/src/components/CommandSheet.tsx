@@ -1,4 +1,13 @@
-import { AppModal } from "./ui/AppModal";
+import {
+  AppModal,
+  hairline,
+  radius,
+  shadow,
+  spacing,
+  type,
+  Search,
+  X,
+} from "@workspace/client-kit-native/ui";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 /**
  * CommandSheet — the mobile command palette (quickfire-overlay-spec §7.1).
@@ -71,8 +80,6 @@ import {
   dismissCommandSheetAtom,
   openQuickfireSheetAtom,
 } from "../state/commandSheetAtoms";
-import { hairline, radius, shadow, spacing, type } from "../design/tokens";
-import { Search, X } from "../design/icons";
 import {
   buildMobileSlate,
   type MobileCommandOutcome,

@@ -1,4 +1,4 @@
-import { AppModal } from "../components/ui/AppModal";
+import { AppModal, spacing, type } from "@workspace/client-kit-native/ui";
 import { workspaceName as displayWorkspaceName } from "../services/workspaceName";
 import { WorkspaceCreateSheet } from "../components/WorkspaceCreateSheet";
 import { WorkspaceApprovalSurface } from "../components/WorkspaceApprovalSurface";
@@ -32,7 +32,6 @@ import {
 import { mobileNavigationLayout } from "../shellCore/mobileLayout";
 import { ActionSheetHost } from "../components/ui/ActionSheetHost";
 import { Button } from "../components/ui/primitives";
-import { spacing, type } from "../design/tokens";
 import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
 
 export type DrawerParamList = { PanelContent: undefined };

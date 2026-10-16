@@ -1,4 +1,4 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Box, Button, Callout, Flex, Spinner, Text, TextField } from "@radix-ui/themes";

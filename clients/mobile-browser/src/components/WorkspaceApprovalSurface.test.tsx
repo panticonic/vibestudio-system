@@ -1,11 +1,11 @@
 import { render } from "@testing-library/react-native";
 import { approvalPresentationKey } from "@vibestudio/shared/approvalPresentation";
-import type { ApprovalSheetProps } from "./ApprovalSheet";
+import type { ApprovalSheetProps } from "@workspace/client-kit-native";
 import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
 import { WorkspaceApprovalSurface } from "./WorkspaceApprovalSurface";
 
 let mockSheet: ApprovalSheetProps;
-jest.mock("./ApprovalSheet", () => ({
+jest.mock("@workspace/client-kit-native", () => ({
   ApprovalSheet: (props: ApprovalSheetProps) => {
     mockSheet = props;
     return require("react").createElement(require("react-native").View, {

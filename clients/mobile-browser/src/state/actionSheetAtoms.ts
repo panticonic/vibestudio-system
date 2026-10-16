@@ -8,7 +8,7 @@
  */
 
 import { atom } from "jotai";
-import type { IconComponent } from "../design/icons";
+import { type IconComponent } from "@workspace/client-kit-native/ui";
 
 export type ActionSheetTone = "default" | "danger" | "primary";
 

@@ -11,7 +11,8 @@ import { Badge, IconButton, Tooltip } from "@radix-ui/themes";
 import { CrossCircledIcon, GlobeIcon, UpdateIcon } from "@radix-ui/react-icons";
 
 import { useShellEvent } from "../shell/useShellEvent";
-import { connectionStatusCopy, type ConnectionStatus } from "./connectionStatusCopy";
+import type { WorkspaceTransportStatus } from "@vibestudio/shared/workspaceConnection";
+import { connectionSentence, viewFromTransport } from "@workspace/connection-core";
 
 type ConnectionMode = "local" | "remote";
 interface RemoteTransport {
@@ -23,7 +24,7 @@ interface RemoteTransport {
 
 interface ConnectionSnapshot {
   mode: ConnectionMode;
-  status: ConnectionStatus;
+  status: WorkspaceTransportStatus;
   remoteHost?: string;
   remoteTransport?: RemoteTransport | null;
 }
@@ -63,7 +64,7 @@ export function ConnectionStatusBadge({
     "server-connection-changed",
     useCallback(
       (payload: {
-        status: ConnectionStatus;
+        status: WorkspaceTransportStatus;
         isRemote: boolean;
         remoteHost?: string;
         remoteTransport?: RemoteTransport;
@@ -102,11 +103,10 @@ export function ConnectionStatusBadge({
   const status = snap?.status ?? "connecting";
   const mode = snap?.mode ?? "local";
   const summary = snap
-    ? connectionStatusCopy({
-        status,
+    ? connectionSentence({
+        view: viewFromTransport({ status, everOnline: hasConnected }),
         isRemote: mode === "remote",
-        remoteHost: snap.remoteHost,
-        hasConnected,
+        ...(snap.remoteHost === undefined ? {} : { remoteHost: snap.remoteHost }),
       })
     : "Checking connection…";
 

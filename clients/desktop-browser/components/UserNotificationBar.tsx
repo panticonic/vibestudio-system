@@ -1,4 +1,4 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSetAtom } from "jotai";

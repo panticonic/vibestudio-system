@@ -103,7 +103,10 @@ stay inside their workspace.
 
 ## OTA Updates
 
-- `appUpdatePrompt.ts` prompts for trusted mobile app updates.
+- `mobileClientUpdate.ts` is this app's `ClientUpdatePort` (install, roll back)
+  over `@workspace/client-update-core`; `@workspace/client-kit-native` words the
+  prompt (`presentClientUpdates`) and `WorkspaceSessionEffects` feeds it
+  `supervision:changed` events for this client.
 - Install calls the shared bundle-delivery flow over the app's System
   app-source `MobileRpcClient` transport, then activates the prepared bundle.
 - Roll back first changes the trusted server build, then activates the
@@ -126,6 +129,11 @@ stay inside their workspace.
   navigation, approval, identity, and lifecycle behavior in both.
 - Use the same identity and state projections as the desktop. Render natively
   and idiomatically, but never add a mobile-only fallback data path.
+- Shared chrome (approval sheet, connection bar, update prompt, workspace rows,
+  and the design tokens, icons and `MobileUnitIcon` they draw with) lives in
+  `@workspace/client-kit-native`, built on the headless cores; this app wires its
+  own data into them (`WorkspaceApprovalSurface`, `WorkspaceConnectionBar`,
+  `BrowserKitProvider`). Change shared chrome there, not here.
 - For unit icons, use `MobileUnitIcon`/`MobilePanelIcon`. Relative manifest
   images resolve through the authenticated local asset facade, browser panels
   use captured favicons, SVG artwork renders through `react-native-svg` (not

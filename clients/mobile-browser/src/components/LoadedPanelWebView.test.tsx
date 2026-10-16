@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react-native";
 import { LoadedPanelWebView, type LoadedPanelWebViewProps } from "./LoadedPanelWebView";
-import type { ThemeColors } from "../state/themeAtoms";
+import { type ThemeColors } from "@workspace/client-kit-native/ui";
 import type { WebViewEntry } from "./webViewStack";
 
 const mockPanelWebViewRender = jest.fn();

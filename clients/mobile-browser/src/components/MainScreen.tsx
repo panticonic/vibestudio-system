@@ -38,7 +38,7 @@ import {
   type StackNavigationProp,
 } from "@workspace/mobile-navigation";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { ConnectionBar } from "./ConnectionBar";
+import { WorkspaceConnectionBar } from "./WorkspaceConnectionBar";
 import { AppBar } from "./AppBar";
 import { workspaceBrowserProfile } from "../services/workspaceBrowserProfile";
 import { LoadedPanelWebView } from "./LoadedPanelWebView";
@@ -144,8 +144,9 @@ import { collectMobileOpenPanels } from "../shellCore/openPanelIndex";
 import type { PanelDescriptor } from "@workspace/omnibox-core";
 import type { QuickfireTransport } from "@workspace/quickfire-core/session";
 import type { MobileSlateDeps } from "../commands/slate";
-import { spacing, type as typeScale } from "../design/tokens";
 import {
+  spacing,
+  type as typeScale,
   Archive as ArchiveIcon,
   ArrowLeft as ArrowLeftIcon,
   ArrowRight as ArrowRightIcon,
@@ -163,7 +164,7 @@ import {
   Share2 as ShareIcon,
   Square as SquareIcon,
   type IconComponent,
-} from "../design/icons";
+} from "@workspace/client-kit-native/ui";
 import { Button, EmptyState } from "./ui/primitives";
 
 /** Native icon choices for renderer-neutral shared panel commands. */
@@ -2475,7 +2476,7 @@ export function MainScreen({
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <ConnectionBar onRepair={handleRepair} />
+      <WorkspaceConnectionBar onRepair={handleRepair} />
       <AppBar
         title={activePanelTitle}
         approvalCount={workspaceDirectory?.approvalCount ?? 0}

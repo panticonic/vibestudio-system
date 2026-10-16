@@ -1,4 +1,4 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { WorkspaceMembersSection } from "./WorkspaceMembersSection";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { workspaceLabel } from "../shell/workspaceLabel";

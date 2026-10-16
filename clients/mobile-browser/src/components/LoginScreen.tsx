@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "./ui/primitives";
-import { radius, spacing, type } from "../design/tokens";
+import { radius, spacing, type } from "@workspace/client-kit-native/ui";
 import type { StackNavigationProp } from "@workspace/mobile-navigation";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { RootStackParamList } from "../navigation/RootNavigator";

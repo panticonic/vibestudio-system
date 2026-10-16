@@ -44,8 +44,12 @@ import {
 } from "@vibestudio/shared/panelChrome";
 import type { AddressAutocompleteItem } from "@workspace/omnibox-core";
 import { getCurrentSnapshot } from "@vibestudio/shared/panel/accessors";
-import { hairline, radius, spacing, touchTarget, type } from "../design/tokens";
 import {
+  hairline,
+  radius,
+  spacing,
+  touchTarget,
+  type,
   Bell,
   ArrowLeft,
   ArrowRight,
@@ -63,7 +67,7 @@ import {
   Workflow,
   X,
   type IconComponent,
-} from "../design/icons";
+} from "@workspace/client-kit-native/ui";
 import { IconButton } from "./ui/primitives";
 import { MobilePanelIcon } from "./MobilePanelIcon";
 

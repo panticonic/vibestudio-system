@@ -1,4 +1,12 @@
-import { AppModal } from "./ui/AppModal";
+import {
+  AppModal,
+  spacing,
+  radius,
+  touchTarget,
+  type,
+  X,
+  Check,
+} from "@workspace/client-kit-native/ui";
 import { useRef, useState } from "react";
 import { ScrollView, Text, TextInput, View, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,9 +19,7 @@ import {
 } from "../services/workspaceFileTransfer";
 import { workspaceName } from "../services/workspaceName";
 import { themeColorsAtom } from "../state/themeAtoms";
-import { spacing, radius, touchTarget, type } from "../design/tokens";
 import { Button, IconButton } from "./ui/primitives";
-import { X, Check } from "../design/icons";
 
 type Source = Awaited<ReturnType<typeof listTransferFiles>>;
 type Prepared = Awaited<ReturnType<typeof prepareMobileTransfer>>;

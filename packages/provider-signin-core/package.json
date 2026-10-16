@@ -1,0 +1,16 @@
+{
+  "name": "@workspace/provider-signin-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless provider sign-in: device codes, browser callbacks and paste-back, and the OAuth callback hand-off",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vibestudio/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

@@ -257,6 +257,39 @@ Guidelines:
   preserve file identity and provenance; editing files directly on disk does
   not bypass this flow.
 
+## Client Kits
+
+Shared chrome is not rewritten per client. Five framework-free cores hold the
+state machines and pure derivations behind small ports; one kit per runtime
+holds that runtime's components built on them. A new client composes them.
+
+| Core                                   | `client-kit-web` | `client-kit-native` | `client-kit-terminal` |
+| -------------------------------------- | ---------------- | ------------------- | --------------------- |
+| `approvals-core`: queue, decisions, protected inputs, card and trust-change model | approval card, install review, full-surface dialog | approval sheet | approvals overlay |
+| `connection-core`: availability, reconnect | `ConnectionNotice` | `ConnectionBar` | `ConnectionStatus` |
+| `workspace-core`: list, filter, switch | (desktop switcher stays app-specific) | `WorkspaceList` | `WorkspacePicker` |
+| `client-update-core`: ready builds, apply, roll back | `ClientUpdatePrompt` | `presentClientUpdates` | `ClientUpdatePrompt` |
+| `provider-signin-core`: device code, browser callback, paste-back, OAuth callback hand-off | `DeviceCodeBody` | sign-in panel | `SignInDetail` |
+
+`@workspace/snapshot-store` is the one subscribable cell every core exposes
+(`getSnapshot` / `subscribe`, the shape React's `useSyncExternalStore` takes).
+
+Rules for client authors:
+
+- A core never talks to a host. It takes a port (`ConnectionPort`,
+  `WorkspacePort`, `ClientUpdatePort`, `SignInPort`, an RPC client for
+  approvals) that the client wires from its own host API. Do not add a second
+  wiring path inside a kit.
+- Approval decisions come from `approvalDecisionOptions`; never build a
+  decision list in a component. A capability approval that carries
+  `trustChange` is a critical, per-operation decision: render
+  `trustChangeSection(approval)` (the kits' trust-change section does) and offer
+  only once or deny.
+- Protected inputs (`client-config`, `credential-input`, `secret-input`) are
+  typed only into trusted chrome. Route every key and paste to
+  `editProtectedInput` while one is shown, send values only through
+  `submitProtectedInput`, and never to a session, log or untrusted surface.
+
 ## Choosing Clients vs Panels vs Extensions
 
 Use a client when the code is a trusted top-level program a host runs:

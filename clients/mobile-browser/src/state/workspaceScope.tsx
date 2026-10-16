@@ -10,6 +10,7 @@ import type {
   MobileWorkspaceDirectory,
   MobileWorkspaceSession,
 } from "../services/workspaceDirectory";
+import { BrowserKitProvider } from "./BrowserKitProvider";
 import { colorSchemeAtom } from "./themeAtoms";
 
 export const WorkspaceVisibilityContext = createContext(true);
@@ -36,7 +37,9 @@ export function WorkspaceScope({
   );
   return (
     <WorkspaceVisibilityContext.Provider value={visible}>
-      <Provider store={session.store}>{children}</Provider>
+      <Provider store={session.store}>
+        <BrowserKitProvider>{children}</BrowserKitProvider>
+      </Provider>
     </WorkspaceVisibilityContext.Provider>
   );
 }

@@ -1,4 +1,4 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { deferredFeature } from "./deferredFeature";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useState } from "react";
@@ -24,7 +24,7 @@ import {
 import { type RemoteCredCurrent } from "../shell/client";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
-import { connectionStatusCopy } from "./connectionStatusCopy";
+import { connectionSentence, viewFromTransport } from "@workspace/connection-core";
 import "./connectionSettingsDialog.css";
 
 // The dialog keeps pairing and connection listeners alive while closed.
@@ -280,11 +280,15 @@ export function ConnectionSettingsDialog({
               // A transient blip — calm, reassuring, NOT the scary re-pair banner.
               <Callout.Root size="1" color="blue" mb="3">
                 <Callout.Text>
-                  {connectionStatusCopy({
-                    status: live.status,
+                  {connectionSentence({
+                    view: viewFromTransport({
+                      status: live.status,
+                      everOnline: true,
+                      ...(live.reconnect?.attempt === undefined
+                        ? {}
+                        : { attempt: live.reconnect.attempt }),
+                    }),
                     isRemote: true,
-                    hasConnected: true,
-                    attempt: live.reconnect?.attempt,
                   })}
                 </Callout.Text>
               </Callout.Root>
@@ -293,10 +297,9 @@ export function ConnectionSettingsDialog({
               live.status === "disconnected" ? (
               <Callout.Root size="1" color="amber" mb="3">
                 <Callout.Text>
-                  {connectionStatusCopy({
-                    status: live.status,
+                  {connectionSentence({
+                    view: viewFromTransport({ status: live.status, everOnline: true }),
                     isRemote: true,
-                    hasConnected: true,
                   })}
                   . Vibestudio will reconnect automatically when your server is
                   reachable.

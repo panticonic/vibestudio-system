@@ -1,0 +1,30 @@
+{
+  "name": "@workspace/client-kit-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DOM chrome shared by web clients: approval surfaces, connection banner, client-update prompt, sign-in presentation",
+  "exports": {
+    ".": "./src/index.ts",
+    "./userFacingError": "./src/userFacingError.ts"
+  },
+  "dependencies": {
+    "@radix-ui/react-icons": "^1.3.2",
+    "@radix-ui/themes": "^3.3.0",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/approvals-core": "workspace:*",
+    "@workspace/client-update-core": "workspace:*",
+    "@workspace/connection-core": "workspace:*",
+    "@workspace/provider-signin-core": "workspace:*",
+    "@workspace/snapshot-store": "workspace:*",
+    "@workspace/ui": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "vitest": "^3.2.7"
+  }
+}

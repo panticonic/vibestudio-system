@@ -21,15 +21,18 @@ import type {
 } from "@vibestudio/identity/workspaceRpcPolicy";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { showActionSheetAtom } from "../state/actionSheetAtoms";
-import { ArrowRight, Plus, X, Lock } from "../design/icons";
-import { spacing, radius, touchTarget, type } from "../design/tokens";
 import {
+  ArrowRight,
+  Plus,
+  X,
+  Lock,
+  spacing,
+  radius,
+  touchTarget,
+  type,
   Badge,
-  Button,
-  Card,
-  IconButton,
-  SectionHeader,
-} from "./ui/primitives";
+} from "@workspace/client-kit-native/ui";
+import { Button, Card, IconButton, SectionHeader } from "./ui/primitives";
 
 type PolicySnapshot = Awaited<
   ReturnType<MobileWorkspaceDirectory["hubControl"]["getWorkspaceRpcPolicy"]>

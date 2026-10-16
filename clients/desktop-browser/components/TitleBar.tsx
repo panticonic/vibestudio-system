@@ -1,4 +1,4 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { usePanelTrust } from "./usePanelTrust";
 import { confirmAction, confirmClosePanel } from "./ConfirmDialog";
 import {

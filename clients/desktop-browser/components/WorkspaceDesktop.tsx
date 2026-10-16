@@ -1,8 +1,8 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { measureShellPhase } from "../shell/startupPerformance";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
 import { APPROVAL_OVERLAY_HOST_ID } from "./ConsentApprovalBar";
-import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
+import { WorkspaceIconsContext } from "@workspace/client-kit-web";
 import {
   useCallback,
   useEffect,

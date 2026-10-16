@@ -1,3 +1,4 @@
+import { BrowserKitProvider } from "../state/BrowserKitProvider";
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { WorkspaceConnectionsSection } from "./WorkspaceConnectionsSection";
@@ -50,11 +51,13 @@ function fixture(incomingLocked = false, role = "admin") {
   };
   const view = render(
     <Provider store={createStore()}>
-      <WorkspaceConnectionsSection
-        directory={directory as unknown as MobileWorkspaceDirectory}
-        initialWorkspaceId={snapshot.workspaceId}
-      />
-      <ActionSheetHost />
+      <BrowserKitProvider>
+        <WorkspaceConnectionsSection
+          directory={directory as unknown as MobileWorkspaceDirectory}
+          initialWorkspaceId={snapshot.workspaceId}
+        />
+        <ActionSheetHost />
+      </BrowserKitProvider>
     </Provider>,
   );
   return { ...view, directory, policy };

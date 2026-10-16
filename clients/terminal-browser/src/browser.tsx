@@ -2,44 +2,59 @@ import React from "react";
 import { withRpcAbortSignal, isRpcAbortedBy } from "@vibestudio/rpc";
 import { Box, Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
-import type { DurableObservation } from "@vibestudio/shell-core/durableObservation";
 import type {
   TerminalBrowserExit,
   TerminalBrowserHost,
-  TerminalBrowserWorkspace,
   TerminalServerConnectionState,
 } from "@vibestudio/shell-core/terminal/terminalBrowserHost";
-import { createApprovalsClient, type ApprovalsClient } from "./approvals/approvalsClient.js";
+import {
+  applyInstallReviewNav,
+  applyTaskRulesNav,
+  approvalRequestedBy,
+  createApprovalQueue,
+  createApprovalsClient,
+  editProtectedInput,
+  effectiveTaskRuleSelection,
+  focusedRowKeyOf,
+  INITIAL_INSTALL_REVIEW_NAV,
+  INITIAL_TASK_RULES_NAV,
+  installReviewOutcomeLines,
+  isProtectedApproval,
+  isTaskRulesApproval,
+  newProtectedInput,
+  routeApprovalDigit,
+  shouldHandleInstallReviewNav,
+  shouldHandleTaskRulesNav,
+  submitProtectedInput,
+  type ApprovalQueue,
+  type ApprovalsClient,
+  type InstallReviewNavState,
+  type ProtectedInputState,
+  type TaskRulesNavState,
+} from "@workspace/approvals-core";
+import {
+  createWorkspaceModel,
+  type WorkspaceEntry,
+  type WorkspaceModel,
+  type WorkspaceModelState,
+} from "@workspace/workspace-core";
 import {
   ApprovalsOverlay,
+  ClickRegions,
+  ClickRegionsProvider,
+  ListOverlay,
+  Scrollable,
+  WorkspacePicker,
+  workspacePickerItems,
   approvalHeadline,
   approvalPanelHeight,
   approvalQueueIndexAt,
-} from "./approvals/ApprovalsOverlay.js";
-import { approvalRequestedBy } from "./approvals/approvalRequester.js";
-import { installReviewOutcomeLines } from "./approvals/installReviewOutcome.js";
-import {
-  editProtectedInput,
-  isProtectedApproval,
-  newProtectedInput,
-  type ProtectedInputState,
-} from "./approvals/protectedInput.js";
-import {
-  applyInstallReviewNav,
-  focusedRowKeyOf,
-  INITIAL_INSTALL_REVIEW_NAV,
-  routeApprovalDigit,
-  shouldHandleInstallReviewNav,
-  type InstallReviewNavState,
-} from "./approvals/installReviewNav.js";
-import {
-  applyTaskRulesNav,
-  effectiveTaskRuleSelection,
-  INITIAL_TASK_RULES_NAV,
-  isTaskRulesApproval,
-  shouldHandleTaskRulesNav,
-  type TaskRulesNavState,
-} from "./approvals/taskRulesNav.js";
+  clampScroll,
+  listItemAt,
+  listWindow,
+  type ClickAction,
+  type ListItem,
+} from "@workspace/client-kit-terminal";
 import { Compositor } from "./compositor/compositor.js";
 import { InkLayer } from "./compositor/inkLayer.js";
 import type { CursorState, Rect, Screen } from "./compositor/screen.js";
@@ -83,7 +98,6 @@ import { DEFAULT_SETTINGS, SETTING_ROWS, parseSettings, type BrowserSettings } f
 import { TerminalOwnership, captureConsole, type CapturedConsole } from "./tty/terminal.js";
 import {
   HelpOverlay,
-  ListOverlay,
   LogsOverlay,
   MessageBox,
   NeedsYouBar,
@@ -91,22 +105,20 @@ import {
   OpenUrlDialog,
   PrefixMenu,
   SettingsOverlay,
-  listItemAt,
-  listWindow,
   prefixMenuBindingAt,
   settingsAt,
   StatusBar,
   TabStrip,
   prefixMenuLines,
   tabWindow,
-  type ListItem,
   type LogLine,
   type StatusView,
   type TabView,
 } from "./ui/chrome.js";
-import { ClickRegions, ClickRegionsProvider, type ClickAction } from "./ui/clickable.js";
-import { clampScroll } from "./ui/Scrollable.js";
-import { Scrollable } from "./ui/Scrollable.js";
+
+/** The workspace picker ranks its entries by the typed query, as the palette and launcher do. */
+const rankWorkspaces = (entries: WorkspaceEntry[], query: string) =>
+  fuzzyFilter(entries, query, (entry) => entry.name).map(({ item, match }) => ({ ...item, match }));
 
 const MIN_COLUMNS = 40;
 // Eight body rows keep an approval's title, queue, detail and decision hints visible.
@@ -165,11 +177,7 @@ type Overlay =
       submit: (paths: string[], signal: AbortSignal) => Promise<string>;
     } & ListState)
   | { kind: "settings"; selected: number; error: string | null }
-  | ({
-      kind: "workspaces";
-      workspaces: TerminalBrowserWorkspace[] | null;
-      error: string | null;
-    } & ListState)
+  | ({ kind: "workspaces"; model: WorkspaceModel } & ListState)
   | { kind: "confirm-close"; sessionId: string }
   | ({ kind: "links"; tabTitle: string; urls: string[] } & ListState)
   | { kind: "open-url"; tabTitle: string; url: string };
@@ -256,7 +264,7 @@ export class TerminalBrowser {
   private approvals: PendingApproval[] = [];
   /** The launcher, with nothing open, saw one Ctrl-C; the next one quits. */
   private quitArmed = false;
-  private approvalObservation: DurableObservation | null = null;
+  private readonly approvalQueue: ApprovalQueue;
   private overlay: Overlay | null = null;
   private launcher: ListState = { query: "", selected: 0 };
   private copy: CopyState | null = null;
@@ -303,6 +311,7 @@ export class TerminalBrowser {
     this.approvalsClient = createApprovalsClient(
       withRpcAbortSignal(host.workspaceRpc, this.lifetime.signal)
     );
+    this.approvalQueue = createApprovalQueue(this.approvalsClient);
     this.connection = host.connectionState();
     const layout = this.layout();
     const onLayerFrame = () => this.compositor.invalidate();
@@ -391,14 +400,22 @@ export class TerminalBrowser {
       process.off("SIGCONT", onContinue);
     });
 
-    const approvalObservation = this.approvalsClient.observe(
-      (pending) => this.guard(() => this.applyApprovals(pending)),
-      (error) => this.log("warn", `Approval queue observation failed: ${describeError(error)}`)
+    let applied: readonly PendingApproval[] = this.approvals;
+    const stopObserving = this.approvalQueue.subscribe(() =>
+      this.guard(() => {
+        const state = this.approvalQueue.getSnapshot();
+        if (state.status === "failed") {
+          this.log("warn", `Approval queue observation failed: ${describeError(state.error)}`);
+        }
+        if (state.pending === applied) return;
+        applied = state.pending;
+        this.applyApprovals([...state.pending]);
+      })
     );
-    this.approvalObservation = approvalObservation;
+    void this.approvalQueue.start();
     this.cleanups.push(() => {
-      if (this.approvalObservation === approvalObservation) this.approvalObservation = null;
-      return approvalObservation.stop(this.lifetime.signal.reason);
+      stopObserving();
+      return this.approvalQueue.stop(this.lifetime.signal.reason);
     });
     this.cleanups.push(
       this.services.sessions.onChange((entries) => this.guard(() => this.applyEntries(entries)))
@@ -646,7 +663,7 @@ export class TerminalBrowser {
 
   private async refreshApprovals(): Promise<void> {
     try {
-      await this.approvalObservation?.refresh();
+      await this.approvalQueue.refresh();
     } catch (error) {
       if (this.cancelled(error)) return;
       this.log("warn", `Approvals could not be refreshed: ${describeError(error)}`);
@@ -1244,24 +1261,13 @@ export class TerminalBrowser {
         return {
           rect,
           element: (
-            <ListOverlay
-              title="Switch workspace"
-              query={overlay.query}
-              placeholder="type to filter"
+            <WorkspacePicker
+              state={this.workspaceState(overlay)}
               items={items}
               selected={overlay.selected}
               width={rect.width}
               height={rect.height}
-              empty={
-                <Text dimColor>
-                  {overlay.error
-                    ? `Could not list workspaces: ${overlay.error}`
-                    : overlay.workspaces === null
-                      ? "Loading workspaces…"
-                      : "No other workspaces."}
-                </Text>
-              }
-              footer="↑↓ choose · Enter switch · Esc close"
+              rank={rankWorkspaces}
             />
           ),
           click: listClick(items, overlay.selected, rect.height),
@@ -1650,20 +1656,19 @@ export class TerminalBrowser {
     }));
   }
 
+  /** The picker's state: the model's list and selection, and the query this overlay is typing. */
+  private workspaceState(overlay: Extract<Overlay, { kind: "workspaces" }>): WorkspaceModelState {
+    return { ...overlay.model.getSnapshot(), query: overlay.query };
+  }
+
   private workspaceItems(overlay: Extract<Overlay, { kind: "workspaces" }>): PaletteEntry[] {
-    const entries = (overlay.workspaces ?? []).map((workspace) => ({
-      key: workspace.id,
-      label: workspace.name,
-      hint: workspace.id === this.host.workspace.id ? "current" : undefined,
-      run: () => {
-        if (workspace.id === this.host.workspace.id) this.overlay = null;
-        else this.finish({ kind: "switch-workspace", workspaceId: workspace.id });
-      },
-    }));
-    const ranked = fuzzyFilter(entries, overlay.query, (entry) => entry.label).map(
-      ({ item, match }) => ({
+    const ranked = workspacePickerItems(this.workspaceState(overlay), rankWorkspaces).map(
+      (item) => ({
         ...item,
-        match,
+        run: () => {
+          if (item.key === this.host.workspace.id) this.overlay = null;
+          else void this.own(overlay.model.switchTo(item.key));
+        },
       })
     );
     overlay.selected = Math.min(overlay.selected, Math.max(0, ranked.length - 1));
@@ -2199,22 +2204,11 @@ export class TerminalBrowser {
       }
       if (result === "submit") {
         const state = overlay.protectedInput;
-        state.submitting = true;
-        const submit =
-          target.kind === "client-config"
-            ? this.approvalsClient.submitClientConfig
-            : target.kind === "credential-input"
-              ? this.approvalsClient.submitCredentialInput
-              : this.approvalsClient.submitSecretInput;
         void this.own(
-          submit(target.approvalId, { ...state.values }).then(
-            () => {
-              state.values = {};
-              return this.refreshApprovals();
-            },
+          submitProtectedInput(this.approvalsClient, target, state).then(
+            () => this.refreshApprovals(),
             (error: unknown) => {
               if (this.cancelled(error)) return;
-              state.submitting = false;
               state.error = "Submission failed. Values remain here; retry or cancel.";
               this.changed();
             }
@@ -2503,26 +2497,27 @@ export class TerminalBrowser {
   }
 
   private openWorkspaces(): void {
+    const model = createWorkspaceModel(
+      {
+        list: () => this.host.listWorkspaces(),
+        // Switching ends this browser with the destination; the CLI relaunches it there.
+        select: async (workspaceId) => this.finish({ kind: "switch-workspace", workspaceId }),
+      },
+      this.host.workspace.id
+    );
     const overlay: Extract<Overlay, { kind: "workspaces" }> = {
       kind: "workspaces",
-      workspaces: null,
-      error: null,
+      model,
       query: "",
       selected: 0,
     };
     this.overlay = overlay;
+    model.subscribe(() => this.changed());
     void this.own(
-      this.host.listWorkspaces().then(
-        (workspaces) => {
-          overlay.workspaces = workspaces;
-          this.changed();
-        },
-        (error: unknown) => {
-          if (this.cancelled(error)) return;
-          overlay.error = describeError(error);
-          this.changed();
-        }
-      )
+      model.load().catch((error: unknown) => {
+        // The failure is the model's state, which the picker shows.
+        this.cancelled(error);
+      })
     );
   }
 

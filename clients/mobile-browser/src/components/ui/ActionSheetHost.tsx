@@ -7,7 +7,14 @@
  * colors, safe-area padding. Tap backdrop / drag down / Cancel to dismiss.
  */
 
-import { AppModal } from "./AppModal";
+import {
+  AppModal,
+  radius,
+  shadow,
+  spacing,
+  type,
+  Check,
+} from "@workspace/client-kit-native/ui";
 import { useCallback, useEffect, useRef } from "react";
 import {
   Animated,
@@ -26,8 +33,6 @@ import {
   dismissActionSheetAtom,
 } from "../../state/actionSheetAtoms";
 import { themeColorsAtom } from "../../state/themeAtoms";
-import { radius, shadow, spacing, type } from "../../design/tokens";
-import { Check } from "../../design/icons";
 
 const SLIDE_DISTANCE = 480;
 

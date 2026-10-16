@@ -64,10 +64,18 @@ It requires `device-session`, `panel-hosting`, `approval-surface` and `hub-contr
   `components/ConfirmDialog` (rendered by `ConfirmDialogHost` in `App`), never
   `window.confirm` or `window.prompt` (Electron has no `prompt`). Closing a
   panel always uses the wording `Close "X" and its N sub-panels?`.
-- Errors shown to people go through `utils/userFacingError`. Don't render
-  `String(error)` or write a per-file message helper.
-- Connection status wording lives in `components/connectionStatusCopy`; both
-  the title-bar badge and Settings use it.
+- Errors shown to people go through `userFacingError` from
+  `@workspace/client-kit-web/userFacingError`. Don't render `String(error)` or
+  write a per-file message helper.
+- Connection status wording lives in `@workspace/connection-core`
+  (`connectionSentence`, `connectionNotice`); the title-bar badge, Settings and
+  the kit's `ConnectionNotice` banner all use it.
+- Shared chrome comes from the client kit, not from this client:
+  `@workspace/client-kit-web` holds the approval card, install review, full
+  surface, connection banner, client-update prompt and device-code panel, built
+  on the headless cores (`approvals-core`, `connection-core`,
+  `client-update-core`, `provider-signin-core`). This client keeps only the
+  wiring: the host bridge, the overlay and shell events.
 
 ## Mobile Parity
 

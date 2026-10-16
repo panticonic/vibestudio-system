@@ -1,0 +1,13 @@
+{
+  "name": "@workspace/snapshot-store",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A minimal subscribable snapshot cell shared by the client headless cores (React useSyncExternalStore shaped)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

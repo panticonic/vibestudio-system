@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventName, EventPayloads, NotificationPayload } from "@vibestudio/shared/events";
 
 const shellClient = vi.hoisted(() => ({
-  applyUpdate: vi.fn(() => Promise.resolve({ applied: true })),
   rollback: vi.fn(() => Promise.resolve()),
   restart: vi.fn(() => Promise.resolve()),
   recoverExecution: vi.fn(() => Promise.resolve()),
@@ -20,9 +19,6 @@ const shellClient = vi.hoisted(() => ({
 vi.mock("../shell/client", () => ({
   browserEnvironment: { openDownload: vi.fn(), revealDownload: vi.fn() },
   extensions: { invoke: vi.fn() },
-  app: {
-    applyUpdate: shellClient.applyUpdate,
-  },
   notification: {
     show: shellClient.show,
     reportAction: shellClient.reportAction,
@@ -101,7 +97,6 @@ describe("NotificationBar", () => {
   beforeEach(() => {
     vi.mocked(useShellEvent).mockClear();
     vi.mocked(useDirectShellEvent).mockClear();
-    shellClient.applyUpdate.mockClear();
     shellClient.rollback.mockClear();
     shellClient.restart.mockClear();
     shellClient.recoverExecution.mockClear();

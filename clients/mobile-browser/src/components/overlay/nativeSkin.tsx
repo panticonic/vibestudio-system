@@ -51,9 +51,12 @@ import type {
   QuickfireTableProps,
 } from "@workspace/quickfire-core/ui";
 import type { QuickfireTone } from "@workspace/quickfire-core";
-import type { ThemeColors } from "../../state/themeAtoms";
-import { hairline, radius, spacing, type } from "../../design/tokens";
 import {
+  type ThemeColors,
+  hairline,
+  radius,
+  spacing,
+  type,
   Bell,
   Brain,
   Check,
@@ -72,7 +75,7 @@ import {
   Wrench,
   X,
   type IconComponent,
-} from "../../design/icons";
+} from "@workspace/client-kit-native/ui";
 import { copyToClipboard } from "../../services/nativeCapabilities";
 
 const GLYPHS: Record<QuickfireIconProps["name"], IconComponent> = {

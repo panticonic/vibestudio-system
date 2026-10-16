@@ -15,8 +15,14 @@ import {
 } from "react-native";
 import { useAtomValue } from "jotai";
 import { themeColorsAtom } from "../../state/themeAtoms";
-import { pressedOpacity, radius, spacing, touchTarget, type } from "../../design/tokens";
-import type { IconComponent } from "../../design/icons";
+import {
+  pressedOpacity,
+  radius,
+  spacing,
+  touchTarget,
+  type,
+  type IconComponent,
+} from "@workspace/client-kit-native/ui";
 
 /** Round, hit-target-sized icon button with a soft pressed state. */
 export function IconButton({
@@ -124,30 +130,6 @@ export function SectionHeader({ label, trailing }: { label: string; trailing?: R
   );
 }
 
-/** Pill badge, tone-aware. */
-export function Badge({
-  label,
-  tone = "neutral",
-}: {
-  label: string;
-  tone?: "neutral" | "primary" | "success" | "warning" | "danger" | "info";
-}) {
-  const colors = useAtomValue(themeColorsAtom);
-  const palette = {
-    neutral: { bg: colors.surfaceSunken, fg: colors.textSecondary },
-    primary: { bg: colors.accentSoft, fg: colors.accent },
-    success: { bg: colors.successSoft, fg: colors.success },
-    warning: { bg: colors.warningSoft, fg: colors.warning },
-    danger: { bg: colors.dangerSoft, fg: colors.danger },
-    info: { bg: colors.infoSoft, fg: colors.info },
-  }[tone];
-  return (
-    <View style={[styles.badge, { backgroundColor: palette.bg }]}>
-      <Text style={[type.micro, { color: palette.fg }]}>{label}</Text>
-    </View>
-  );
-}
-
 /** Centered empty/error/loading state with icon or custom art, copy, action. */
 export function EmptyState({
   art,
@@ -221,12 +203,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.xs,
-  },
-  badge: {
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    alignSelf: "flex-start",
   },
   empty: {
     flex: 1,

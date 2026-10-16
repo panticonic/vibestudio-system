@@ -11,14 +11,9 @@
  * the shared `DiffViewer` consumes.
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
+import { ApprovalCard, WorkspaceIconsContext, type BlobResult } from "@workspace/client-kit-web";
+import { resolveCallerInfo, type ApprovalQueueInfo } from "@workspace/approvals-core";
 import type { DiffContentFetcher, DiffReviewEntry } from "@workspace/ui/diff";
-import { ApprovalCard } from "../components/ApprovalCard";
-import {
-  resolveCallerInfo,
-  type ApprovalQueueInfo,
-  type BlobResult
-} from "../components/approvalCardModel";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { OverlaySurfaceComponentProps } from "./types";
 

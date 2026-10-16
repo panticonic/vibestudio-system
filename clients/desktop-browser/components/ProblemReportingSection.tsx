@@ -1,4 +1,4 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { problemReportingConversation } from "@vibestudio/shared/problemReportingConversation";
 import { reportDraftContent } from "@vibestudio/service-schemas/problemReportBundle";
 import { useCallback, useEffect, useState } from "react";

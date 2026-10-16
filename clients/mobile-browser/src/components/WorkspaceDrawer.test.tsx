@@ -1,5 +1,6 @@
 import { render, fireEvent, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
+import { BrowserKitProvider } from "../state/BrowserKitProvider";
 import { WorkspaceDrawer } from "./WorkspaceDrawer";
 import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
 
@@ -38,11 +39,13 @@ function fixture() {
   const onSettings = jest.fn();
   const view = render(
     <Provider store={createStore()}>
-      <WorkspaceDrawer
-        directory={directory as unknown as MobileWorkspaceDirectory}
-        onSelect={onSelect}
-        onSettings={onSettings}
-      />
+      <BrowserKitProvider>
+        <WorkspaceDrawer
+          directory={directory as unknown as MobileWorkspaceDirectory}
+          onSelect={onSelect}
+          onSettings={onSettings}
+        />
+      </BrowserKitProvider>
     </Provider>,
   );
   return { ...view, directory, onSelect, onSettings };

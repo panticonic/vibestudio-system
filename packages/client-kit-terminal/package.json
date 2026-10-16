@@ -1,0 +1,23 @@
+{
+  "name": "@workspace/client-kit-terminal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ink chrome for terminal clients: approvals overlay, connection status, workspace picker, update prompt",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/approvals-core": "workspace:*",
+    "@workspace/client-update-core": "workspace:*",
+    "@workspace/connection-core": "workspace:*",
+    "@workspace/provider-signin-core": "workspace:*",
+    "@workspace/workspace-core": "workspace:*",
+    "ink": "^6.8.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

@@ -7,6 +7,7 @@ import { workspaceDirectoryAtom } from "./src/state/workspaceDirectoryAtom";
 import { useEffect, useRef, useState } from "react";
 import { AppRegistry, Appearance, Linking, StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { BrowserKitProvider } from "./src/state/BrowserKitProvider";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { NavigationContainer } from "@workspace/mobile-navigation";
 import { Provider as JotaiProvider, useAtomValue, useSetAtom } from "jotai";
@@ -203,7 +204,9 @@ function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <JotaiProvider>
-          <AppContent />
+          <BrowserKitProvider>
+            <AppContent />
+          </BrowserKitProvider>
         </JotaiProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

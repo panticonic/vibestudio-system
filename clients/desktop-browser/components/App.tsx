@@ -1,5 +1,5 @@
 import { ReportingFirstUse } from "./ProblemReporting";
-import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
+import { WorkspaceIconsContext } from "@workspace/client-kit-web";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useEffect, useCallback } from "react";
 import { useSetAtom } from "jotai";

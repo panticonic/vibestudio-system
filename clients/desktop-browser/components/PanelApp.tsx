@@ -1,4 +1,4 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { WebsiteConnectionsProvider } from "../shell/hooks/WebsiteConnections";
 import { hubApprovalSource } from "../shell/client";
 import { useShellWorkspaceClient, useWorkspaceVisible, useWorkspaceNavigationHost } from "../shell/workspaceContext";

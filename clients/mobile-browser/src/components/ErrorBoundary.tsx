@@ -10,8 +10,7 @@ import React, { type ErrorInfo, type ReactNode } from "react";
 import { View, Text, ScrollView, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { EmptyState, Button } from "./ui/primitives";
-import type { ThemeColors } from "../state/themeAtoms";
-import { AlertTriangle, RefreshCw } from "../design/icons";
+import { type ThemeColors, AlertTriangle, RefreshCw } from "@workspace/client-kit-native/ui";
 
 interface ErrorBoundaryProps {
   children: ReactNode;

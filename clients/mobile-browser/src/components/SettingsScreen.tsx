@@ -49,8 +49,6 @@ import {
   type,
   pressedOpacity,
   touchTarget,
-} from "../design/tokens";
-import {
   ArrowLeft,
   Copy,
   Sun,
@@ -58,15 +56,10 @@ import {
   Smartphone,
   Unplug,
   type IconComponent,
-} from "../design/icons";
-import {
-  Card,
-  SectionHeader,
   Badge,
-  Button,
-  IconButton,
-} from "./ui/primitives";
-import { ConnectionBar } from "./ConnectionBar";
+} from "@workspace/client-kit-native/ui";
+import { Card, SectionHeader, Button, IconButton } from "./ui/primitives";
+import { WorkspaceConnectionBar } from "./WorkspaceConnectionBar";
 import { WorkspaceConnectionsSection } from "./WorkspaceConnectionsSection";
 import { MobileAccountProfileSection } from "./MobileAccountProfileSection";
 
@@ -390,7 +383,7 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      <ConnectionBar onRepair={handleDisconnect} />
+      <WorkspaceConnectionBar onRepair={handleDisconnect} />
 
       <View style={styles.headerRow}>
         <IconButton icon={ArrowLeft} label="Back" onPress={handleBack} />

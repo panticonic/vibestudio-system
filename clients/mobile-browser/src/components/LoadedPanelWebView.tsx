@@ -4,7 +4,7 @@ import type { WebsiteNotificationHost } from "../services/workspaceWebsiteNotifi
 import { memo, useCallback } from "react";
 import { StyleSheet, View } from "react-native";
 import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
-import type { ThemeColors } from "../state/themeAtoms";
+import { type ThemeColors } from "@workspace/client-kit-native/ui";
 import type { WebViewEntry } from "./webViewStack";
 import {
   PanelWebView,

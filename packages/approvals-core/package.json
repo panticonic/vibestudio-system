@@ -1,0 +1,20 @@
+{
+  "name": "@workspace/approvals-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless approvals: pending queue, decisions, protected inputs, trust-change card model",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vibestudio/rpc": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@vibestudio/shell-core": "workspace:*",
+    "@workspace/snapshot-store": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

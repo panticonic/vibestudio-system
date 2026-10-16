@@ -1,7 +1,8 @@
 import { act, render, waitFor } from "@testing-library/react-native";
 import { WorkspaceSessionEffects } from "./WorkspaceSessionEffects";
 import { handleExternalOpen } from "../services/oauthLoopback";
-import { handleMobileSupervisionChange } from "../services/appUpdatePrompt";
+import { createMobileClientUpdateModel } from "../services/mobileClientUpdate";
+import { presentClientUpdates } from "@workspace/client-kit-native";
 import type {
   MobileWorkspaceDirectory,
   MobileWorkspaceSession,
@@ -10,8 +11,12 @@ import type {
 jest.mock("../services/oauthLoopback", () => ({
   handleExternalOpen: jest.fn(async () => undefined),
 }));
-jest.mock("../services/appUpdatePrompt", () => ({
-  handleMobileSupervisionChange: jest.fn(),
+const mockUpdateModel = { handleChange: jest.fn() };
+jest.mock("../services/mobileClientUpdate", () => ({
+  createMobileClientUpdateModel: jest.fn(() => mockUpdateModel),
+}));
+jest.mock("@workspace/client-kit-native", () => ({
+  presentClientUpdates: jest.fn(() => jest.fn()),
 }));
 
 function setup(workspaceId = "personal") {
@@ -187,10 +192,10 @@ it("reconciles the selected native app update from supervision in System", async
   const system = setup("system");
   const personal = setup();
   const event = {
-    identity: { kind: "app", entityId: "mobile" },
+    identity: { kind: "client", entityId: "mobile" },
     change: "adopted",
     source: "clients/mobile-browser",
-    app: { target: "react-native" },
+    client: { id: "mobile", runtime: "react-native" },
   };
   const view = render(
     <>
@@ -200,16 +205,15 @@ it("reconciles the selected native app update from supervision in System", async
   );
   system.emit("supervision:changed", event);
   personal.emit("supervision:changed", event);
-  await waitFor(() =>
-    expect(handleMobileSupervisionChange).toHaveBeenCalledTimes(1),
-  );
-  expect(handleMobileSupervisionChange).toHaveBeenCalledWith(
-    event,
-    expect.objectContaining({
-      shellClient: system.client,
-      selectedSource: "clients/mobile-browser",
-    }),
-  );
+  await waitFor(() => expect(mockUpdateModel.handleChange).toHaveBeenCalledTimes(1));
+  expect(mockUpdateModel.handleChange).toHaveBeenCalledWith(event);
+  expect(createMobileClientUpdateModel).toHaveBeenCalledTimes(1);
+  expect(createMobileClientUpdateModel).toHaveBeenCalledWith({
+    shellClient: system.client,
+    selectedSource: "clients/mobile-browser",
+    selectedClientId: "mobile",
+  });
+  expect(presentClientUpdates).toHaveBeenCalledTimes(1);
   expect(personal.client.hostLaunch.configuredCandidate).not.toHaveBeenCalled();
   expect(personal.client.events.subscribeAll).toHaveBeenCalledWith([
     "notification:show",
@@ -229,16 +233,17 @@ it("does not present old app lifecycle work after its System session is replaced
   );
   const view = render(<WorkspaceSessionEffects {...f.props} />);
   f.emit("supervision:changed", {
-    identity: { kind: "app", entityId: "mobile" },
+    identity: { kind: "client", entityId: "mobile" },
     change: "adopted",
     source: "clients/mobile-browser",
-    app: { target: "react-native" },
+    client: { id: "mobile", runtime: "react-native" },
   });
   f.directory.sessions.set("system", { ...f.session });
   await act(async () => {
     resolve({ source: "clients/mobile-browser", name: "mobile" });
   });
-  expect(handleMobileSupervisionChange).not.toHaveBeenCalled();
+  expect(mockUpdateModel.handleChange).not.toHaveBeenCalled();
+  expect(createMobileClientUpdateModel).not.toHaveBeenCalled();
   view.unmount();
   await waitFor(() =>
     expect(f.client.events.unsubscribeMany).toHaveBeenCalledWith([

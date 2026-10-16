@@ -6,7 +6,12 @@ import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
 import { workspaceName } from "../services/workspaceName";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { showActionSheetAtom } from "../state/actionSheetAtoms";
-import { spacing, radius, touchTarget, type } from "../design/tokens";
+import {
+  spacing,
+  radius,
+  touchTarget,
+  type,
+} from "@workspace/client-kit-native/ui";
 import { Button, Card } from "./ui/primitives";
 
 export type WorkspaceMember = Awaited<

@@ -3,7 +3,7 @@ import { Text } from "react-native";
 import { useAtomValue, useSetAtom } from "jotai";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { showActionSheetAtom } from "../state/actionSheetAtoms";
-import { type } from "../design/tokens";
+import { type } from "@workspace/client-kit-native/ui";
 import { Button, Card, SectionHeader } from "./ui/primitives";
 
 export function WorkspaceCookiesCard({

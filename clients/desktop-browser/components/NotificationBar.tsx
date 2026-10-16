@@ -1,4 +1,4 @@
-import { userFacingError } from "../utils/userFacingError";
+import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { createPortal } from "react-dom";
 import { useSetAtom } from "jotai";
 import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
@@ -101,7 +101,7 @@ function panelOpenInstruction(value: unknown): {
 export function NotificationBar() {
   const navigationHost = useWorkspaceNavigationHost();
   const openCommandAgent = useSetAtom(openCommandAgentAtom);
-  const { app, browserEnvironment, extensions, notification, panel, supervisedUnits } =
+  const { browserEnvironment, extensions, notification, panel, supervisedUnits } =
     useShellWorkspaceClient();
 
   const [notifications, setNotifications] = useState<Map<string, NotificationPayload>>(new Map());
@@ -185,17 +185,7 @@ export function NotificationBar() {
         return;
       }
       try {
-        if (action.command?.type === "app.applyUpdate") {
-          const appId = action.command.appId;
-          const result = await app.applyUpdate(appId);
-          if (!result.applied) {
-            await notification.show({
-              type: "warning",
-              title: "No pending update",
-              message: `${appId} does not have a pending desktop update.`,
-            });
-          }
-        } else if (action.command?.type === "runtime.supervision.rollback") {
+        if (action.command?.type === "runtime.supervision.rollback") {
           await supervisedUnits.rollback(action.command.release.releaseId, {
             buildKey: action.command.buildKey,
           });
@@ -240,7 +230,6 @@ export function NotificationBar() {
       removeNotification(notificationId);
     },
     [
-      app,
       browserEnvironment,
       extensions,
       notification,

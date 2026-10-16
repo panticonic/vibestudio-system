@@ -1,0 +1,18 @@
+{
+  "name": "@workspace/client-update-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless pending client updates: what is ready, the prompt, apply and roll back",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vibestudio/shared": "workspace:*",
+    "@vibestudio/workspace-contracts": "workspace:*",
+    "@workspace/snapshot-store": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

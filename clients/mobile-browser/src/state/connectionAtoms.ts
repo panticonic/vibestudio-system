@@ -6,6 +6,7 @@
  */
 
 import { atom } from "jotai";
+import type { ConnectionReadiness } from "@workspace/client-kit-native";
 import type { ConnectionStatus } from "../services/mobileTransport";
 
 /** Current connection status */
@@ -20,7 +21,7 @@ export const isConnectingAtom = atom((get) => get(connectionStatusAtom) === "con
 /** Whether the device has network connectivity (updated by useAppLifecycle via NetInfo) */
 export const networkReachableAtom = atom<boolean>(true);
 
-export type WorkspaceReadiness = "connecting" | "shell-ready" | "reconciled" | "failed";
+export type WorkspaceReadiness = ConnectionReadiness;
 
 /** Workspace startup continues after the durable shell can first paint. */
 export const workspaceReadinessAtom = atom<WorkspaceReadiness>("connecting");

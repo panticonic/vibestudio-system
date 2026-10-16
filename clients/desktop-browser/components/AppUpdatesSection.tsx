@@ -1,21 +1,24 @@
-import { userFacingError } from "../utils/userFacingError";
+import { useSnapshot, userFacingError } from "@workspace/client-kit-web";
+import { useClientUpdates } from "./DesktopClientUpdates";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Callout, Code, Flex, Table, Text, Tooltip } from "@radix-ui/themes";
 import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
-import { type app, type supervisedUnits } from "../shell/client";
+import { type supervisedUnits } from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
 
-type PendingUpdate = Awaited<ReturnType<typeof app.listPendingUpdates>>[number];
 type SupervisedUnit = Awaited<ReturnType<typeof supervisedUnits.list>>[number];
 type ReleaseVersions = Awaited<ReturnType<typeof supervisedUnits.versions>>;
 type AppUnit = SupervisedUnit & { versions: ReleaseVersions };
 type UnitHealth = Awaited<ReturnType<typeof supervisedUnits.health>>;
 
 export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolean } = {}) {
-  const { app, notification, supervisedUnits } = useShellWorkspaceClient();
+  const { notification, supervisedUnits } = useShellWorkspaceClient();
 
-  const [pending, setPending] = useState<PendingUpdate[]>([]);
+  // The window's ready client builds are the client-update model's; taking one
+  // is its port (`app.applyUpdate`).
+  const updates = useClientUpdates();
+  const { pending, busy: updateBusy } = useSnapshot(updates);
   const [apps, setApps] = useState<AppUnit[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,20 +29,15 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [pendingUpdates, units] = await Promise.all([
-        app.listPendingUpdates(),
-        supervisedUnits.list(),
-      ]);
-      setPending(pendingUpdates);
-      const appUnits = units.filter((unit) => unit.identity.kind === "app");
-      setApps(
-        await Promise.all(
-          appUnits.map(async (unit) => ({
-            ...unit,
-            versions: await supervisedUnits.versions(unit.identity.entityId),
-          }))
-        )
+      const units = await supervisedUnits.list();
+      const appUnits = units.filter((unit) => unit.identity.kind === "client");
+      const withVersions = await Promise.all(
+        appUnits.map(async (unit) => ({
+          ...unit,
+          versions: await supervisedUnits.versions(unit.identity.entityId),
+        }))
       );
+      setApps(withVersions);
     } catch (err) {
       setError(userFacingError(err));
     } finally {
@@ -64,30 +62,16 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
     "supervision:changed",
     useCallback(
       (change) => {
-        if (change.identity.kind === "app") void load();
+        if (change.identity.kind === "client") void load();
       },
       [load]
     )
   );
 
   const pendingByApp = useMemo(
-    () => new Map(pending.map((update) => [update.appId, update])),
+    () => new Map(pending.map((update) => [update.clientId, update])),
     [pending]
   );
-
-  const loadUpdate = async (appId: string) => {
-    setBusy(`apply:${appId}`);
-    try {
-      setError(null);
-      const result = await app.applyUpdate(appId);
-      if (!result.applied) setError(`${appId} has no pending desktop update.`);
-      await load();
-    } catch (err) {
-      setError(userFacingError(err));
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const rollback = async (appId: string, buildKey?: string) => {
     setBusy(`rollback:${appId}:${buildKey ?? "latest"}`);
@@ -113,7 +97,7 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
     setBusy(`restart:${appId}`);
     try {
       setError(null);
-      await supervisedUnits.restart({ kind: "app", entityId: appId });
+      await supervisedUnits.restart({ kind: "client", entityId: appId });
       await load();
       await loadDiagnostics(appId);
     } catch (err) {
@@ -128,7 +112,7 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
     try {
       setError(null);
       const diagnostics = await supervisedUnits.health(
-        { kind: "app", entityId: appId },
+        { kind: "client", entityId: appId },
         { limit: 80, errorLimit: 20 }
       );
       setExpandedDiagnostics((current) => ({ ...current, [appId]: diagnostics }));
@@ -240,8 +224,8 @@ export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolea
                       {pendingUpdate ? (
                         <Button
                           size="1"
-                          disabled={busy === `apply:${appId}`}
-                          onClick={() => void loadUpdate(appId)}
+                          disabled={updateBusy === appId}
+                          onClick={() => void updates.apply(appId).catch(() => undefined)}
                         >
                           Apply update
                         </Button>

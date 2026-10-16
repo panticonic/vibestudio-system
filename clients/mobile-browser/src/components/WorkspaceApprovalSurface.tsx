@@ -5,7 +5,7 @@ import type {
   MobileWorkspaceDirectory,
 } from "../services/workspaceDirectory";
 import type { ToastInput } from "../state/toastAtoms";
-import { ApprovalSheet, type ApprovalSheetProps } from "./ApprovalSheet";
+import { ApprovalSheet, type ApprovalSheetProps } from "@workspace/client-kit-native";
 
 /** Approvals retain their exact hub/workspace owner while the shared queue is open. */
 export function WorkspaceApprovalSurface({

@@ -20,6 +20,7 @@ import {
 import { WorkspaceDesktop } from "./WorkspaceDesktop";
 import { deferredFeature } from "./deferredFeature";
 import { WorkspaceConnectionNotice } from "./WorkspaceConnectionNotice";
+import { DesktopClientUpdatePrompt, DesktopClientUpdates } from "./DesktopClientUpdates";
 
 const WorkspaceChooser = deferredFeature(async () => ({
   default: (await import("./WorkspaceChooser")).WorkspaceChooser,
@@ -78,50 +79,55 @@ export default function MainMode() {
 
   return (
     <ApprovalPresentationContext.Provider value={approvalPresentation}>
-      <WorkspaceDesktop
-        connectionNotice={
-          <WorkspaceConnectionNotice
-            onOpenSettings={() => setSettingsTarget({ section: "connection" })}
-          />
-        }
-      >
-        {/* Workspace creation */}
-        <AppDialog
-          open={workspaceChooserOpen}
-          onOpenChange={(open) => {
-            setWorkspaceChooserOpen(open);
-            if (!open) {
-              setCreationTemplate(null);
-              setCreationSource(null);
-            }
-          }}
-          maxWidth="920px"
-          className="workspace-creation-dialog"
-          title="Create a workspace"
-          description="A home for your projects, panels and conversations."
+      <DesktopClientUpdates>
+        <WorkspaceDesktop
+          connectionNotice={
+            <>
+              <WorkspaceConnectionNotice
+                onOpenSettings={() => setSettingsTarget({ section: "connection" })}
+              />
+              <DesktopClientUpdatePrompt />
+            </>
+          }
         >
-          <button
-            className="workspace-creation-close"
-            aria-label="Close workspace setup"
-            onClick={() => {
-              setWorkspaceChooserOpen(false);
-              setCreationTemplate(null);
-              setCreationSource(null);
+          {/* Workspace creation */}
+          <AppDialog
+            open={workspaceChooserOpen}
+            onOpenChange={(open) => {
+              setWorkspaceChooserOpen(open);
+              if (!open) {
+                setCreationTemplate(null);
+                setCreationSource(null);
+              }
             }}
+            maxWidth="920px"
+            className="workspace-creation-dialog"
+            title="Create a workspace"
+            description="A home for your projects, panels and conversations."
           >
-            ×
-          </button>
-          <WorkspaceChooser />
-        </AppDialog>
-      </WorkspaceDesktop>
+            <button
+              className="workspace-creation-close"
+              aria-label="Close workspace setup"
+              onClick={() => {
+                setWorkspaceChooserOpen(false);
+                setCreationTemplate(null);
+                setCreationSource(null);
+              }}
+            >
+              ×
+            </button>
+            <WorkspaceChooser />
+          </AppDialog>
+        </WorkspaceDesktop>
 
-      <ConnectionSettingsDialog
-        section={settingsTarget?.section ?? null}
-        workspaceId={settingsTarget?.workspaceId}
-        onSectionChange={(section) =>
-          setSettingsTarget(section ? { ...settingsTarget, section } : null)
-        }
-      />
+        <ConnectionSettingsDialog
+          section={settingsTarget?.section ?? null}
+          workspaceId={settingsTarget?.workspaceId}
+          onSectionChange={(section) =>
+            setSettingsTarget(section ? { ...settingsTarget, section } : null)
+          }
+        />
+      </DesktopClientUpdates>
     </ApprovalPresentationContext.Provider>
   );
 }

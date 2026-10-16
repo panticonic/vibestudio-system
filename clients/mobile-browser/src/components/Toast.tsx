@@ -14,8 +14,12 @@ import {
   XCircle,
   X,
   type IconComponent,
-} from "../design/icons";
-import { radius, shadow, spacing, touchTarget, type } from "../design/tokens";
+  radius,
+  shadow,
+  spacing,
+  touchTarget,
+  type,
+} from "@workspace/client-kit-native/ui";
 
 const DEFAULT_DURATION_MS = 4500;
 

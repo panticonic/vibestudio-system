@@ -29,7 +29,12 @@ import type {
 } from "../services/shellClient";
 import { readClipboardImageOrText } from "../services/nativeCapabilities";
 import { themeColorsAtom } from "../state/themeAtoms";
-import { spacing, radius, type, pressedOpacity } from "../design/tokens";
+import {
+  spacing,
+  radius,
+  type,
+  pressedOpacity,
+} from "@workspace/client-kit-native/ui";
 import { Card, SectionHeader } from "./ui/primitives";
 
 interface MobileAccountProfileSectionProps {

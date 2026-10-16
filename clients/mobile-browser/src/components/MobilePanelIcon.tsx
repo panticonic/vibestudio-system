@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { browserUrlFromPanelSource } from "@vibestudio/shared/panelChrome";
-import { MobileUnitIcon } from "./MobileUnitIcon";
+import { MobileUnitIcon } from "@workspace/client-kit-native/ui";
 
 export function MobilePanelIcon(props: {
   icon?: string;

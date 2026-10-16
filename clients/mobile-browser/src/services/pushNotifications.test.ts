@@ -580,8 +580,8 @@ describe("pushNotifications", () => {
         parts: [
           {
             identityKey: "clients/mobile-browser@ev-mobile",
-            kind: "app",
-            label: "Client App",
+            kind: "client",
+            label: "Client",
             surfaces: [],
             name: "@workspace-clients/mobile-browser",
             title: "Mobile",
@@ -591,7 +591,7 @@ describe("pushNotifications", () => {
             version: null,
             requiredUnitKeys: [],
             runsInBackground: false,
-            target: "react-native",
+            runtime: "react-native",
             origin: {
               url: null,
               originKey: "vibestudio",
@@ -618,7 +618,7 @@ describe("pushNotifications", () => {
             version: null,
             requiredUnitKeys: [],
             runsInBackground: false,
-            target: null,
+            runtime: null,
             origin: {
               url: null,
               originKey: "vibestudio",
@@ -637,7 +637,7 @@ describe("pushNotifications", () => {
           panels: 0,
           agents: 0,
           services: 0,
-          clientApps: 1,
+          clients: 1,
           extensions: 1,
         },
         unchangedPartCount: 0,

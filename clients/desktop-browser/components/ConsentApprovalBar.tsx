@@ -1,4 +1,24 @@
-import { userFacingError } from "../utils/userFacingError";
+import {
+  ApprovalFullSurface,
+  ApprovalKindIcon,
+  InstallReviewOutcomeNotice,
+  approvalOpensFullSurface,
+  useSnapshot,
+  userFacingError,
+  type ApprovalCardIntent,
+  type BlobResult,
+  type WorkspaceHistoryTarget,
+} from "@workspace/client-kit-web";
+import {
+  createApprovalQueue,
+  diffReviewPayloadHashes,
+  getDiffReviewPayload,
+  highestPendingTone,
+  resolveCallerInfo,
+  type ApprovalsClient,
+  type ApprovalTone,
+  type CallerInfo,
+} from "@workspace/approvals-core";
 import { useReportingSetup, useReportingReady } from "./ProblemReporting";
 import {
   isRpcConnectionLost,
@@ -34,6 +54,7 @@ import {
   useId,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 import { useAtomValue } from "jotai";
@@ -46,11 +67,6 @@ import type {
 import { getApprovalCopy } from "@vibestudio/shared/approvalCopy";
 import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
 import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
-import {
-  createApprovalStateController,
-  type ApprovalStateController,
-  SHELL_APPROVAL_PENDING_CHANGED_EVENT,
-} from "@vibestudio/shell-core/approvalState";
 
 import {
   useShellContentOverlay,
@@ -61,21 +77,7 @@ import { useShellEvent } from "../shell/useShellEvent";
 import { effectiveThemeAtom, themeConfigAtom } from "../state/themeAtoms";
 import { FOCUS_APPROVAL_REQUEST_EVENT } from "../commands/slate";
 import { useNavigationActions } from "./NavigationContext";
-import { ApprovalKindIcon } from "./ApprovalCard";
-import { ApprovalFullSurface } from "./ApprovalFullSurface";
-import { InstallReviewOutcomeNotice } from "./InstallReview";
-import {
-  approvalOpensFullSurface,
-  diffReviewPayloadHashes,
-  getDiffReviewPayload,
-  highestPendingTone,
-  resolveCallerInfo,
-  type ApprovalCardIntent,
-  type ApprovalTone,
-  type BlobResult,
-  type CallerInfo,
-  type WorkspaceHistoryTarget,
-} from "./approvalCardModel";
+import { useShellOverlay } from "../shell/useShellOverlay";
 import type { OverlayThemeInfo } from "../overlay/types";
 
 /**
@@ -97,11 +99,7 @@ const WORKSPACE_HISTORY_SOURCE = "about/workspace-history";
 
 export type ApprovalSource = {
   owner: RpcDestination;
-  shellApproval: import("../shell/workspaceClient").ShellWorkspaceClient["shellApproval"];
-  events: Pick<
-    import("../shell/workspaceClient").ShellWorkspaceClient["events"],
-    "subscribe" | "unsubscribe" | "on"
-  >;
+  shellApproval: ApprovalsClient;
 };
 
 export function ConsentApprovalBar({
@@ -116,18 +114,30 @@ export function ConsentApprovalBar({
   const workspaceClient = useShellWorkspaceClient();
   const { unitIcons, account, blobstore, panel, shellPresence } =
     workspaceClient;
-  const { events, shellApproval } = source ?? workspaceClient;
+  const { shellApproval } = source ?? workspaceClient;
   const owner = useMemo<RpcDestination>(
     () => source?.owner ?? { kind: "workspace", workspaceId },
     [source, workspaceId],
   );
   const ownerKey = rpcDestinationKey(owner);
 
-  const [queueError, setQueueError] = useState<string | null>(null);
-  const [pendingAccess, setPendingAccess] = useState<PendingApproval[]>([]);
-  const approvalController = useRef<ApprovalStateController | null>(null);
-  const retryApprovalController = useRef<(() => Promise<void>) | null>(null);
-  const authoritativePending = useRef<PendingApproval[]>([]);
+  // The queue is the host's; this mirrors it. A decision is retired from the
+  // view at once (`answered`) and put back only if the authoritative queue
+  // still holds it after the decision failed.
+  const [approvalQueue] = useState(() => createApprovalQueue(shellApproval));
+  const queueState = useSnapshot(approvalQueue);
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
+  const retire = useCallback(
+    (approvalId: string) =>
+      setAnswered((ids) => (ids.has(approvalId) ? ids : new Set(ids).add(approvalId))),
+    [],
+  );
+  const pendingAccess = useMemo(
+    () => queueState.pending.filter((approval) => !answered.has(approval.approvalId)),
+    [queueState.pending, answered],
+  );
+  const queueError =
+    queueState.status === "failed" ? userFacingError(queueState.error) : null;
   const [decisionError, setDecisionError] = useState<{
     approvalId: string;
     message: string;
@@ -215,89 +225,54 @@ export function ConsentApprovalBar({
       );
   }, [focusCurrentApproval, workspaceVisible]);
 
+  // Forget answered ids once the authoritative queue no longer holds them.
   useEffect(() => {
-    let active = true;
-    let operation = Promise.resolve();
-    const admissionFailures = new WeakMap<ApprovalStateController, unknown>();
-    const createController = () => {
-      let controller!: ApprovalStateController;
-      controller = createApprovalStateController({
-        listPending: () => shellApproval.listPending(),
-        subscribePendingChanged: () =>
-          events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-        unsubscribePendingChanged: () =>
-          events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-        onPendingChanged: (listener) =>
-          events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, (payload) =>
-            listener(payload),
-          ),
-        onChange: (pending) => {
-          setQueueError(null);
-          authoritativePending.current = pending;
-          setPendingAccess(pending);
-        },
-        onError: (err, phase) => {
-          if (phase === "subscribe") admissionFailures.set(controller, err);
-          setQueueError(userFacingError(err));
-          if (!isRpcConnectionLost(err))
-            console.warn(
-              `[ConsentApprovalBar] approval state ${phase} failed:`,
-              err,
-            );
-        },
-      });
-      return controller;
-    };
-    const startController = async () => {
-      const controller = createController();
-      approvalController.current = controller;
-      await controller.start();
-    };
-    const retireController = async (controller: ApprovalStateController) => {
-      try {
-        await controller.stop();
-      } catch (error) {
-        // A failed start is already visible. Its matching unsubscribe still
-        // completed when stop returns that same error; any distinct failure
-        // means retirement itself was not clean and blocks replacement.
-        if (error !== admissionFailures.get(controller)) throw error;
-      }
-    };
-    operation = startController();
-    void operation.catch(() => undefined);
-    retryApprovalController.current = () => {
-      operation = operation
-        .catch(() => undefined)
-        .then(async () => {
-          const previous = approvalController.current;
-          if (previous) {
-            approvalController.current = null;
-            await retireController(previous);
-          }
-          if (active) await startController();
-        });
-      void operation.catch(() => undefined);
-      return operation;
-    };
-    return () => {
-      active = false;
-      retryApprovalController.current = null;
-      operation = operation
-        .catch(() => undefined)
-        .then(async () => {
-          const controller = approvalController.current;
-          approvalController.current = null;
-          if (controller) await retireController(controller);
-        });
-      void operation.catch((error: unknown) => {
+    setAnswered((ids) => {
+      const held = new Set(queueState.pending.map((approval) => approval.approvalId));
+      const kept = [...ids].filter((id) => held.has(id));
+      return kept.length === ids.size ? ids : new Set(kept);
+    });
+  }, [queueState.pending]);
+
+  // Stopping a queue whose admission failed rejects with that same failure,
+  // which is already on screen; any other failure is retirement itself failing.
+  const retireQueue = useCallback(async () => {
+    try {
+      await approvalQueue.stop();
+    } catch (error) {
+      const state = approvalQueue.getSnapshot();
+      if (!(state.status === "failed" && state.error === error)) throw error;
+    }
+  }, [approvalQueue]);
+  const startQueue = useCallback(
+    () =>
+      approvalQueue.start().catch((error: unknown) => {
         if (!isRpcConnectionLost(error))
-          console.warn(
-            "[ConsentApprovalBar] approval state retirement failed:",
-            error,
-          );
-      });
+          console.warn("[ConsentApprovalBar] approval queue failed:", error);
+      }),
+    [approvalQueue],
+  );
+  const queueOperation = useRef(Promise.resolve());
+  const retryQueue = useCallback(() => {
+    queueOperation.current = queueOperation.current
+      .then(retireQueue)
+      .then(startQueue);
+    return queueOperation.current;
+  }, [retireQueue, startQueue]);
+  useEffect(() => {
+    queueOperation.current = queueOperation.current.then(startQueue);
+    return () => {
+      queueOperation.current = queueOperation.current
+        .then(retireQueue)
+        .catch((error: unknown) => {
+          if (!isRpcConnectionLost(error))
+            console.warn(
+              "[ConsentApprovalBar] approval queue retirement failed:",
+              error,
+            );
+        });
     };
-  }, []);
+  }, [retireQueue, startQueue]);
 
   // Replay the attention pulse whenever a not-yet-seen approval enters the queue.
   useEffect(() => {
@@ -532,9 +507,7 @@ export function ConsentApprovalBar({
     const approval = current;
     if (!approval) return;
     setDecisionError(null);
-    setPendingAccess((items) =>
-      items.filter((item) => item.approvalId !== approval.approvalId),
-    );
+    retire(approval.approvalId);
     void shellApproval
       .resolve(approval.approvalId, decision)
       .catch((error: unknown) => reconcileFailedDecision(approval, error));
@@ -583,9 +556,7 @@ export function ConsentApprovalBar({
       if (resolution.decision !== "cancel" && reportingSetup.required) {
         await reportingSetup.save();
       }
-      setPendingAccess((items) =>
-        items.filter((item) => item.approvalId !== approval.approvalId),
-      );
+      retire(approval.approvalId);
       const outcome = await shellApproval.resolveInstallReview(
         approval.approvalId,
         resolution,
@@ -601,9 +572,7 @@ export function ConsentApprovalBar({
     if (current?.kind !== "capability" || current.cardType !== "task.rules")
       return;
     const approval = current;
-    setPendingAccess((items) =>
-      items.filter((item) => item.approvalId !== approval.approvalId),
-    );
+    retire(approval.approvalId);
     runApprovalAction(approval, () =>
       shellApproval.resolveTaskRules(approval.approvalId, resolution),
     );
@@ -627,26 +596,25 @@ export function ConsentApprovalBar({
     approval: PendingApproval,
     error: unknown,
   ) => {
-    const controller = approvalController.current;
-    if (!controller) {
-      console.error("[ConsentApprovalBar] approval action failed:", error);
-      return;
-    }
     try {
-      await controller.refresh("manual");
+      await approvalQueue.refresh();
     } catch {
-      // The controller has already published the queue failure. Without an
-      // authoritative read, this decision cannot be reconciled safely.
+      // The queue has already published the failure. Without an authoritative
+      // read, this decision cannot be reconciled safely.
       return;
     }
-    if (approvalController.current !== controller) return;
     // A denied decision can also mean the request was withdrawn or membership
     // changed. Only the current authoritative queue can put a request back.
-    if (
-      authoritativePending.current.some(
-        (item) => item.approvalId === approval.approvalId,
-      )
-    ) {
+    const stillPending = approvalQueue
+      .getSnapshot()
+      .pending.some((item) => item.approvalId === approval.approvalId);
+    setAnswered((ids) => {
+      if (!stillPending || !ids.has(approval.approvalId)) return ids;
+      const next = new Set(ids);
+      next.delete(approval.approvalId);
+      return next;
+    });
+    if (stillPending) {
       console.error("[ConsentApprovalBar] approval action failed:", error);
       setDecisionError({
         approvalId: approval.approvalId,
@@ -1005,9 +973,7 @@ export function ConsentApprovalBar({
                     size="1"
                     variant="soft"
                     onClick={() =>
-                      void retryApprovalController
-                        .current?.()
-                        .catch(() => undefined)
+                      void retryQueue().catch(() => undefined)
                     }
                   >
                     Retry
@@ -1041,7 +1007,7 @@ export function ConsentApprovalBar({
     return present(
       <>
         {resultNotice}
-        <ApprovalFullSurface
+        <OverlaidApprovalFullSurface
           workspaceLabel={approvalWorkspaceLabel}
           onboardingOptions={reportingSetup.content}
           presentationKey={presentationKey ?? undefined}
@@ -1093,6 +1059,18 @@ export function ConsentApprovalBar({
       />
     </>,
   );
+}
+
+/**
+ * The full surface is a dialog in this document; the native panel views are
+ * hidden beneath it for as long as it is open, or the dialog renders correctly
+ * and is covered by whatever panel happens to be on screen.
+ */
+function OverlaidApprovalFullSurface(
+  props: ComponentProps<typeof ApprovalFullSurface>,
+) {
+  useShellOverlay(true);
+  return <ApprovalFullSurface {...props} />;
 }
 
 function ApprovalNativePresentation({

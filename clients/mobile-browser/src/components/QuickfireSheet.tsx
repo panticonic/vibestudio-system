@@ -1,4 +1,13 @@
-import { AppModal } from "./ui/AppModal";
+import {
+  AppModal,
+  hairline,
+  radius,
+  shadow,
+  spacing,
+  type,
+  SendHorizontal,
+  Square,
+} from "@workspace/client-kit-native/ui";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 /**
  * QuickfireSheet — the panel-scoped agent conversation on mobile
@@ -65,8 +74,6 @@ import {
   returnToCommandSheetAtom,
   type QuickfireSheetRequest,
 } from "../state/commandSheetAtoms";
-import { hairline, radius, shadow, spacing, type } from "../design/tokens";
-import { SendHorizontal, Square } from "../design/icons";
 import { IconButton } from "./ui/primitives";
 import { openExternalUrl } from "../services/nativeCapabilities";
 import { useNativeSkin } from "./overlay/nativeSkin";

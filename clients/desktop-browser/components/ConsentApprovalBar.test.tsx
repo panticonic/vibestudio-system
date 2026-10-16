@@ -25,9 +25,14 @@ import type {
   PendingCapabilityApproval,
   PendingUnitInstallReviewApproval,
 } from "@vibestudio/shared/approvals";
-import type { ApprovalCardIntent } from "./approvalCardModel";
+import type { ApprovalCardIntent } from "@workspace/client-kit-web";
+import type { ApprovalsClient } from "@workspace/approvals-core";
+import {
+  observePendingApprovals,
+  type ApprovalEvents,
+} from "../shell/approvalObservation";
 
-type ListPendingFn = () => Promise<unknown[]>;
+type ListFn = () => Promise<unknown[]>;
 type GetTreePageFn = () => Promise<{
   revision: number;
   nodes: Array<{ slotId: string }>;
@@ -46,7 +51,7 @@ const shellClient = vi.hoisted(() => ({
   decideServer: vi.fn(),
   loadIcon: vi.fn(async () => "blob:owning-workspace-icon"),
   heartbeat: vi.fn(() => Promise.resolve()),
-  listPending: vi.fn<ListPendingFn>(() => Promise.resolve([])),
+  list: vi.fn<ListFn>(() => Promise.resolve([])),
   resolve: vi.fn(() => Promise.resolve()),
   submitClientConfig: vi.fn(() => Promise.resolve()),
   submitCredentialInput: vi.fn(() => Promise.resolve()),
@@ -97,7 +102,14 @@ const overlay = vi.hoisted(() => ({
   onIntent: null as ((payload: unknown) => void) | null,
 }));
 
-vi.mock("../shell/client", () => ({
+vi.mock("../shell/client", async () => {
+  const { observePendingApprovals } = await import("../shell/approvalObservation");
+  const events = {
+    subscribe: shellClient.subscribe,
+    unsubscribe: shellClient.unsubscribe,
+    on: shellClient.onEvent,
+  };
+  return {
   problemReports: {
     consent: shellClient.consent,
     serverConsent: shellClient.serverConsent,
@@ -106,18 +118,18 @@ vi.mock("../shell/client", () => ({
   },
   unitIcons: { load: shellClient.loadIcon },
   shellApproval: {
-    listPending: shellClient.listPending,
+    list: shellClient.list,
     resolve: shellClient.resolve,
     submitClientConfig: shellClient.submitClientConfig,
     submitCredentialInput: shellClient.submitCredentialInput,
     resolveInstallReview: shellClient.resolveInstallReview,
+    observe: observePendingApprovals({
+      list: () => shellClient.list() as ReturnType<ApprovalsClient["list"]>,
+      events,
+    }),
   },
   shellPresence: { heartbeat: shellClient.heartbeat },
-  events: {
-    subscribe: shellClient.subscribe,
-    unsubscribe: shellClient.unsubscribe,
-    on: shellClient.onEvent,
-  },
+  events,
   blobstore: { getText: shellClient.getText },
   account: { getProfile: shellClient.getProfile },
   panel: {
@@ -126,7 +138,8 @@ vi.mock("../shell/client", () => ({
     navigate: shellClient.navigate,
     createPanel: shellClient.createPanel,
   },
-}));
+  };
+});
 
 vi.mock("../shell/useShellContentOverlay", () => ({
   useShellContentOverlay: (
@@ -183,7 +196,9 @@ const fullSurface = vi.hoisted(() => ({
     onClose?: () => void;
   } | null,
 }));
-vi.mock("./ApprovalFullSurface", () => ({
+vi.mock("../shell/useShellOverlay", () => ({ useShellOverlay: () => {} }));
+vi.mock("@workspace/client-kit-web", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@workspace/client-kit-web")>()),
   ApprovalFullSurface: (props: {
     approval: { approvalId: string };
     onClose: () => void;
@@ -264,8 +279,8 @@ function hostAppStartupApproval(
     parts: [
       {
         identityKey: "clients/desktop-browser@ev-shell",
-        kind: "app",
-        label: "Client App",
+        kind: "client",
+        label: "Client",
         surfaces: [],
         name: "@workspace-clients/desktop-browser",
         title: "Shell",
@@ -275,7 +290,7 @@ function hostAppStartupApproval(
         version: null,
         requiredUnitKeys: [],
         runsInBackground: false,
-        target: "electron",
+        runtime: "web",
         origin: {
           url: null,
           originKey: "vibestudio",
@@ -294,7 +309,7 @@ function hostAppStartupApproval(
       panels: 0,
       agents: 0,
       services: 0,
-      clientApps: 1,
+      clients: 1,
       extensions: 0,
     },
     unchangedPartCount: 0,
@@ -330,7 +345,7 @@ function installReviewApproval(
       panels: 1,
       agents: 0,
       services: 0,
-      clientApps: 0,
+      clients: 0,
       extensions: 0,
     },
   };
@@ -383,10 +398,35 @@ function mountBar(source?: SourceFactory) {
   );
 }
 
+/** A client's approvals with some calls replaced, observed through `events`. */
+function approvalsWith(
+  base: ApprovalsClient,
+  events: ApprovalEvents,
+  overrides: Partial<ApprovalsClient> = {},
+): ApprovalsClient {
+  const merged = { ...base, ...overrides };
+  return { ...merged, observe: observePendingApprovals({ list: merged.list, events }) };
+}
+
+/**
+ * The host announced a queue change. The queue only learns that it changed and
+ * re-reads the authoritative list, so the new list is what `list` now returns.
+ */
+async function announcePending(pending: unknown[]): Promise<void> {
+  shellClient.list.mockResolvedValue(pending);
+  const listener = shellClient.onEvent.mock.calls
+    .filter(([event]) => event === "shell-approval:pending-changed")
+    .at(-1)?.[1];
+  expect(listener).toBeTypeOf("function");
+  await act(async () => {
+    await listener?.({});
+  });
+}
+
 describe("ConsentApprovalBar coordinator", () => {
   it("decides a server-owned request through its captured queue without a workspace heartbeat", async () => {
     const resolve = vi.fn(async () => {});
-    const listPending = vi.fn(async () => [
+    const list = vi.fn(async () => [
       capabilityApproval({
         approvalId: "server-approval",
         title: "Server access",
@@ -394,8 +434,7 @@ describe("ConsentApprovalBar coordinator", () => {
     ]);
     const view = mountBar((client) => ({
       owner: { kind: "hub" },
-      shellApproval: { ...client.shellApproval, listPending, resolve },
-      events: client.events,
+      shellApproval: approvalsWith(client.shellApproval, client.events, { list, resolve }),
     }));
     await waitFor(() =>
       expect(overlay.options?.props?.approval?.approvalId).toBe(
@@ -409,13 +448,13 @@ describe("ConsentApprovalBar coordinator", () => {
       expect(resolve).toHaveBeenCalledWith("server-approval", "once"),
     );
     expect(shellClient.resolve).not.toHaveBeenCalled();
-    expect(shellClient.listPending).not.toHaveBeenCalled();
+    expect(shellClient.list).not.toHaveBeenCalled();
     expect(shellClient.heartbeat).not.toHaveBeenCalled();
     view.unmount();
   });
 
   it("shows a failed queue read and clears the error after Retry succeeds", async () => {
-    shellClient.listPending.mockRejectedValueOnce(
+    shellClient.list.mockRejectedValueOnce(
       new Error("Queue disconnected"),
     );
     const view = mountBar();
@@ -440,24 +479,23 @@ describe("ConsentApprovalBar coordinator", () => {
     const unsubscribe = vi.fn(async () => undefined);
     const view = mountBar((client) => ({
       owner: { kind: "hub" },
-      shellApproval: client.shellApproval,
-      events: {
+      shellApproval: approvalsWith(client.shellApproval, {
         subscribe,
         unsubscribe,
         on: () => () => undefined,
-      },
+      }),
     }));
     expect((await screen.findByRole("alert")).textContent).toContain(
       failure.message,
     );
-    expect(shellClient.listPending).not.toHaveBeenCalled();
+    expect(shellClient.list).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(unsubscribe).toHaveBeenCalledTimes(1);
     expect(subscribe).toHaveBeenCalledTimes(2);
-    expect(shellClient.listPending).toHaveBeenCalledTimes(1);
+    expect(shellClient.list).toHaveBeenCalledTimes(1);
     expect(unsubscribe.mock.invocationCallOrder[0]).toBeLessThan(
       subscribe.mock.invocationCallOrder[1]!,
     );
@@ -483,17 +521,16 @@ describe("ConsentApprovalBar coordinator", () => {
         <ShellWorkspaceClientContext.Provider
           value={{
             ...client,
-            shellApproval: {
-              ...client.shellApproval,
-              listPending: () =>
+            shellApproval: approvalsWith(client.shellApproval, client.events, {
+              list: () =>
                 id === "personal"
                   ? Promise.resolve([request])
                   : (teamPending as ReturnType<
-                      typeof client.shellApproval.listPending
+                      typeof client.shellApproval.list
                     >),
               resolveInstallReview:
                 personalResolve as typeof client.shellApproval.resolveInstallReview,
-            },
+            }),
           }}
         >
           <WorkspaceNavigationHostContext.Provider
@@ -575,7 +612,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("rejects delayed native intents after the same workspace request is restored under a new owner", async () => {
-    shellClient.listPending.mockResolvedValue([
+    shellClient.list.mockResolvedValue([
       capabilityApproval({ approvalId: "same", title: "Access" }),
     ]);
     const first = mountBar();
@@ -621,20 +658,19 @@ describe("ConsentApprovalBar coordinator", () => {
           reject = fail;
         }),
     );
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({ approvalId: "removed", title: "Removed request" }),
     ]);
     const view = mountBar();
     try {
       await waitFor(() => expect(overlay.options?.open).toBe(true));
       emit({ type: "decide", decision: "once", approvalId: "removed" });
-      const listener = shellClient.onEvent.mock.calls.find(
-        ([event]) => event === "shell-approval:pending-changed",
-      )?.[1];
-      act(() => listener?.({ pending: [] }));
+      await announcePending([]);
       await act(async () => reject(new Error("Workspace access removed")));
+      // Initial read, the read the withdrawal event invalidates, and the
+      // authoritative read that reconciles the failed decision.
       await waitFor(() =>
-        expect(shellClient.listPending).toHaveBeenCalledTimes(2),
+        expect(shellClient.list).toHaveBeenCalledTimes(3),
       );
       expect(overlay.options).toBeNull();
       expect(screen.queryByText("Removed request")).toBeNull();
@@ -658,7 +694,7 @@ describe("ConsentApprovalBar coordinator", () => {
     shellClient.serverConsent.mockReset().mockResolvedValue(null);
     shellClient.decide.mockReset();
     shellClient.decideServer.mockReset();
-    shellClient.listPending.mockResolvedValue([]);
+    shellClient.list.mockResolvedValue([]);
     shellClient.resolve.mockImplementation(() => Promise.resolve());
     shellClient.getText.mockResolvedValue("blob-text");
     shellClient.getProfile.mockResolvedValue({
@@ -676,7 +712,7 @@ describe("ConsentApprovalBar coordinator", () => {
   it("forwards only the owning client's exact caller image to the RPC-less overlay", async () => {
     const url = "data:image/svg+xml;base64,PHN2Zy8+";
     shellClient.loadIcon.mockResolvedValueOnce(url);
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       {
         ...capabilityApproval({ approvalId: "mail-icon", title: "Read mail" }),
         requester: {
@@ -726,7 +762,7 @@ describe("ConsentApprovalBar coordinator", () => {
     try {
       expect(shellClient.heartbeat).toHaveBeenCalledTimes(1);
       await waitFor(() =>
-        expect(shellClient.listPending).toHaveBeenCalledTimes(1),
+        expect(shellClient.list).toHaveBeenCalledTimes(1),
       );
       act(() => {
         heartbeatTick?.();
@@ -739,7 +775,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("drives the overlay with the active approval and queue length", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({ approvalId: "a1", title: "First" }),
       capabilityApproval({ approvalId: "a2", title: "Second" }),
       capabilityApproval({ approvalId: "a3", title: "Third" }),
@@ -753,7 +789,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("presents pending System app reviews in the running shell", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       hostAppStartupApproval("app-startup"),
       capabilityApproval({ approvalId: "runtime", title: "Runtime approval" }),
     ]);
@@ -765,7 +801,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("minimizes to a pill on a minimize intent and reopens on click", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "solo",
         title: "Lonely",
@@ -790,7 +826,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("opens queued attention when it is the current in-app decision", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "queued",
         title: "Queued approval",
@@ -811,7 +847,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("keeps publication preparation non-blocking until its review is ready", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "preparing",
         title: "Preparing workspace update…",
@@ -833,28 +869,21 @@ describe("ConsentApprovalBar coordinator", () => {
       name: "Review approval: Preparing workspace update…",
     });
 
-    const pendingChangedListener = shellClient.onEvent.mock.calls.find(
-      ([event]) => event === "shell-approval:pending-changed",
-    )?.[1];
-    act(() =>
-      pendingChangedListener?.({
-        pending: [
+    await announcePending([
           capabilityApproval({
             approvalId: "preparing",
             title: "Review workspace update",
             attention: "queue",
             lifecycle: { state: "ready" },
           }),
-        ],
-      }),
-    );
+        ]);
     await waitFor(() =>
       expect(overlay.options?.props?.approval?.approvalId).toBe("preparing"),
     );
   });
 
   it("removes an inspected preparation when its owning operation ends", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "preparing-ended",
         title: "Preparing workspace update…",
@@ -868,10 +897,7 @@ describe("ConsentApprovalBar coordinator", () => {
       }),
     );
     await waitFor(() => expect(overlay.options?.open).toBe(true));
-    const listener = shellClient.onEvent.mock.calls.find(
-      ([event]) => event === "shell-approval:pending-changed",
-    )?.[1];
-    act(() => listener?.({ pending: [] }));
+    await announcePending([]);
     await waitFor(() => expect(overlay.options).toBeNull());
     expect(
       screen.queryByRole("button", { name: /Review approval/ }),
@@ -879,7 +905,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("keeps actionable approvals in arrival order regardless of attention hint", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "queued",
         title: "Queued",
@@ -899,7 +925,7 @@ describe("ConsentApprovalBar coordinator", () => {
 
   it("keeps an active review open when the next approval was queued", async () => {
     shellClient.resolve.mockImplementation(() => new Promise(() => undefined));
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "interrupt",
         title: "Interrupt",
@@ -931,7 +957,7 @@ describe("ConsentApprovalBar coordinator", () => {
 
   it("minimizes queued preparation from a different requester after an interrupt resolves", async () => {
     shellClient.resolve.mockImplementation(() => new Promise(() => undefined));
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "preparing-template",
         title: "Update meta main",
@@ -967,7 +993,7 @@ describe("ConsentApprovalBar coordinator", () => {
 
   it("resolves and removes an approval on a decide intent", async () => {
     shellClient.resolve.mockImplementation(() => new Promise(() => undefined));
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({ approvalId: "solo", title: "Lonely" }),
     ]);
     mountBar();
@@ -979,7 +1005,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("ignores stale overlay intents for a previously rendered approval", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({ approvalId: "current", title: "Current" }),
     ]);
     mountBar();
@@ -1016,7 +1042,7 @@ describe("ConsentApprovalBar coordinator", () => {
   }
 
   it("passes the diff-review payload and appearance through to the overlay", async () => {
-    shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
+    shellClient.list.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
     const props = overlay.options?.props as {
@@ -1030,7 +1056,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("renders as today (no diffReview) when the approval carries no diff payload", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({ approvalId: "plain", title: "Plain" }),
     ]);
     mountBar();
@@ -1040,7 +1066,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("fetches only payload hashes on a fetch-blob intent and pushes the result down", async () => {
-    shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
+    shellClient.list.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
@@ -1068,7 +1094,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("refreshes failed payloads on retry while retaining successful immutable content", async () => {
-    shellClient.listPending.mockResolvedValueOnce([diffApproval("retry")]);
+    shellClient.list.mockResolvedValueOnce([diffApproval("retry")]);
     shellClient.getText
       .mockRejectedValueOnce(new Error("temporary connection loss"))
       .mockResolvedValueOnce("recovered content");
@@ -1126,7 +1152,7 @@ describe("ConsentApprovalBar coordinator", () => {
       nodes: [],
       nextCursor: null,
     });
-    shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
+    shellClient.list.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
@@ -1153,7 +1179,7 @@ describe("ConsentApprovalBar coordinator", () => {
       nodes: [{ slotId: "other" }, { slotId: "gadb" }],
       nextCursor: null,
     });
-    shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
+    shellClient.list.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
@@ -1182,7 +1208,7 @@ describe("ConsentApprovalBar coordinator", () => {
       nodes: [],
       nextCursor: null,
     });
-    shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
+    shellClient.list.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
@@ -1198,7 +1224,7 @@ describe("ConsentApprovalBar coordinator", () => {
 
   it("keeps decisions working while a diff approval is active", async () => {
     shellClient.resolve.mockImplementation(() => new Promise(() => undefined));
-    shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
+    shellClient.list.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
     emit({ type: "decide", decision: "once", approvalId: "d1" });
@@ -1210,7 +1236,7 @@ describe("ConsentApprovalBar coordinator", () => {
    * opens on the full surface, in this document, as a real dialog.
    */
   it("opens an install review on the full surface instead of the floating card", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       installReviewApproval("news"),
     ]);
     mountBar();
@@ -1223,7 +1249,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("keeps the floating card for approvals that are not a review", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       capabilityApproval({ approvalId: "plain", title: "Open a URL" }),
     ]);
     mountBar();
@@ -1232,7 +1258,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("leaves the review pending when the surface is closed without deciding", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       installReviewApproval("news"),
     ]);
     mountBar();
@@ -1268,7 +1294,7 @@ describe("ConsentApprovalBar coordinator", () => {
       state: "off",
       revision: 3,
     });
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       installReviewApproval("reporting-audit"),
     ]);
     mountBar();
@@ -1312,7 +1338,7 @@ describe("ConsentApprovalBar coordinator", () => {
     shellClient.decideServer
       .mockRejectedValueOnce(new Error("Sharing write disconnected"))
       .mockResolvedValueOnce({ ...device, state: "off", revision: 3 });
-    shellClient.listPending.mockResolvedValue([review]);
+    shellClient.list.mockResolvedValue([review]);
     mountBar();
     await screen.findByTestId("full-surface");
     fireEvent.click(screen.getByRole("checkbox"));
@@ -1348,7 +1374,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("does not save an edited reporting preference when unit audit is cancelled", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       installReviewApproval("cancel-reporting-audit"),
     ]);
     mountBar();
@@ -1370,7 +1396,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("loads the saved default for the next audit instead of carrying an unaccepted edit forward", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       installReviewApproval("first-audit"),
       installReviewApproval("next-audit"),
     ]);
@@ -1400,7 +1426,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("resolves the review the surface's own actions decide", async () => {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       installReviewApproval("news"),
     ]);
     mountBar();
@@ -1443,7 +1469,7 @@ describe("ConsentApprovalBar coordinator", () => {
       ...installReviewApproval("second"),
       attention: "queue" as const,
     };
-    shellClient.listPending.mockResolvedValueOnce([first]);
+    shellClient.list.mockResolvedValueOnce([first]);
     mountBar();
     await waitFor(() =>
       expect(fullSurface.props?.approval?.approvalId).toBe("first"),
@@ -1471,11 +1497,7 @@ describe("ConsentApprovalBar coordinator", () => {
     // The queue removes a decided review immediately. Its RPC remains open
     // until publication landing is known, so the next review can legitimately
     // become current before the first call returns.
-    const pendingChangedListener = shellClient.onEvent.mock.calls.find(
-      ([event]) => event === "shell-approval:pending-changed",
-    )?.[1];
-    expect(pendingChangedListener).toBeTypeOf("function");
-    act(() => pendingChangedListener?.({ pending: [second] }));
+    await announcePending([second]);
     await waitFor(() =>
       expect(fullSurface.props?.approval?.approvalId).toBe("second"),
     );
@@ -1511,7 +1533,7 @@ describe("ConsentApprovalBar coordinator", () => {
     shellClient.resolveInstallReview.mockRejectedValueOnce(
       new Error("review write blocked"),
     );
-    shellClient.listPending.mockResolvedValue([
+    shellClient.list.mockResolvedValue([
       installReviewApproval("startup"),
     ]);
     mountBar();
@@ -1546,7 +1568,7 @@ describe("ConsentApprovalBar coordinator", () => {
       callerId: "agent:builder",
       attention: "queue" as const,
     };
-    shellClient.listPending.mockResolvedValueOnce([first]);
+    shellClient.list.mockResolvedValueOnce([first]);
     mountBar();
     await waitFor(() =>
       expect(fullSurface.props?.approval?.approvalId).toBe("first"),
@@ -1560,15 +1582,12 @@ describe("ConsentApprovalBar coordinator", () => {
       });
     });
 
-    const pendingChangedListener = shellClient.onEvent.mock.calls.find(
-      ([event]) => event === "shell-approval:pending-changed",
-    )?.[1];
-    act(() => pendingChangedListener?.({ pending: [] }));
+    await announcePending([]);
     await waitFor(() =>
       expect(screen.queryByTestId("full-surface")).toBeNull(),
     );
 
-    act(() => pendingChangedListener?.({ pending: [second] }));
+    await announcePending([second]);
     await waitFor(() =>
       expect(fullSurface.props?.approval?.approvalId).toBe("second"),
     );
@@ -1588,7 +1607,7 @@ describe("ConsentApprovalBar coordinator", () => {
       callerId: "agent:other",
       attention: "queue" as const,
     };
-    shellClient.listPending.mockResolvedValueOnce([first]);
+    shellClient.list.mockResolvedValueOnce([first]);
     mountBar();
     await waitFor(() =>
       expect(fullSurface.props?.approval?.approvalId).toBe("first"),
@@ -1601,11 +1620,8 @@ describe("ConsentApprovalBar coordinator", () => {
         resolution: { decision: "install", allowNow: [] },
       });
     });
-    const pendingChangedListener = shellClient.onEvent.mock.calls.find(
-      ([event]) => event === "shell-approval:pending-changed",
-    )?.[1];
-    act(() => pendingChangedListener?.({ pending: [] }));
-    act(() => pendingChangedListener?.({ pending: [unrelated] }));
+    await announcePending([]);
+    await announcePending([unrelated]);
 
     await waitFor(() =>
       expect(fullSurface.props?.approval?.approvalId).toBe("unrelated"),
@@ -1624,7 +1640,7 @@ describe("ConsentApprovalBar coordinator", () => {
     outcome: unknown,
     options: { captureTimers?: boolean } = {},
   ): Promise<void> {
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.list.mockResolvedValueOnce([
       installReviewApproval("news"),
     ]);
     shellClient.resolveInstallReview.mockResolvedValueOnce(outcome as never);
@@ -1731,10 +1747,8 @@ describe("ConsentApprovalBar coordinator", () => {
         const source = useMemo(
           () => ({
             owner: { kind: "workspace" as const, workspaceId: id },
-            events: client.events,
-            shellApproval: {
-              ...client.shellApproval,
-              listPending: async () => [hostAppStartupApproval(id)],
+            shellApproval: approvalsWith(client.shellApproval, client.events, {
+              list: async () => [hostAppStartupApproval(id)],
               resolveInstallReview: async (): Promise<
                 Awaited<
                   ReturnType<typeof client.shellApproval.resolveInstallReview>
@@ -1766,7 +1780,7 @@ describe("ConsentApprovalBar coordinator", () => {
                         workspaceUnchanged: false,
                       },
               }),
-            },
+            }),
           }),
           [client, id],
         );
@@ -1933,7 +1947,7 @@ describe("ConsentApprovalBar coordinator", () => {
         identityKey: "apps/news@ev",
         repoPath: "apps/news",
         title: "News",
-        kind: "app",
+        kind: "client",
       },
     });
 
@@ -1944,7 +1958,7 @@ describe("ConsentApprovalBar coordinator", () => {
   it("surfaces a failed decision back through the overlay props", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     shellClient.resolve.mockRejectedValueOnce(new Error("resolve blocked"));
-    shellClient.listPending.mockResolvedValue([
+    shellClient.list.mockResolvedValue([
       capabilityApproval({ approvalId: "solo", title: "Lonely" }),
     ]);
     mountBar();

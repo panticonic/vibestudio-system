@@ -77,8 +77,7 @@ const hubOwner = createOwnerRpc({ kind: "hub" });
 export const hubRpc = hubOwner.rpc;
 export const hubApprovalSource = {
   owner: { kind: "hub" as const },
-  shellApproval: createShellApprovalClient(hubRpc),
-  events: new EventsClient(hubRpc),
+  shellApproval: createShellApprovalClient(hubRpc, new EventsClient(hubRpc)),
 };
 export const systemWorkspaceId = Promise.resolve(
   g.__vibestudioTransport.identity.workspaceId,
@@ -97,7 +96,6 @@ export const {
   problemReports,
   unitIcons,
   websiteConnections,
-  hostLaunch,
   app,
   panel,
   hostCommands,
@@ -147,7 +145,7 @@ function createOwnerRpc(destination: RpcDestination) {
   >();
   const scopedRpc = createRpcClient({
     selfId: assertPresent(g.__vibestudioTransport).identity.runtimeId,
-    callerKind: "app",
+    callerKind: "client",
     workspaceId: assertPresent(g.__vibestudioTransport).identity.workspaceId,
     authorityAcquisition: "wait",
     onRecovery: (handler) => {
@@ -300,8 +298,7 @@ export async function createWorkspaceShellClient(workspaceId: string) {
     ...scoped,
     // Account/device management has one System presentation owner. Native
     // workspace navigation, panels and Quickfire keep their scoped clients.
-    hostLaunch,
-    hubControl,
+      hubControl,
     account,
     remoteCred,
     incomingPairLink,

@@ -508,6 +508,10 @@
   },
   "dependencies": {
     "@workspace/workspace-transfer": "workspace:*",
+    "@workspace/client-kit-native": "workspace:*",
+    "@workspace/client-update-core": "workspace:*",
+    "@workspace/connection-core": "workspace:*",
+    "@workspace/provider-signin-core": "workspace:*",
     "@vibestudio/browser-data": "workspace:*",
     "@vibestudio/browser-import-archive": "workspace:*",
     "@vibestudio/mobile-iroh": "workspace:*",

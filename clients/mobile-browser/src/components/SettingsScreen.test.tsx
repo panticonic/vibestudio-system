@@ -9,6 +9,7 @@ import {
   persistStoredMobileConnection,
 } from "@vibestudio/mobile-iroh";
 import { SettingsScreen } from "./SettingsScreen";
+import { BrowserKitProvider } from "../state/BrowserKitProvider";
 import { connectionStatusAtom } from "../state/connectionAtoms";
 import { shellClientAtom } from "../state/shellClientAtom";
 import {
@@ -34,8 +35,8 @@ jest.mock("./WorkspaceConnectionsSection", () => ({
   WorkspaceConnectionsSection: () => null,
 }));
 
-jest.mock("./ConnectionBar", () => ({
-  ConnectionBar: () => null,
+jest.mock("./WorkspaceConnectionBar", () => ({
+  WorkspaceConnectionBar: () => null,
 }));
 
 const listMock = listMobileWorkspaces as jest.MockedFunction<
@@ -134,10 +135,12 @@ function renderSettings(section?: "devices" | "connection") {
   return {
     ...render(
       <Provider store={store}>
-        <SettingsScreen
-          navigation={navigation as never}
-          route={{ params: { workspaceId: "ws-a", section } }}
-        />
+        <BrowserKitProvider>
+          <SettingsScreen
+            navigation={navigation as never}
+            route={{ params: { workspaceId: "ws-a", section } }}
+          />
+        </BrowserKitProvider>
       </Provider>,
     ),
     navigation,

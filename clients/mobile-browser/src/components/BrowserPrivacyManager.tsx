@@ -1,5 +1,5 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AppModal } from "./ui/AppModal";
+import { AppModal, type ThemeColors } from "@workspace/client-kit-native/ui";
 import { useWorkspaceVisible } from "../state/workspaceScope";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -19,7 +19,6 @@ import type {
   ShellClient,
 } from "../services/shellClient";
 import { themeColorsAtom } from "../state/themeAtoms";
-import type { ThemeColors } from "../state/themeAtoms";
 import { Button } from "./ui/primitives";
 
 const PAGE_SIZE = 25;

@@ -1,4 +1,12 @@
-import { AppModal } from "./ui/AppModal";
+import {
+  AppModal,
+  radius,
+  spacing,
+  touchTarget,
+  type,
+  X,
+  Workflow,
+} from "@workspace/client-kit-native/ui";
 import { useEffect, useRef, useState } from "react";
 import {
   pendingReviewNotice,
@@ -23,9 +31,7 @@ import { useAtomValue } from "jotai";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
 import { themeColorsAtom } from "../state/themeAtoms";
-import { radius, spacing, touchTarget, type } from "../design/tokens";
 import { Button, IconButton } from "./ui/primitives";
-import { X, Workflow } from "../design/icons";
 
 /** Creates one ordinary workspace through the existing account control API. */
 export function WorkspaceCreateSheet({

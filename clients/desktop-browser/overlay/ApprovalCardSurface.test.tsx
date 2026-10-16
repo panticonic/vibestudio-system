@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { PanelIcon } from "../components/PanelIcon";
 import { ApprovalCardSurface } from "./ApprovalCardSurface";
 
-vi.mock("../components/ApprovalCard", () => ({
-  ApprovalCard: () => <PanelIcon source="workers/mail" icon="./icon.svg" fallback="worker" />
-}));
+vi.mock("@workspace/client-kit-web", async (importOriginal) => {
+  const kit = await importOriginal<typeof import("@workspace/client-kit-web")>();
+  return {
+    ...kit,
+    ApprovalCard: () => <kit.UnitIcon source="workers/mail" icon="./icon.svg" fallback="worker" />
+  };
+});
 afterEach(cleanup);
 it("renders only captured exact icon coordinates without an ambient client or origin fallback", async () => {
   const approval = {

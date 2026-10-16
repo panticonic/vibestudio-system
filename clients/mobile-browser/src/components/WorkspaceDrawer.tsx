@@ -20,8 +20,12 @@ import {
   User,
   Workflow,
   RefreshCw,
-} from "../design/icons";
-import { radius, spacing, touchTarget, type } from "../design/tokens";
+  radius,
+  spacing,
+  touchTarget,
+  type,
+  WorkspaceEntryRow,
+} from "@workspace/client-kit-native";
 
 export function WorkspaceDrawer({
   directory,
@@ -161,43 +165,17 @@ export function WorkspaceDrawer({
                     perform(directory.toggleExpanded(entry.workspaceId))
                   }
                 />
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
+                <WorkspaceEntryRow
+                  icon={Icon}
+                  title={displayWorkspaceName(entry)}
+                  subtitle={subtitle}
+                  selected={selected}
                   accessibilityLabel={`Open ${displayWorkspaceName(entry)}, ${subtitle}`}
                   onPress={() => {
                     perform(directory.activate(entry.workspaceId));
                     onSelect();
                   }}
-                  style={styles.workspaceButton}
-                >
-                  <View
-                    style={[
-                      styles.icon,
-                      {
-                        backgroundColor: selected
-                          ? colors.accentSoft
-                          : colors.surfaceSunken,
-                      },
-                    ]}
-                  >
-                    <Icon
-                      size={17}
-                      color={selected ? colors.accent : colors.textSecondary}
-                    />
-                  </View>
-                  <View style={styles.copy}>
-                    <Text
-                      numberOfLines={1}
-                      style={[type.bodyStrong, { color: colors.text }]}
-                    >
-                      {displayWorkspaceName(entry)}
-                    </Text>
-                    <Text style={[type.micro, { color: colors.textTertiary }]}>
-                      {subtitle}
-                    </Text>
-                  </View>
-                </Pressable>
+                />
                 <IconButton
                   icon={Plus}
                   label={`New panel in ${displayWorkspaceName(entry)}`}
@@ -313,21 +291,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: spacing.xs,
-  },
-  workspaceButton: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: touchTarget,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  icon: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.sm,
-    alignItems: "center",
-    justifyContent: "center",
   },
   message: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   retry: { minHeight: touchTarget, justifyContent: "center" },

@@ -9,8 +9,7 @@
 import React, { type ErrorInfo, type ReactNode } from "react";
 import { View, StyleSheet } from "react-native";
 import { EmptyState, Button } from "./ui/primitives";
-import type { ThemeColors } from "../state/themeAtoms";
-import { RefreshCw } from "../design/icons";
+import { type ThemeColors, RefreshCw } from "@workspace/client-kit-native/ui";
 
 interface WebViewErrorBoundaryProps {
   children: ReactNode;
