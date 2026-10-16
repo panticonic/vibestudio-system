@@ -14,6 +14,9 @@ relay application traffic.
 
 - A server is a hub that hosts users, devices, and workspace children.
 - The hub and each child have a persistent Iroh endpoint secret and Endpoint ID.
+- A device's key only signs. Every device process binds its own fresh endpoint
+  and presents a delegation signed by the device key; the server binds the
+  connection to that device, so several processes of one device connect at once.
 - A device keeps one fixed reach for hub control, and asks the hub for a
   workspace's current reach by workspace ID.
 - A reach contains only the protocol version, the Endpoint ID, and an ordered

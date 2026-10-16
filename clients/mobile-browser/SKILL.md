@@ -14,10 +14,11 @@ stay inside their workspace.
 ## What this client does and doesn't own
 
 - The host runtime owns everything device-level: pairing and re-pairing, the
-  device credential and endpoint identity, the single physical Iroh connection
-  (and its reconnection), delivering and verifying this client's build, and push
-  (FCM, notifee, lock-screen decisions). This client runs only after the host
-  has paired and started it in its own React Native instance; it never runs
+  device credential and signing identity, the single physical Iroh connection
+  (on a fresh per-process endpoint the device key delegates) and its
+  reconnection, delivering and verifying this client's build, and push (FCM,
+  notifee, lock-screen decisions). This client runs only after the host has
+  paired and started it in its own React Native instance; it never runs
   unpaired and holds no credential.
 - The client reaches the host through `@vibestudio/rn-client-api` and nothing
   else host-owned. `App.tsx` builds the API once (`connectNativeClientApi`),
