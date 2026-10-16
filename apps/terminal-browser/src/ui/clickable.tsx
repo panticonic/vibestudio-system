@@ -140,6 +140,42 @@ export interface Button {
   color?: "green" | "red" | "yellow" | "cyan";
 }
 
+const BUTTON_GAP = 2;
+
+/** `buttons` laid out in lines of `width` columns, as `ButtonRows` draws them. */
+export function buttonLines(buttons: readonly Button[], width: number): Button[][] {
+  const lines: Button[][] = [];
+  let line: Button[] = [];
+  let used = 0;
+  for (const button of buttons) {
+    const size = button.label.length + 2;
+    if (line.length > 0 && used + BUTTON_GAP + size > width) {
+      lines.push(line);
+      line = [];
+      used = 0;
+    }
+    used += (line.length > 0 ? BUTTON_GAP : 0) + size;
+    line.push(button);
+  }
+  if (line.length > 0) lines.push(line);
+  return lines;
+}
+
+/** Buttons that wrap onto as many lines as they need: none is ever cut off. */
+export function ButtonRows({
+  lines,
+}: {
+  lines: readonly (readonly Button[])[];
+}): React.ReactElement {
+  return (
+    <Box flexDirection="column" flexShrink={0}>
+      {lines.map((line, index) => (
+        <ButtonRow key={index} buttons={line} />
+      ))}
+    </Box>
+  );
+}
+
 /**
  * A one-line row of buttons, clipped to its width. Each is a filled block, so
  * it reads as something to press: its color fills it, or it is drawn inverse.

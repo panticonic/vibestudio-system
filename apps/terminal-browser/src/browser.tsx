@@ -13,8 +13,8 @@ import { createApprovalsClient, type ApprovalsClient } from "./approvals/approva
 import {
   ApprovalsOverlay,
   approvalHeadline,
+  approvalPanelHeight,
   approvalQueueIndexAt,
-  approvalQueueWindow,
 } from "./approvals/ApprovalsOverlay.js";
 import { approvalRequestedBy } from "./approvals/approvalRequester.js";
 import { installReviewOutcomeLines } from "./approvals/installReviewOutcome.js";
@@ -87,6 +87,7 @@ import {
   LogsOverlay,
   MessageBox,
   NeedsYouBar,
+  statusMenuLabel,
   OpenUrlDialog,
   PrefixMenu,
   SettingsOverlay,
@@ -110,6 +111,8 @@ import { Scrollable } from "./ui/Scrollable.js";
 const MIN_COLUMNS = 40;
 // Eight body rows keep an approval's title, queue, detail and decision hints visible.
 const MIN_ROWS = 10;
+/** Rows of the tab that stay in view above an open approval. */
+const MIN_TAB_ROWS = 4;
 const MAX_LOG_LINES = 1000;
 
 interface ListState {
@@ -189,8 +192,10 @@ interface Layout {
   tooSmall: boolean;
   tabs: Rect;
   body: Rect;
-  /** The "Needs you" bar, while the focused tab's work waits on an approval. */
+  /** The approvals bar: something waits for approval and its panel is not open. */
   needsYou: Rect | null;
+  /** The open approvals panel, docked below the tab at the height it needs. */
+  dock: Rect | null;
   status: Rect;
 }
 
@@ -225,8 +230,8 @@ export class TerminalBrowser {
   private readonly tabsLayer: InkLayer;
   private readonly statusLayer: InkLayer;
   private readonly needsYouLayer: InkLayer;
-  /** Whether sessions are currently sized around the "Needs you" bar. */
-  private needsYouShown = false;
+  /** The tab height sessions were last fitted to: the bar or the dock moving changes it. */
+  private fittedBodyRows = -1;
   private readonly overlayLayer: InkLayer;
 
   private settings: BrowserSettings = DEFAULT_SETTINGS;
@@ -568,7 +573,7 @@ export class TerminalBrowser {
 
   /** Fit sessions and chrome layers to `layout` (a resize, or the bar coming or going). */
   private relayout(layout: Layout): void {
-    this.needsYouShown = layout.needsYou !== null;
+    this.fittedBodyRows = layout.body.height;
     for (const session of this.sessions) session.resize(this.sessionSize(layout));
     this.tabsLayer.resize({ columns: layout.columns, rows: 1 });
     this.needsYouLayer.resize({ columns: layout.columns, rows: 1 });
@@ -673,10 +678,9 @@ export class TerminalBrowser {
   }
 
   /**
-   * Show each request once, in full, as it arrives: over the tab or the
-   * launcher, but never over a dialog the person is in the middle of (it
-   * waits for that to close). After Esc it lives in the Needs-you bar and the
-   * status bar.
+   * Show each request once, in full, as it arrives: docked below the tab or
+   * the launcher, but never over a dialog the person is in the middle of (it
+   * waits for that to close). After Esc it lives in the approvals bar.
    */
   private presentArrivals(): void {
     const current = new Set(this.approvals.map((approval) => approval.approvalId));
@@ -707,9 +711,7 @@ export class TerminalBrowser {
       );
       this.openApprovals(
         selected,
-        requester
-          ? `requested by ${requester.title}${requester === focused ? " (this tab)" : ""}`
-          : undefined,
+        requester ? (requester === focused ? "for this tab" : `for ${requester.title}`) : undefined,
         true
       );
     }
@@ -722,26 +724,50 @@ export class TerminalBrowser {
     const columns = Math.max(1, this.host.stdout.columns ?? 80);
     const rows = Math.max(1, this.host.stdout.rows ?? 24);
     const tooSmall = columns < MIN_COLUMNS || rows < MIN_ROWS;
-    const bar = !tooSmall && this.tabApprovals().length > 0 ? 1 : 0;
+    const between = Math.max(1, rows - 2);
+    const overlay = this.overlay;
+    // An open approval takes the rows it needs from the bottom of the tab, which
+    // stays in view above it (a few rows at least); closed, a waiting approval
+    // is one bar.
+    // Sized once its content is measured, so the tab resizes once and the first
+    // frame shown is the right one.
+    const dock =
+      !tooSmall && overlay?.kind === "approvals" && this.approvalMeasured(overlay)
+        ? Math.min(
+            Math.max(Math.min(6, between - 1), between - MIN_TAB_ROWS),
+            this.approvalPanelHeight(overlay, columns)
+          )
+        : 0;
+    const bar = !tooSmall && overlay?.kind !== "approvals" && this.approvals.length > 0 ? 1 : 0;
+    const body = Math.max(1, between - bar - dock);
     return {
       columns,
       rows,
       tooSmall,
       tabs: { x: 0, y: 0, width: columns, height: 1 },
-      body: { x: 0, y: 1, width: columns, height: Math.max(1, rows - 2 - bar) },
+      body: { x: 0, y: 1, width: columns, height: body },
       needsYou: bar ? { x: 0, y: rows - 2, width: columns, height: 1 } : null,
+      dock: dock ? { x: 0, y: 1 + body, width: columns, height: dock } : null,
       status: { x: 0, y: rows - 1, width: columns, height: 1 },
     };
   }
 
-  /** Pending approvals the focused tab's work raised or is waiting on: the bar's subject. */
-  private tabApprovals(): PendingApproval[] {
-    const session = this.focusedSession();
-    return session
-      ? this.approvals.filter((approval) =>
-          approvalRequestedBy(approval, session.entry.principalId)
-        )
-      : [];
+  /** Whether the open request's detail has been measured: a detail is at least one row. */
+  private approvalMeasured(overlay: Extract<Overlay, { kind: "approvals" }>): boolean {
+    return overlay.contentHeight > 0 || this.approvals.length === 0;
+  }
+
+  private approvalPanelHeight(
+    overlay: Extract<Overlay, { kind: "approvals" }>,
+    columns: number
+  ): number {
+    return approvalPanelHeight({
+      pending: this.approvals,
+      selectedIndex: this.approvalIndex(overlay),
+      width: columns,
+      contentHeight: overlay.contentHeight,
+      rowExpanded: "focusedRowKey" in this.installReviewProps(overlay),
+    });
   }
 
   private sessionSize(layout = this.layout()): {
@@ -811,20 +837,19 @@ export class TerminalBrowser {
       />
     );
     this.statusLayer.update(<StatusBar view={this.statusView()} width={layout.columns} />);
-    // The bar takes a row from the tab while it shows: sessions resize with it.
-    if ((layout.needsYou !== null) !== this.needsYouShown) this.relayout(layout);
-    const waiting = this.tabApprovals();
-    if (layout.needsYou && waiting.length > 0)
+    // The bar and the dock take rows from the tab while they show: sessions resize with them.
+    if (layout.body.height !== this.fittedBodyRows) this.relayout(layout);
+    if (layout.needsYou && this.approvals.length > 0)
       this.needsYouLayer.update(
         <NeedsYouBar
-          headline={approvalHeadline(waiting[0]!)}
-          more={waiting.length - 1}
+          headline={approvalHeadline(this.approvals[this.firstApprovalIndex()]!)}
+          more={this.approvals.length - 1}
           prefixLabel={this.prefix()}
           width={layout.columns}
         />
       );
     const overlay = this.overlayElement(layout);
-    this.overlayVisible = overlay !== null;
+    this.overlayVisible = overlay !== null && !overlay.measuring;
     this.overlayClick = overlay?.click ?? null;
     if (overlay) {
       this.overlayRect = overlay.rect;
@@ -875,13 +900,6 @@ export class TerminalBrowser {
         this.connection.phase === "connected"
           ? { phase: "connected" }
           : { phase: this.connection.phase, cause: this.connection.cause },
-      approvals: this.approvals.length,
-      // While the "Needs you" bar names the tab's approval, the pill only counts.
-      ...(this.approvals.length > 0 && this.tabApprovals().length === 0
-        ? {
-            approvalHeadline: approvalHeadline(this.approvals[this.firstApprovalIndex()]!),
-          }
-        : {}),
       prefixLabel: prefix,
       prefixPending: this.router.pending,
       ...(hint ? { hint } : {}),
@@ -904,6 +922,8 @@ export class TerminalBrowser {
     rect: Rect;
     element: React.ReactElement;
     click?: OverlayHitTest;
+    /** Rendered to be measured, not shown yet. */
+    measuring?: boolean;
   } | null {
     const overlay = this.overlay;
     const body = layout.body;
@@ -1130,17 +1150,20 @@ export class TerminalBrowser {
           click: listClick(items, overlay.selected, rect.height),
         };
       }
-      case "approvals":
+      case "approvals": {
+        // Until measured it renders out of sight, across the whole width, to be measured.
+        const dock = layout.dock ?? body;
         return {
-          rect: body,
+          rect: dock,
+          ...(layout.dock ? {} : { measuring: true }),
           element: (
             <ApprovalsOverlay
               pending={this.approvals}
               selectedIndex={this.approvalIndex(overlay)}
               {...this.installReviewProps(overlay)}
               protectedInput={overlay.protectedInput}
-              height={body.height}
-              width={body.width}
+              height={dock.height}
+              width={dock.width}
               detailScroll={overlay.scroll}
               detailContentHeight={overlay.contentHeight}
               onDetailHeight={(rows) => {
@@ -1156,10 +1179,11 @@ export class TerminalBrowser {
           ),
           // A click on the queue selects a request; buttons decide.
           click: ((count, selected) => (_x: number, y: number) => {
-            const index = approvalQueueIndexAt(count, selected, body.height, y);
+            const index = approvalQueueIndexAt(count, selected, dock.height, y);
             return index === null ? null : { select: index };
           })(this.approvals.length, this.approvalIndex(overlay)),
         };
+      }
       case "help":
         return {
           rect: this.centered(layout, Math.min(90, body.width), body.height),
@@ -1861,10 +1885,15 @@ export class TerminalBrowser {
       return;
     }
     if (
-      (event.y === layout.status.y || event.y === layout.needsYou?.y) &&
+      event.y === layout.status.y &&
       event.action === "press" &&
-      this.approvals.length > 0
+      !this.copy &&
+      event.x >= layout.columns - statusMenuLabel(this.prefix()).length
     ) {
+      this.onEvents([syntheticKey(this.settings.prefixKey)]);
+      return;
+    }
+    if (event.y === layout.needsYou?.y && event.action === "press" && this.approvals.length > 0) {
       this.command({ kind: "approvals" });
       return;
     }
@@ -1894,6 +1923,18 @@ export class TerminalBrowser {
   /** Keys while the browser has focus: overlays, the launcher and copy mode. */
   private onUiInput(event: Exclude<InputEvent, MouseEvent>): void {
     const overlay = this.overlay;
+    // Ctrl-C steps out of whatever the browser has open, as Esc does, so
+    // pressing it repeatedly always gets out: the next one reaches the tab's
+    // program, and with nothing open the launcher's own pair quits.
+    if (
+      event.kind === "key" &&
+      event.name === "C-c" &&
+      (this.copy || overlay) &&
+      !(overlay?.kind === "launcher" && this.sessions.length === 0)
+    ) {
+      this.onUiInput(syntheticKey("escape"));
+      return;
+    }
     if (!overlay) {
       if (this.copy) this.onCopyKey(event);
       return;
@@ -2129,7 +2170,7 @@ export class TerminalBrowser {
       nav !== "end" &&
       nav !== "escape"
     ) {
-      this.notice = `Not answered: click a button, or press ${this.prefix()} a to answer with keys`;
+      this.notice = `Not answered: keys answer it after ${this.prefix()} a`;
       return;
     }
     if (isProtectedApproval(target) && event.kind === "key" && event.name === "C-d") {
@@ -2451,11 +2492,10 @@ export class TerminalBrowser {
 
   /** Rows the open request's detail shows: what one scroll step is measured against. */
   private approvalDetailRows(overlay: Extract<Overlay, { kind: "approvals" }>): number {
-    return approvalQueueWindow(
-      this.approvals.length,
-      this.approvalIndex(overlay),
-      this.layout().body.height
-    ).detailRows;
+    const layout = this.layout();
+    const natural = this.approvalPanelHeight(overlay, layout.columns);
+    const chrome = natural - Math.max(1, overlay.contentHeight);
+    return Math.max(1, (layout.dock?.height ?? natural) - chrome);
   }
 
   private approvalIndex(overlay: Extract<Overlay, { kind: "approvals" }>): number {

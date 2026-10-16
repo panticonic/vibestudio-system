@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
 import { Scrollable } from "../ui/Scrollable.js";
-import { ButtonRow, Clickable, type Button } from "../ui/clickable.js";
+import { ButtonRows, Clickable, buttonLines, type Button } from "../ui/clickable.js";
 import { approvalDecisionOptions } from "./approvalDecisions.js";
 import {
   isProtectedApproval,
@@ -138,24 +138,53 @@ function terminalUnitIcon(icon: string | undefined, kind: string): string {
  * while it is open.
  */
 /**
- * The bounded overlay's queue window, shared by painting and hit testing:
- * border (2) + title (1) + queue window + gap (1) + detail + hint (2).
+ * The panel's geometry, shared by painting, hit testing and the browser that
+ * sizes the dock to it: border (2), title (1), the queue and a gap below it
+ * (more than one request only), the detail, then the decision area — a rule,
+ * the button lines, the hint.
  */
 export function approvalQueueWindow(
   count: number,
   selectedIndex: number,
-  height: number
-): { inner: number; queueRows: number; first: number; detailRows: number } {
-  const inner = Math.max(4, height - 2);
+  height: number,
+  buttonLines = 1
+): { queueRows: number; first: number; detailRows: number } {
   // One request needs no list: the detail below names it.
-  const queueRows = count > 1 ? Math.min(count, Math.max(1, Math.floor((inner - 3) / 3))) : 0;
+  const queueRows = count > 1 ? Math.min(count, 4) : 0;
   const first = Math.min(
     Math.max(0, selectedIndex - Math.floor(queueRows / 2)),
     Math.max(0, count - queueRows)
   );
-  // Title, the list and the gap below it, then the decision area: a rule, the buttons, the hint.
-  const detailRows = Math.max(1, inner - 1 - (queueRows > 0 ? queueRows + 1 : 0) - 3);
-  return { inner, queueRows, first, detailRows };
+  const detailRows = Math.max(1, height - approvalPanelChrome(queueRows, buttonLines));
+  return { queueRows, first, detailRows };
+}
+
+function approvalPanelChrome(queueRows: number, buttonLines: number): number {
+  return 2 + 1 + (queueRows > 0 ? queueRows + 1 : 0) + 1 + buttonLines + 1;
+}
+
+/**
+ * The rows the panel needs to show everything without scrolling, at `width`
+ * columns (border included): what the dock is sized to, up to what fits.
+ */
+export function approvalPanelHeight(input: {
+  pending: readonly PendingApproval[];
+  selectedIndex: number;
+  width: number;
+  /** The detail's measured height (`onDetailHeight`). */
+  contentHeight: number;
+  /** An install-review permission row is open: its keys differ. */
+  rowExpanded: boolean;
+}): number {
+  const current = input.pending[input.selectedIndex];
+  const buttons = current ? approvalHint(current, input.rowExpanded).decisions : [];
+  const queueRows = input.pending.length > 1 ? Math.min(input.pending.length, 4) : 0;
+  const lines = Math.max(1, buttonLines(buttons, panelInnerWidth(input.width)).length);
+  return approvalPanelChrome(queueRows, lines) + Math.max(1, input.contentHeight);
+}
+
+function panelInnerWidth(width: number): number {
+  return Math.max(10, width - 4);
 }
 
 /**
@@ -254,14 +283,16 @@ export function ApprovalsOverlay({
     );
   }
 
+  const innerWidth = panelInnerWidth(width ?? 80);
+  const lines = buttonLines(hint.decisions, innerWidth);
   const { queueRows, first, detailRows } = approvalQueueWindow(
     pending.length,
     selectedIndex,
-    height
+    height,
+    Math.max(1, lines.length)
   );
   const window = pending.slice(first, first + queueRows);
-  const above = queueRows > 0 ? first : 0;
-  const below = queueRows > 0 ? pending.length - first - window.length : 0;
+  const scrollable = detailContentHeight > detailScroll + detailRows;
   return (
     <Box
       flexDirection="column"
@@ -270,10 +301,16 @@ export function ApprovalsOverlay({
       paddingX={1}
       height={height}
     >
-      <Text bold color="yellow" wrap="truncate-end">
-        {`Approvals (${pending.length})${origin ? ` · ${origin}` : ""}${
-          above || below ? ` · ${above} above, ${below} below` : ""
-        }`}
+      {/* Which request this is and whose tab it is for, once; the detail says the rest. */}
+      <Text wrap="truncate-end">
+        <Text bold color="yellow">
+          Approval needed
+        </Text>
+        <Text dimColor>
+          {`${pending.length > 1 ? ` · ${Math.max(0, selectedIndex) + 1} of ${pending.length}` : ""}${
+            origin ? ` · ${origin}` : ""
+          }`}
+        </Text>
       </Text>
       {pending.length === 0 ? (
         <Text dimColor>Nothing pending. Esc to close.</Text>
@@ -288,21 +325,18 @@ export function ApprovalsOverlay({
           <Scrollable height={detailRows} scroll={detailScroll} onContentHeight={onDetailHeight}>
             {detail}
           </Scrollable>
-          {/* The decision stands apart from what it decides, and says when there is more to read. */}
+          {/* The decision stands apart from what it decides; a rule says when there is more to read. */}
           <Text dimColor wrap="truncate-end">
-            {(detailContentHeight > detailScroll + detailRows
-              ? "── more above the line: scroll with the wheel or PgDn "
-              : ""
-            ).padEnd(Math.max(0, (width ?? 0) - 4), "─")}
+            {scrollable
+              ? "── more above: scroll with the wheel or PgDn ".padEnd(innerWidth, "─")
+              : " "}
           </Text>
-          <ButtonRow buttons={hint.decisions} />
-          {locked ? (
-            <Text wrap="truncate-end" color="yellow">
-              {`Click a button to answer · ${prefixLabel} a to answer with keys · Esc hides this`}
-            </Text>
-          ) : (
-            <Text wrap="truncate-end">{`Click a button or press its key · ${hint.keys} · PgUp/PgDn scroll`}</Text>
-          )}
+          <ButtonRows lines={lines} />
+          <Text dimColor wrap="truncate-end">
+            {locked
+              ? `${prefixLabel} a to answer with keys · Esc hides`
+              : `${hint.keys} · PgUp/PgDn scroll`}
+          </Text>
         </>
       )}
     </Box>

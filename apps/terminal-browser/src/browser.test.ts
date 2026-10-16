@@ -465,7 +465,7 @@ describe("terminal browser", () => {
     const second = request("second");
     app.workspace.approvals = [first, second];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (2)"), "selected first request");
+    await until(() => app.tty.text().includes(" of 2"), "selected first request");
     app.workspace.approvals = [second, first];
     app.workspace.emitApprovalsChanged();
     await until(() => app.tty.text().includes("2. Read logs first"), "reordered queue");
@@ -502,34 +502,84 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (1)"), "presented on arrival");
-    expect(app.tty.text()).toContain("Click a button to answer · Ctrl-B a to answer with keys");
+    await until(() => app.tty.text().includes("Approval needed"), "presented on arrival");
+    expect(app.tty.text()).toContain("Ctrl-B a to answer with keys · Esc hides");
     app.tty.type("1\r");
-    await until(() => app.tty.text().includes("Not answered: click a button"), "explained");
+    await until(
+      () => app.tty.text().includes("Not answered: keys answer it after Ctrl-B a"),
+      "explained"
+    );
     expect(app.workspace.resolved).toEqual([]);
     expect(app.shell.typed(pty)).toBe("");
     // Esc hides it for good; it stays named in the status bar.
     app.tty.type("\x1b[27u");
-    await until(() => !app.tty.text().includes("Approvals (1)"), "hidden");
+    await until(() => !app.tty.text().includes("Approval needed"), "hidden");
     app.workspace.emitApprovalsChanged();
     await until(
-      () =>
-        app.tty.text().split("\n").at(-1)!.includes("Approval needed — press Ctrl-B a · Read logs"),
+      () => app.tty.text().split("\n").at(-2)!.includes("! Approval: Read logs"),
       "status bar approval"
     );
-    expect(app.tty.text()).not.toContain("Approvals (1)");
+    expect(app.tty.text()).not.toContain("Approval needed");
     app.tty.type("1");
     await until(() => app.shell.typed(pty) === "1", "keys reach the tab again");
     // Asked for, it answers to keys.
-    app.tty.click(4, 19);
+    app.tty.click(4, 18);
     await until(
       () =>
-        app.tty.text().includes("Approvals (1)") &&
-        app.tty.text().includes("Click a button or press its key"),
+        app.tty.text().includes("Approval needed") && app.tty.text().includes("PgUp/PgDn scroll"),
       "status bar click opens approvals, answerable with keys"
     );
     app.tty.type("1");
     await until(() => app.workspace.resolved.includes("workspace:once"), "decided by key");
+  });
+
+  it("docks an approval below the tab at the height it needs, wrapping buttons rather than cutting them", async () => {
+    const app = start();
+    const pty = await startEcho(app);
+    app.tty.stdout.columns = 60;
+    app.tty.screen.resize(60, 20);
+    app.tty.stdout.emit("resize");
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.workspace.approvals = [
+      {
+        kind: "capability",
+        approvalId: "short",
+        callerId: entry.principalId!,
+        callerKind: "app",
+        repoPath: ECHO,
+        effectiveVersion: "ev",
+        requestedAt: 1,
+        capability: "server-logs.read",
+        title: "Read logs",
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approval needed"), "docked");
+    const lines = () => app.tty.text().split("\n");
+    const top = lines().findIndex((line) => line.startsWith("╭"));
+    // The tab stays in view above, one PTY resize to the rows left to it.
+    expect(top).toBeGreaterThan(5);
+    await until(() => app.shell.pty(pty).rows === top - 1, "tab fitted above the dock");
+    // Every decision is whole, on as many lines as it takes.
+    expect(app.tty.text()).toContain("[4] Don't allow");
+    // While it is open nothing else repeats it.
+    expect(app.tty.text()).not.toContain("! Approval:");
+    expect(lines().at(-1)).not.toContain("Approval");
+    // Ctrl-C steps out of it as Esc does; the next one reaches the tab's program.
+    app.tty.type("\x03");
+    await until(() => lines().at(-2)!.includes("! Approval: Read logs"), "hidden into the bar");
+    app.tty.type("\x03");
+    await until(() => app.shell.typed(pty) === "\x03", "next Ctrl-C reaches the tab");
+    expect(app.workspace.resolved).toEqual([]);
+  });
+
+  it("opens the browser menu from the status bar's menu button", async () => {
+    const app = start();
+    await startEcho(app);
+    await until(() => app.tty.text().split("\n").at(-1)!.includes("Ctrl-B menu"), "menu button");
+    const menu = app.tty.find("Ctrl-B menu");
+    app.tty.click(menu.x + 2, menu.y);
+    await until(() => app.tty.text().includes("the browser menu"), "menu");
   });
 
   it("scrolls a long request with the wheel and hides it with a bare Esc", async () => {
@@ -579,14 +629,14 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("more above the line"), "says there is more");
+    await until(() => app.tty.text().includes("more above:"), "says there is more");
     // One request: no list above it, the detail names it.
     expect(app.tty.text()).not.toContain("1. what's in your workspace");
     expect(app.tty.text()).not.toContain("Part 29");
-    const { x, y } = app.tty.find("Part 3 ");
+    const { x, y } = app.tty.find("Part 1 ");
     for (let step = 0; step < 30; step++) app.tty.type(`\x1b[<65;${x + 1};${y + 1}M`);
     await until(() => app.tty.text().includes("Part 29"), "wheel scrolled to the end");
-    expect(app.tty.text()).not.toContain("more above the line");
+    expect(app.tty.text()).not.toContain("more above:");
     // A real terminal's Esc is a lone ESC byte.
     app.tty.type("\x1b");
     await until(() => app.tty.text().includes("what would you like to open?"), "hidden by Esc");
@@ -612,18 +662,18 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (1)"), "review presented");
+    await until(() => app.tty.text().includes("Approval needed"), "review presented");
     app.tty.type(PREFIX);
     await until(() => app.tty.text().includes("the browser menu"), "prefix menu over the review");
     app.tty.type("\x1b[27u");
-    await until(() => app.tty.text().includes("Approvals (1)"), "review back after cancel");
+    await until(() => app.tty.text().includes("Approval needed"), "review back after cancel");
     app.tty.type("\x1b[27u");
     await until(() => app.tty.text().includes("what would you like to open?"), "launcher");
     app.tty.type(PREFIX);
     await until(() => app.tty.text().includes("the browser menu"), "prefix menu over the launcher");
     app.tty.type("a");
-    await until(() => app.tty.text().includes("Approvals (1)"), "asked for");
-    await until(() => !app.tty.text().includes("Click a button to answer"), "keys answer it");
+    await until(() => app.tty.text().includes("Approval needed"), "asked for");
+    await until(() => !app.tty.text().includes("Ctrl-B a to answer with keys"), "keys answer it");
     app.tty.type("\x1b[27u");
     await until(() => app.tty.text().includes("what would you like to open?"), "launcher again");
   });
@@ -646,7 +696,7 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (1)"), "approval");
+    await until(() => app.tty.text().includes("Approval needed"), "approval");
     app.tty.stdout.columns = 30;
     app.tty.stdout.emit("resize");
     app.tty.type("1text");
@@ -663,7 +713,7 @@ describe("terminal browser", () => {
     app.tty.stdout.rows = 20;
     app.tty.stdout.emit("resize");
     app.tty.type(`${PREFIX}a`);
-    await until(() => app.tty.text().includes("Approvals (1)"), "visible again");
+    await until(() => app.tty.text().includes("Approval needed"), "visible again");
     app.tty.type("1");
     await until(() => app.workspace.resolved.length === 1, "visible decision");
   });
@@ -701,9 +751,9 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (1)"), "approval modal");
+    await until(() => app.tty.text().includes("Approval needed"), "approval modal");
     cancelFragmented();
-    await until(() => !app.tty.text().includes("Approvals (1)"), "approval focus cancelled");
+    await until(() => !app.tty.text().includes("Approval needed"), "approval focus cancelled");
     expect(app.workspace.resolved).toEqual([]);
     app.workspace.approvals = [
       {
@@ -1126,12 +1176,12 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (1)"), "approvals overlay");
-    expect(app.tty.text()).toContain("requested by Echo (this tab)");
+    await until(() => app.tty.text().includes("Approval needed"), "approvals overlay");
+    expect(app.tty.text()).toContain("for this tab");
     app.tty.type(`${PREFIX}a1`);
     await until(() => app.workspace.resolved.includes("a1:once"), "decision");
     await until(
-      () => !app.tty.text().includes("Approvals (1)"),
+      () => !app.tty.text().includes("Approval needed"),
       "overlay closes when queue empties"
     );
   });
@@ -1180,14 +1230,14 @@ describe("terminal browser", () => {
       },
     ];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (1)"), "approvals overlay");
-    expect(app.tty.text()).toContain("requested by Echo (this tab)");
+    await until(() => app.tty.text().includes("Approval needed"), "approvals overlay");
+    expect(app.tty.text()).toContain("for this tab");
     expect(app.tty.text()).toContain("[1] Confirm    [2] Cancel ");
     expect(app.tty.text()).not.toContain("[3]");
     app.tty.type("\x1b[27u");
     await until(() => app.tty.tabs().includes("!"), "badge on the tab");
     app.tty.type(`${PREFIX}a`);
-    await until(() => app.tty.text().includes("Approvals (1)"), "approvals again");
+    await until(() => app.tty.text().includes("Approval needed"), "approvals again");
     app.tty.type("2");
     await until(() => app.workspace.resolved.includes("a2:deny"), "denied");
   });
@@ -1219,10 +1269,10 @@ describe("terminal browser", () => {
     };
     app.workspace.approvals = [welcome];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (1)"), "presented on arrival");
+    await until(() => app.tty.text().includes("Approval needed"), "presented on arrival");
     expect(app.tty.tabs()).not.toContain("!");
     app.tty.type("\x1b[27u");
-    await until(() => !app.tty.text().includes("Approvals (1)"), "hidden");
+    await until(() => !app.tty.text().includes("Approval needed"), "hidden");
     app.workspace.approvals = [
       {
         ...welcome,
@@ -1249,19 +1299,19 @@ describe("terminal browser", () => {
     app.workspace.emitApprovalsChanged();
     await until(() => app.tty.tabs().includes("!"), "badge on the tab");
     // Presented once already: it does not pop up again.
-    expect(app.tty.text()).not.toContain("Approvals (1)");
+    expect(app.tty.text()).not.toContain("Approval needed");
     // The browser's own bar names it above the status bar; the tab gives it a row.
     const lines = () => app.tty.text().split("\n");
-    await until(() => lines().at(-2)!.includes("Needs you — click here or press Ctrl-B a"), "bar");
+    await until(() => lines().at(-2)!.includes("! Approval: "), "bar");
     expect(lines().at(-2)).toContain("Welcome — here's what's in your workspace");
     const pty = app.latestPty();
     await until(() => app.shell.pty(pty).rows === 17, "tab one row shorter");
     app.tty.click(10, 18);
-    await until(() => app.tty.text().includes("Approvals (1)"), "bar click opens it");
+    await until(() => app.tty.text().includes("Approval needed"), "bar click opens it");
     app.tty.type("\x1b[27u");
     app.workspace.approvals = [];
     app.workspace.emitApprovalsChanged();
-    await until(() => !app.tty.text().includes("Needs you"), "bar gone once answered");
+    await until(() => !app.tty.text().includes("! Approval:"), "bar gone once answered");
     await until(() => app.shell.pty(pty).rows === 18, "tab gets its row back");
   });
 
@@ -1492,7 +1542,7 @@ describe("terminal browser", () => {
     });
     app.workspace.approvals = [request("first", "Read logs"), request("second", "Write notes")];
     app.workspace.emitApprovalsChanged();
-    await until(() => app.tty.text().includes("Approvals (2)"), "approvals overlay");
+    await until(() => app.tty.text().includes(" of 2"), "approvals overlay");
     const { x, y } = cellOf(app.tty, "2. Write notes");
     // The detail below the queue names the selected request on a line of its own.
     const detailOf = (title: string) =>
@@ -1508,7 +1558,7 @@ describe("terminal browser", () => {
     app.tty.click(1, 0);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(app.workspace.resolved).toEqual([]);
-    expect(app.tty.text()).toContain("Approvals (2)");
+    expect(app.tty.text()).toContain(" of 2");
   });
 
   it("quits with the terminal restored", async () => {

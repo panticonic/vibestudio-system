@@ -110,9 +110,6 @@ export interface StatusView {
   workspace: string;
   server: string;
   connection: { phase: "connected" | "reconnecting" | "lost"; cause?: string };
-  approvals: number;
-  /** The approval opening approvals selects first: the focused tab's, else the oldest. */
-  approvalHeadline?: string;
   prefixLabel: string;
   prefixPending: boolean;
   /** Mode-specific key hints that replace the defaults (copy mode, launcher, ...). */
@@ -150,26 +147,13 @@ export function StatusBar({
             text: `disconnected (${view.connection.cause ?? "server gone"})`,
             color: "red",
           };
-  // What the prefix is for, always in view; a one-shot notice needs the room more.
-  const right =
-    view.hint ??
-    (view.notice
-      ? `${view.prefixLabel} menu`
-      : `${view.prefixLabel} browser menu: tabs, approvals, quit`);
+  // The way into everything, always in view: a button that opens the menu, named by its key.
   return (
     <Box width={width} height={1} justifyContent="space-between">
       <Box flexShrink={1} flexGrow={1}>
         <Text wrap="truncate-end">
-          {/* Most important first: truncation cuts the server address, never approvals.
-              A waiting approval names itself and the key that opens it, before anything else;
-              a one-shot notice takes the headline's room. */}
-          {view.approvals > 0 ? (
-            <Text color="black" backgroundColor="yellow" bold>
-              {` ! Approval needed — press ${view.prefixLabel} a`}
-              {view.approvalHeadline && !view.notice ? ` · ${view.approvalHeadline}` : ""}
-              {view.approvals > 1 ? ` (+${view.approvals - 1} more)` : ""}{" "}
-            </Text>
-          ) : null}
+          {/* Most important first: truncation cuts the server address. Approvals have
+              their own bar above. */}
           {view.notice ? <Text color="cyan">{` ${view.notice} ·`}</Text> : null}
           <Text bold>{` ${view.workspace}`}</Text>
           <Text dimColor>{" · "}</Text>
@@ -178,10 +162,19 @@ export function StatusBar({
         </Text>
       </Box>
       <Box flexShrink={0}>
-        <Text dimColor wrap="truncate-start">{`${right} `}</Text>
+        {view.hint ? (
+          <Text dimColor wrap="truncate-start">{`${view.hint} `}</Text>
+        ) : (
+          <Text inverse>{statusMenuLabel(view.prefixLabel)}</Text>
+        )}
       </Box>
     </Box>
   );
+}
+
+/** The status bar's menu button, flush right: a click there opens the menu. */
+export function statusMenuLabel(prefixLabel: string): string {
+  return ` ${prefixLabel} menu `;
 }
 
 // ── list overlays (palette, launcher, workspaces) ──────────────────────────────
@@ -381,13 +374,22 @@ export function NeedsYouBar({
   prefixLabel: string;
   width: number;
 }): React.ReactElement {
+  // The whole bar is the button: its fill says so; the key is the other way in.
+  const key = ` ${prefixLabel} a `;
   return (
     <Box width={width} height={1}>
-      <Text backgroundColor="yellow" color="black" bold wrap="truncate-end">
-        {` ! Needs you — click here or press ${prefixLabel} a · ${headline}${more > 0 ? ` (+${more} more)` : ""} `.padEnd(
-          width
-        )}
-      </Text>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text backgroundColor="yellow" color="black" bold wrap="truncate-end">
+          {` ! Approval: ${headline}${more > 0 ? ` (+${more} more)` : ""} `.padEnd(
+            Math.max(0, width - key.length)
+          )}
+        </Text>
+      </Box>
+      <Box flexShrink={0}>
+        <Text backgroundColor="yellow" color="black">
+          {key}
+        </Text>
+      </Box>
     </Box>
   );
 }

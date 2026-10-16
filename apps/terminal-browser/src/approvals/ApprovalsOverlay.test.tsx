@@ -446,7 +446,7 @@ describe("ApprovalsOverlay — bounded height", () => {
     expect(lines).toHaveLength(14);
     expect(text).toContain("21. Request number 20");
     expect(text).not.toContain("1. Request number 0\n");
-    expect(text).toMatch(/\d+ above, \d+ below/);
+    expect(text).toContain("21 of 30");
     expect(text).toContain("[1] Allow once");
     expect(text).toContain("[4] Don't allow");
     expect(text).toContain("PgUp/PgDn scroll");
