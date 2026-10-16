@@ -9,7 +9,18 @@ import type {
   InstallReviewPart,
 } from "@vibestudio/shared/authority/unitInstallReview";
 import { launchGateView } from "@vibestudio/shared/bootstrapLaunchGate";
-import { formatLaunchGateForTerminal } from "@vibestudio/shared/bootstrapLaunchGate";
+import {
+  formatLaunchGateForTerminal,
+  formatLaunchGateUnitsForTerminal,
+} from "@vibestudio/shared/bootstrapLaunchGate";
+
+/** The terminal at its full disclosure, as words: wrapping is layout, not content. */
+function terminalWords(approvals: Parameters<typeof formatLaunchGateForTerminal>[0]): string {
+  return `${formatLaunchGateForTerminal(approvals, "electron")}\n${formatLaunchGateUnitsForTerminal(approvals)}`.replace(
+    /\s+/gu,
+    " "
+  );
+}
 
 // The section talks to the workspace to list host targets; this test is about
 // the launch gate it renders, so the client is a stub.
@@ -176,7 +187,7 @@ describe("the launch gate on the shell surface", () => {
     const approvals = foreignRoot(acme);
     const { container } = draw(approvals);
     const text = container.textContent ?? "";
-    const terminal = formatLaunchGateForTerminal(approvals, "electron");
+    const terminal = terminalWords(approvals);
 
     for (const line of [
       launchGateView({ approvals }).summary,
@@ -186,7 +197,7 @@ describe("the launch gate on the shell surface", () => {
       "Vibestudio won't start. Nothing is installed or changed.",
     ]) {
       expect(text).toContain(line);
-      expect(terminal).toContain(line);
+      expect(terminal).toContain(line.replace(/\s+/gu, " "));
     }
   });
 
