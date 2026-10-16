@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { isSemanticEmoji } from "@vibestudio/shared/panel/icon";
 import { Scrollable } from "../ui/Scrollable.js";
+import { ButtonRow, Clickable, type Button } from "../ui/clickable.js";
 import { approvalDecisionOptions } from "./approvalDecisions.js";
 import {
   isProtectedApproval,
@@ -108,6 +109,11 @@ function summarizeTitle(a: PendingApproval): string {
   }
 }
 
+/** One line naming an approval, as the status bar announces it. */
+export function approvalHeadline(a: PendingApproval): string {
+  return a.kind === "unit-install-review" ? installReviewHeading(a) : summarizeTitle(a);
+}
+
 function terminalUnitIcon(icon: string | undefined, kind: string): string {
   if (isSemanticEmoji(icon)) return icon;
   if (kind === "panel") return "▦";
@@ -123,6 +129,40 @@ function terminalUnitIcon(icon: string | undefined, kind: string): string {
  * session cannot paint a fake prompt over it, and session input is suspended
  * while it is open.
  */
+/**
+ * The bounded overlay's queue window, shared by painting and hit testing:
+ * border (2) + title (1) + queue window + gap (1) + detail + hint (2).
+ */
+export function approvalQueueWindow(
+  count: number,
+  selectedIndex: number,
+  height: number
+): { inner: number; queueRows: number; first: number } {
+  const inner = Math.max(4, height - 2);
+  const queueRows = Math.min(count, Math.max(1, Math.floor((inner - 3) / 3)));
+  const first = Math.min(
+    Math.max(0, selectedIndex - Math.floor(queueRows / 2)),
+    Math.max(0, count - queueRows)
+  );
+  return { inner, queueRows, first };
+}
+
+/**
+ * The request listed at overlay-relative row `y` (below the border and the
+ * title). A click only selects it: decisions stay on keys, so a stray click
+ * can never consent.
+ */
+export function approvalQueueIndexAt(
+  count: number,
+  selectedIndex: number,
+  height: number,
+  y: number
+): number | null {
+  const { queueRows, first } = approvalQueueWindow(count, selectedIndex, height);
+  const offset = y - 2;
+  return offset >= 0 && offset < queueRows ? first + offset : null;
+}
+
 export function ApprovalsOverlay({
   pending,
   selectedIndex,
@@ -169,7 +209,7 @@ export function ApprovalsOverlay({
   );
   const hint = current
     ? approvalHint(current, focusedRowKey !== undefined)
-    : { decisions: "", keys: "" };
+    : { decisions: [], keys: "" };
 
   if (height === undefined) {
     return (
@@ -189,7 +229,7 @@ export function ApprovalsOverlay({
             {current ? (
               <Box flexDirection="column" marginTop={1}>
                 {detail}
-                <Text>{hint.decisions}</Text>
+                <Text>{hint.decisions.map((button) => button.label).join("  ")}</Text>
                 <Text>{hint.keys}</Text>
               </Box>
             ) : null}
@@ -199,13 +239,7 @@ export function ApprovalsOverlay({
     );
   }
 
-  // Bounded layout: border (2) + title (1) + queue window + gap (1) + detail + hint (2).
-  const inner = Math.max(4, height - 2);
-  const queueRows = Math.min(pending.length, Math.max(1, Math.floor((inner - 3) / 3)));
-  const first = Math.min(
-    Math.max(0, selectedIndex - Math.floor(queueRows / 2)),
-    Math.max(0, pending.length - queueRows)
-  );
+  const { inner, queueRows, first } = approvalQueueWindow(pending.length, selectedIndex, height);
   const window = pending.slice(first, first + queueRows);
   const above = first;
   const below = pending.length - first - window.length;
@@ -236,8 +270,8 @@ export function ApprovalsOverlay({
           <Scrollable height={detailRows} scroll={detailScroll} onContentHeight={onDetailHeight}>
             {detail}
           </Scrollable>
-          <Text wrap="truncate-end">{hint.decisions}</Text>
-          <Text wrap="truncate-end">{`${hint.keys} · PgUp/PgDn scroll`}</Text>
+          <ButtonRow buttons={hint.decisions} />
+          <Text wrap="truncate-end">{`${hint.keys} · PgUp/PgDn scroll · click or press a key to decide`}</Text>
         </>
       )}
     </Box>
@@ -273,9 +307,15 @@ function TaskRulesDetail({
       {rows.length > 1 ? <Text>Choose what this chat may do:</Text> : null}
       {rows.map((row, i) => (
         <Box flexDirection="column" key={row.selectionKey}>
-          <Text inverse={rows.length > 1 && i === focus} wrap="wrap">
-            {`${chosen.has(row.selectionKey) ? "☑" : "☐"} ${row.title}`}
-          </Text>
+          {/* A click focuses a row; on the focused row it toggles, as ⎵ does. */}
+          <Clickable
+            id={`rule:${row.selectionKey}`}
+            action={rows.length > 1 && i === focus ? { rule: i, key: " " } : { rule: i }}
+          >
+            <Text inverse={rows.length > 1 && i === focus} wrap="wrap">
+              {`${chosen.has(row.selectionKey) ? "☑" : "☐"} ${row.title}`}
+            </Text>
+          </Clickable>
           {row.resource ? (
             <Text dimColor wrap="wrap">{`    ${row.resource.label}: ${row.resource.value}`}</Text>
           ) : null}
@@ -312,19 +352,53 @@ function GenericDetail({ approval }: { approval: PendingApproval }): React.React
  * part/row keys change their own hint once a part is expanded — mirroring
  * `installReviewNav.ts`'s two focus levels.
  */
+/**
+ * The focused request's decisions as buttons, each the key that makes it
+ * (a click presses that key, released on the same button), and the keys
+ * that navigate it.
+ */
 function approvalHint(
   approval: PendingApproval,
   rowExpanded: boolean
-): { decisions: string; keys: string } {
+): { decisions: Button[]; keys: string } {
+  const decide = (key: string, label: string, color?: Button["color"]): Button => ({
+    // Scoped to the request: a press on one request's button never releases onto another's.
+    id: `decision:${approval.approvalId}:${key}`,
+    label: `[${key}] ${label}`,
+    action: { key, confirm: true },
+    ...(color ? { color } : {}),
+  });
   if (isProtectedApproval(approval))
     return {
-      decisions: "Enter advances to Submit · Ctrl-D decline",
-      keys: "Tab/Shift-Tab fields · ←/→ choices · ↑/↓ request · Ctrl-G dismiss",
+      decisions: [
+        {
+          id: `decision:${approval.approvalId}:submit`,
+          label: "[Enter] Submit",
+          action: {
+            field: approval.fields.length,
+            key: "enter",
+            confirm: true,
+          },
+          color: "green",
+        },
+        {
+          id: `decision:${approval.approvalId}:decline`,
+          label: "[Ctrl-D] Decline",
+          action: { key: "C-d", confirm: true },
+          color: "red",
+        },
+        {
+          id: `decision:${approval.approvalId}:dismiss`,
+          label: "[Ctrl-G] Dismiss",
+          action: { key: "C-g" },
+        },
+      ],
+      keys: "Tab/Shift-Tab fields · ←/→ choices · ↑/↓ request",
     };
   if (isTaskRulesApproval(approval)) {
     const labels = taskRulesDecisionLabels(approval);
     return {
-      decisions: `[1] ${labels.allow}  [2] ${labels.decline}`,
+      decisions: [decide("1", labels.allow, "green"), decide("2", labels.decline, "red")],
       keys:
         taskRuleRows(approval).length > 1
           ? "←/→ row  ⎵ toggle row  · ↑/↓ select · Esc dismiss"
@@ -332,21 +406,38 @@ function approvalHint(
     };
   }
   if (approval.kind !== "unit-install-review") {
+    const options = approvalDecisionOptions(approval).map((option, index) =>
+      decide(String(index + 1), option.label)
+    );
     return {
-      decisions: approvalDecisionOptions(approval)
-        .map((option, index) => `[${index + 1}] ${option.label}`)
-        .join("  "),
+      decisions:
+        approval.kind === "device-code"
+          ? [
+              {
+                id: `decision:${approval.approvalId}:open`,
+                label: "[o] Open verification",
+                action: { key: "o", confirm: true },
+                color: "green",
+              },
+              {
+                id: `decision:${approval.approvalId}:copy`,
+                label: "[c] Copy code",
+                action: { key: "c" },
+              },
+              ...options,
+            ]
+          : options,
       keys: "↑/↓ select · Esc dismiss",
     };
   }
   const actions = getInstallReviewActionCopy(approval);
-  const decisions = [`[1] ${actions.accept.label}`];
-  if (actions.decline) decisions.push(`[4] ${actions.decline.label}`);
+  const decisions = [decide("1", actions.accept.label, "green")];
+  if (actions.decline) decisions.push(decide("4", actions.decline.label, "red"));
   const focus = rowExpanded
     ? "←/→ permission  ⎵ toggle permission  ⇥ close part"
     : "←/→ part  ⎵ toggle part  ⇥ open part";
   return {
-    decisions: decisions.join("  "),
+    decisions,
     keys: `${focus}  · ↑/↓ select · Esc dismiss`,
   };
 }
@@ -379,9 +470,15 @@ function InstallReviewDetail({
       <Text>{approval.description}</Text>
       {approval.parts.map((part, i) => (
         <Box flexDirection="column" key={part.identityKey}>
-          <Text inverse={i === focused}>
-            {`${partCheckboxGlyph(part, selection)} ${terminalUnitIcon(part.icon, part.kind)} ${partChangeSign(part)}${part.title}   ${part.label}`}
-          </Text>
+          {/* A click focuses a part; on the focused part it toggles, as ⎵ does. */}
+          <Clickable
+            id={`part:${part.identityKey}`}
+            action={i === focused ? { part: i, key: " " } : { part: i }}
+          >
+            <Text inverse={i === focused}>
+              {`${partCheckboxGlyph(part, selection)} ${terminalUnitIcon(part.icon, part.kind)} ${partChangeSign(part)}${part.title}   ${part.label}`}
+            </Text>
+          </Clickable>
           <Text dimColor>{`    ${partNotableLine(part)}`}</Text>
           {i === focused ? (
             <PartDetail part={part} selection={selection} focusedRowKey={focusedRowKey} />

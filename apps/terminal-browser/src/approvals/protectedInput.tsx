@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { Clickable } from "../ui/clickable.js";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { InputEvent, MouseEvent } from "../input/tokenizer.js";
 import {
@@ -160,9 +161,11 @@ export function ProtectedInputDetail({
               : value;
         return (
           <Box key={field.name} flexDirection="column">
-            <Text
-              inverse={state.field === index}
-            >{`${field.label}${field.required ? " *" : ""}: ${display}`}</Text>
+            <Clickable id={`field:${field.name}`} action={{ field: index }}>
+              <Text
+                inverse={state.field === index}
+              >{`${field.label}${field.required ? " *" : ""}: ${display}`}</Text>
+            </Clickable>
             {field.description ? <Text dimColor>{field.description}</Text> : null}
             {field.type === "select" &&
             field.options.find((option) => option.id === value)?.description ? (

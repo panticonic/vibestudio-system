@@ -10,7 +10,8 @@ export const PREFIX_KEYS = [
 ] as const;
 
 export type PrefixKeyId = (typeof PREFIX_KEYS)[number]["id"];
-export const DEFAULT_PREFIX_KEY: PrefixKeyId = "C-space";
+/** Ctrl-B, as in tmux: one easy chord. Programs still get it by pressing it twice. */
+export const DEFAULT_PREFIX_KEY: PrefixKeyId = "C-b";
 
 export function isPrefixKeyId(value: unknown): value is PrefixKeyId {
   return PREFIX_KEYS.some((key) => key.id === value);
@@ -42,11 +43,21 @@ export type Command =
   | { kind: "cancel" }
   | { kind: "send-prefix" };
 
+/** Where a binding is listed in the prefix menu and help. */
+export type BindingGroup = "open" | "tab" | "browser";
+
+export const BINDING_GROUPS: readonly { id: BindingGroup; title: string }[] = [
+  { id: "open", title: "Open and switch" },
+  { id: "tab", title: "This tab" },
+  { id: "browser", title: "Browser" },
+];
+
 export interface Binding {
   /** Key after the prefix, as shown to the user. */
   key: string;
   command: Command;
   description: string;
+  group: BindingGroup;
 }
 
 /** Every prefix binding. The help overlay and the palette are generated from this table. */
@@ -55,71 +66,83 @@ export const PREFIX_BINDINGS: readonly Binding[] = [
     key: "k",
     command: { kind: "palette" },
     description: "Command palette: apps, sessions, actions",
+    group: "open",
   },
   {
     key: "c",
     command: { kind: "launcher" },
-    description: "Start an app or a shell, or resume a session",
+    description: "Launcher: start an app or a shell, or resume a session",
+    group: "open",
   },
   {
     key: "1-9",
     command: { kind: "tab", index: 0 },
     description: "Go to tab 1-9",
+    group: "open",
   },
-  { key: "n", command: { kind: "next-tab" }, description: "Next tab" },
-  { key: "p", command: { kind: "prev-tab" }, description: "Previous tab" },
-  { key: "Tab", command: { kind: "last-tab" }, description: "Last used tab" },
+  { key: "n", command: { kind: "next-tab" }, description: "Next tab", group: "open" },
+  { key: "p", command: { kind: "prev-tab" }, description: "Previous tab", group: "open" },
+  { key: "Tab", command: { kind: "last-tab" }, description: "Last used tab", group: "open" },
   {
     key: "[",
     command: { kind: "copy-mode" },
     description: "Scroll back and copy text",
+    group: "tab",
   },
   {
     key: "/",
     command: { kind: "search" },
     description: "Search retained terminal rows (literal, case-sensitive)",
+    group: "tab",
   },
   {
     key: "o",
     command: { kind: "links" },
     description: "Links in this tab (open one in your browser)",
+    group: "tab",
   },
   {
     key: "a",
     command: { kind: "approvals" },
     description: "Approvals waiting for you",
+    group: "browser",
   },
-  { key: "l", command: { kind: "logs" }, description: "Browser log" },
-  { key: "s", command: { kind: "settings" }, description: "Settings" },
+  { key: "l", command: { kind: "logs" }, description: "Browser log", group: "browser" },
+  { key: "s", command: { kind: "settings" }, description: "Settings", group: "browser" },
   {
     key: "d",
     command: { kind: "detach" },
     description: "Detach: close this tab, the program keeps running",
+    group: "tab",
   },
   {
     key: "x",
     command: { kind: "close" },
     description: "End this session for good (stops the program)",
+    group: "tab",
   },
   {
     key: "r",
     command: { kind: "reattach" },
     description: "Reattach this tab (restarts an app that ended)",
+    group: "tab",
   },
-  { key: "w", command: { kind: "workspace" }, description: "Switch workspace" },
+  { key: "w", command: { kind: "workspace" }, description: "Switch workspace", group: "open" },
   {
     key: "?",
     command: { kind: "help" },
     description: "Help: every key binding",
+    group: "browser",
   },
   {
     key: "q",
     command: { kind: "quit" },
     description: "Quit (programs keep running; resume them later)",
+    group: "browser",
   },
 ];
 
-/** How the person opens approvals with this prefix, e.g. "Ctrl-Space a" (apps mention it). */
+/** How the person opens approvals with this prefix, e.g. "Ctrl-B a" (apps mention it). */
 export function approvalsKeyLabel(prefix: PrefixKeyId): string {
   const binding = PREFIX_BINDINGS.find((entry) => entry.command.kind === "approvals")!;
   return `${prefixLabel(prefix)} ${binding.key}`;
@@ -163,6 +186,11 @@ export class KeyRouter {
     this.armed = false;
   }
 
+  /** Disarm without a command (a click away from the prefix menu). */
+  cancel(): void {
+    this.armed = false;
+  }
+
   route(events: readonly InputEvent[]): Routed[] {
     const out: Routed[] = [];
     for (const event of events) {
@@ -175,8 +203,14 @@ export class KeyRouter {
         }
         continue;
       }
+      if (event.kind === "mouse") {
+        // The armed prefix shows its menu; the browser hit-tests the click
+        // against it (running the entry, or cancelling) before anything else.
+        out.push({ kind: "input", event });
+        continue;
+      }
       if (event.kind !== "key") {
-        // A paste or click while armed cancels the prefix and is delivered normally.
+        // A paste while armed cancels the prefix and is delivered normally.
         this.armed = false;
         out.push({ kind: "prefix", pending: false }, { kind: "input", event });
         continue;

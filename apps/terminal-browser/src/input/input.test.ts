@@ -107,7 +107,7 @@ describe("KeyRouter", () => {
   const route = (router: KeyRouter, text: string) => router.route(new InputTokenizer().push(text));
   it("reserves Ctrl-G for browser cancellation, including prefix-armed fragmented ESC", () => {
     expect(isPrefixKeyId("C-g")).toBe(false);
-    expect(parseSettings({ prefixKey: "C-g" }).prefixKey).toBe("C-space");
+    expect(parseSettings({ prefixKey: "C-g" }).prefixKey).toBe("C-b");
     const router = new KeyRouter("C-space");
     const tokenizer = new InputTokenizer();
     router.route(tokenizer.push("\x00\x1b"));
@@ -163,6 +163,19 @@ describe("KeyRouter", () => {
     const router = new KeyRouter("C-space");
     const out = route(router, "\x1b[200~\x00k\x1b[201~");
     expect(out).toEqual([{ kind: "input", event: { kind: "paste", text: "\x00k" } }]);
+  });
+
+  it("keeps the prefix armed through a click, for the menu to hit-test, until cancelled", () => {
+    const router = new KeyRouter("C-b");
+    route(router, "\x02");
+    const out = route(router, "\x1b[<0;5;5M");
+    expect(out).toEqual([{ kind: "input", event: expect.objectContaining({ kind: "mouse" }) }]);
+    expect(router.pending).toBe(true);
+    router.cancel();
+    expect(router.pending).toBe(false);
+    expect(route(router, "?")).toEqual([
+      { kind: "input", event: expect.objectContaining({ kind: "key", name: "?" }) },
+    ]);
   });
 
   it("follows a changed prefix", () => {

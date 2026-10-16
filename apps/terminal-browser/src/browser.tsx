@@ -10,7 +10,11 @@ import type {
   TerminalServerConnectionState,
 } from "@vibestudio/shell-core/terminal/terminalBrowserHost";
 import { createApprovalsClient, type ApprovalsClient } from "./approvals/approvalsClient.js";
-import { ApprovalsOverlay } from "./approvals/ApprovalsOverlay.js";
+import {
+  ApprovalsOverlay,
+  approvalHeadline,
+  approvalQueueIndexAt,
+} from "./approvals/ApprovalsOverlay.js";
 import { approvalRequestedBy } from "./approvals/approvalRequester.js";
 import { installReviewOutcomeLines } from "./approvals/installReviewOutcome.js";
 import {
@@ -40,7 +44,9 @@ import { InkLayer } from "./compositor/inkLayer.js";
 import type { CursorState, Rect, Screen } from "./compositor/screen.js";
 import { fuzzyFilter } from "./input/fuzzy.js";
 import {
+  DEFAULT_PREFIX_KEY,
   KeyRouter,
+  type Binding,
   approvalsKeyLabel,
   prefixBytes,
   prefixLabel,
@@ -79,16 +85,24 @@ import {
   ListOverlay,
   LogsOverlay,
   MessageBox,
+  NeedsYouBar,
   OpenUrlDialog,
+  PrefixMenu,
   SettingsOverlay,
+  listItemAt,
+  listWindow,
+  prefixMenuBindingAt,
+  settingsAt,
   StatusBar,
   TabStrip,
+  prefixMenuLines,
   tabWindow,
   type ListItem,
   type LogLine,
   type StatusView,
   type TabView,
 } from "./ui/chrome.js";
+import { ClickRegions, ClickRegionsProvider, type ClickAction } from "./ui/clickable.js";
 import { clampScroll } from "./ui/Scrollable.js";
 import { Scrollable } from "./ui/Scrollable.js";
 
@@ -168,6 +182,8 @@ interface Layout {
   tooSmall: boolean;
   tabs: Rect;
   body: Rect;
+  /** The "Needs you" bar, while the focused tab's work waits on an approval. */
+  needsYou: Rect | null;
   status: Rect;
 }
 
@@ -201,6 +217,9 @@ export class TerminalBrowser {
   private readonly compositor: Compositor;
   private readonly tabsLayer: InkLayer;
   private readonly statusLayer: InkLayer;
+  private readonly needsYouLayer: InkLayer;
+  /** Whether sessions are currently sized around the "Needs you" bar. */
+  private needsYouShown = false;
   private readonly overlayLayer: InkLayer;
 
   private settings: BrowserSettings = DEFAULT_SETTINGS;
@@ -223,8 +242,9 @@ export class TerminalBrowser {
   private apps: TerminalApp[] | null = null;
   private appsProblem: string | null = null;
   private approvals: PendingApproval[] = [];
+  /** The launcher, with nothing open, saw one Ctrl-C; the next one quits. */
+  private quitArmed = false;
   private approvalObservation: DurableObservation | null = null;
-  private seenApprovals = new Set<string>();
   private overlay: Overlay | null = null;
   private launcher: ListState = { query: "", selected: 0 };
   private copy: CopyState | null = null;
@@ -234,6 +254,12 @@ export class TerminalBrowser {
   private connection: TerminalServerConnectionState;
   private overlayVisible = false;
   private overlayRect: Rect = { x: 0, y: 0, width: 1, height: 1 };
+  /** What a click on the painted overlay means, from the geometry it was painted with. */
+  private overlayClick: OverlayHitTest | null = null;
+  /** The overlay's buttons and rows, located with the layout Ink drew them with. */
+  private readonly overlayRegions = new ClickRegions();
+  /** A confirm button the left button went down on; it acts if released there. */
+  private pressedRegion: string | null = null;
   private chromeScheduled = false;
   private finished = false;
   private settle!: {
@@ -268,6 +294,7 @@ export class TerminalBrowser {
     const onLayerFrame = () => this.compositor.invalidate();
     this.tabsLayer = new InkLayer({ columns: layout.columns, rows: 1 }, onLayerFrame);
     this.statusLayer = new InkLayer({ columns: layout.columns, rows: 1 }, onLayerFrame);
+    this.needsYouLayer = new InkLayer({ columns: layout.columns, rows: 1 }, onLayerFrame);
     this.overlayLayer = new InkLayer(
       { columns: layout.columns, rows: Math.max(1, layout.body.height) },
       onLayerFrame
@@ -379,7 +406,7 @@ export class TerminalBrowser {
             this.applySettings(parseSettings(raw), false);
           if (raw["prefixKey"] === "C-g" && !this.finished)
             this.setNotice(
-              "Ctrl-G is reserved for browser cancellation; your prefix is now Ctrl-Space. Choose another in Settings."
+              `Ctrl-G is reserved for browser cancellation; your prefix is now ${prefixLabel(DEFAULT_PREFIX_KEY)}. Choose another in Settings.`
             );
         },
         (error: unknown) => {
@@ -424,6 +451,7 @@ export class TerminalBrowser {
       ...this.ownedTasks,
       this.tabsLayer.settled(),
       this.statusLayer.settled(),
+      this.needsYouLayer.settled(),
       this.overlayLayer.settled(),
     ];
     this.sessions = [];
@@ -442,6 +470,7 @@ export class TerminalBrowser {
       for (const retire of [
         () => this.tabsLayer.dispose(),
         () => this.statusLayer.dispose(),
+        () => this.needsYouLayer.dispose(),
         () => this.overlayLayer.dispose(),
         () => this.terminal.release(),
         () => this.console?.restore(),
@@ -522,14 +551,20 @@ export class TerminalBrowser {
   }
 
   private onResize(): void {
-    const layout = this.layout();
     this.router.setPrefix(this.settings.prefixKey);
+    this.copy = null;
+    this.relayout(this.layout());
+    this.changed();
+  }
+
+  /** Fit sessions and chrome layers to `layout` (a resize, or the bar coming or going). */
+  private relayout(layout: Layout): void {
+    this.needsYouShown = layout.needsYou !== null;
     for (const session of this.sessions) session.resize(this.sessionSize(layout));
     this.tabsLayer.resize({ columns: layout.columns, rows: 1 });
+    this.needsYouLayer.resize({ columns: layout.columns, rows: 1 });
     this.statusLayer.resize({ columns: layout.columns, rows: 1 });
-    this.copy = null;
     this.compositor.invalidateAll();
-    this.changed();
   }
 
   // ── data ───────────────────────────────────────────────────────────────────
@@ -606,9 +641,8 @@ export class TerminalBrowser {
 
   private applyApprovals(pending: PendingApproval[]): void {
     if (this.finished) return;
-    const fresh = pending.filter((approval) => !this.seenApprovals.has(approval.approvalId));
-    this.seenApprovals = new Set(pending.map((approval) => approval.approvalId));
-    const emptied = this.approvals.length > 0 && pending.length === 0;
+    const previous = this.approvals;
+    const emptied = previous.length > 0 && pending.length === 0;
     this.approvals = pending;
     const focused = this.focusedSession();
     if (this.overlay?.kind === "approvals") {
@@ -627,9 +661,17 @@ export class TerminalBrowser {
         overlay.protectedInput = newProtectedInput();
       }
     } else if (focused && this.settings.autoOpenApprovals && !this.isModalOpen()) {
+      // Newly this tab's: a new request from its work, or its work newly
+      // parked on a review that was already waiting.
+      const principalId = focused.entry.principalId;
       const index = pending.findIndex(
         (approval) =>
-          fresh.includes(approval) && approvalRequestedBy(approval, focused.entry.principalId)
+          approvalRequestedBy(approval, principalId) &&
+          !previous.some(
+            (earlier) =>
+              earlier.approvalId === approval.approvalId &&
+              approvalRequestedBy(earlier, principalId)
+          )
       );
       if (index !== -1) this.openApprovals(index, `requested by ${focused.title} (this tab)`);
     }
@@ -642,14 +684,26 @@ export class TerminalBrowser {
     const columns = Math.max(1, this.host.stdout.columns ?? 80);
     const rows = Math.max(1, this.host.stdout.rows ?? 24);
     const tooSmall = columns < MIN_COLUMNS || rows < MIN_ROWS;
+    const bar = !tooSmall && this.tabApprovals().length > 0 ? 1 : 0;
     return {
       columns,
       rows,
       tooSmall,
       tabs: { x: 0, y: 0, width: columns, height: 1 },
-      body: { x: 0, y: 1, width: columns, height: Math.max(1, rows - 2) },
+      body: { x: 0, y: 1, width: columns, height: Math.max(1, rows - 2 - bar) },
+      needsYou: bar ? { x: 0, y: rows - 2, width: columns, height: 1 } : null,
       status: { x: 0, y: rows - 1, width: columns, height: 1 },
     };
+  }
+
+  /** Pending approvals the focused tab's work raised or is waiting on: the bar's subject. */
+  private tabApprovals(): PendingApproval[] {
+    const session = this.focusedSession();
+    return session
+      ? this.approvals.filter((approval) =>
+          approvalRequestedBy(approval, session.entry.principalId)
+        )
+      : [];
   }
 
   private sessionSize(layout = this.layout()): {
@@ -681,6 +735,7 @@ export class TerminalBrowser {
       });
     }
     if (this.overlayVisible) this.overlayLayer.grid.paint(screen, this.overlayRect);
+    if (layout.needsYou) this.needsYouLayer.grid.paint(screen, layout.needsYou);
     this.statusLayer.grid.paint(screen, layout.status);
     if (!session || this.overlayVisible || this.copy || !session.isLive()) return hidden;
     const cursor = session.grid.cursor();
@@ -717,15 +772,30 @@ export class TerminalBrowser {
       />
     );
     this.statusLayer.update(<StatusBar view={this.statusView()} width={layout.columns} />);
+    // The bar takes a row from the tab while it shows: sessions resize with it.
+    if ((layout.needsYou !== null) !== this.needsYouShown) this.relayout(layout);
+    const waiting = this.tabApprovals();
+    if (layout.needsYou && waiting.length > 0)
+      this.needsYouLayer.update(
+        <NeedsYouBar
+          headline={approvalHeadline(waiting[0]!)}
+          more={waiting.length - 1}
+          prefixLabel={this.prefix()}
+          width={layout.columns}
+        />
+      );
     const overlay = this.overlayElement(layout);
     this.overlayVisible = overlay !== null;
+    this.overlayClick = overlay?.click ?? null;
     if (overlay) {
       this.overlayRect = overlay.rect;
       this.overlayLayer.resize({
         columns: overlay.rect.width,
         rows: overlay.rect.height,
       });
-      this.overlayLayer.update(overlay.element);
+      this.overlayLayer.update(
+        <ClickRegionsProvider regions={this.overlayRegions}>{overlay.element}</ClickRegionsProvider>
+      );
     }
     this.compositor.invalidate();
   }
@@ -767,6 +837,12 @@ export class TerminalBrowser {
           ? { phase: "connected" }
           : { phase: this.connection.phase, cause: this.connection.cause },
       approvals: this.approvals.length,
+      // While the "Needs you" bar names the tab's approval, the pill only counts.
+      ...(this.approvals.length > 0 && this.tabApprovals().length === 0
+        ? {
+            approvalHeadline: approvalHeadline(this.approvals[this.firstApprovalIndex()]!),
+          }
+        : {}),
       prefixLabel: prefix,
       prefixPending: this.router.pending,
       ...(hint ? { hint } : {}),
@@ -785,10 +861,33 @@ export class TerminalBrowser {
     };
   }
 
-  private overlayElement(layout: Layout): { rect: Rect; element: React.ReactElement } | null {
+  private overlayElement(layout: Layout): {
+    rect: Rect;
+    element: React.ReactElement;
+    click?: OverlayHitTest;
+  } | null {
     const overlay = this.overlay;
     const body = layout.body;
     const prefix = this.prefix();
+    if (!overlay && this.router.pending) {
+      // The armed prefix shows every command it can run, in full, over the
+      // bottom of the tab; the next key picks one or cancels.
+      const lines = prefixMenuLines(prefix, body.width, body.height - 2);
+      const height = Math.min(lines.length + 2, body.height);
+      return {
+        rect: {
+          x: body.x,
+          y: body.y + body.height - height,
+          width: body.width,
+          height,
+        },
+        element: <PrefixMenu lines={lines} width={body.width} height={height} />,
+        click: (x, y) => {
+          const binding = prefixMenuBindingAt(lines, height, x, y);
+          return binding ? { key: bindingKeyName(binding) } : null;
+        },
+      };
+    }
     if (!overlay) {
       const session = this.focusedSession();
       if (!session || session.isLive() || this.copy) return null;
@@ -820,6 +919,11 @@ export class TerminalBrowser {
           line.message.toLocaleLowerCase().includes(overlay.query.toLocaleLowerCase())
         );
         overlay.selected = Math.min(overlay.selected, Math.max(0, logs.length - 1));
+        const items = logs.map((line, index) => ({
+          key: String(index),
+          label: `${line.level.toUpperCase()} ${line.message}`,
+          detail: new Date(line.time).toISOString(),
+        }));
         return {
           rect,
           element: (
@@ -827,11 +931,7 @@ export class TerminalBrowser {
               title="Inspect browser log entries"
               query={overlay.query}
               placeholder="filter messages"
-              items={logs.map((line, index) => ({
-                key: String(index),
-                label: `${line.level.toUpperCase()} ${line.message}`,
-                detail: new Date(line.time).toISOString(),
-              }))}
+              items={items}
               selected={overlay.selected}
               width={rect.width}
               height={rect.height}
@@ -839,6 +939,7 @@ export class TerminalBrowser {
               footer="↑↓ entry · Enter full detail · Ctrl-G close"
             />
           ),
+          click: listClick(items, overlay.selected, rect.height),
         };
       }
       case "file": {
@@ -905,6 +1006,10 @@ export class TerminalBrowser {
         const session = this.sessions.find((tab) => tab.sessionId === overlay.sessionId);
         const matches = session?.grid.search(overlay.query) ?? [];
         overlay.selected = Math.min(overlay.selected, Math.max(0, matches.length - 1));
+        const items = matches.map((match, index) => ({
+          key: String(index),
+          label: `${match.start.y + 1}: ${match.text}`,
+        }));
         return {
           rect,
           element: (
@@ -912,10 +1017,7 @@ export class TerminalBrowser {
               title={`Search scrollback · ${session?.title ?? "tab ended"}`}
               query={overlay.query}
               placeholder="literal, case-sensitive search"
-              items={matches.map((match, index) => ({
-                key: String(index),
-                label: `${match.start.y + 1}: ${match.text}`,
-              }))}
+              items={items}
               selected={overlay.selected}
               width={rect.width}
               height={rect.height}
@@ -927,6 +1029,7 @@ export class TerminalBrowser {
               footer="↑↓ match · Enter inspect/select · Ctrl-G close · n/N repeat in copy mode"
             />
           ),
+          click: listClick(items, overlay.selected, rect.height),
         };
       }
       case "palette": {
@@ -951,6 +1054,7 @@ export class TerminalBrowser {
               footer="↑↓ choose · Enter run · Esc close"
             />
           ),
+          click: listClick(items, overlay.selected, rect.height),
         };
       }
       case "launcher": {
@@ -983,6 +1087,7 @@ export class TerminalBrowser {
               }
             />
           ),
+          click: listClick(items, overlay.selected, rect.height),
         };
       }
       case "approvals":
@@ -1004,6 +1109,11 @@ export class TerminalBrowser {
               {...(overlay.origin ? { origin: overlay.origin } : {})}
             />
           ),
+          // A click selects a request; deciding stays on keys.
+          click: ((count, selected) => (_x: number, y: number) => {
+            const index = approvalQueueIndexAt(count, selected, body.height, y);
+            return index === null ? null : { select: index };
+          })(this.approvals.length, this.approvalIndex(overlay)),
         };
       case "help":
         return {
@@ -1047,6 +1157,13 @@ export class TerminalBrowser {
               loading={!this.settingsLoaded}
             />
           ),
+          click: ((settings) => (x: number, y: number) => {
+            const hit = settingsAt(settings, rect.width, x, y);
+            if (!hit) return null;
+            return hit.step === 0
+              ? { select: hit.index }
+              : { select: hit.index, key: hit.step < 0 ? "left" : "right" };
+          })(this.settings),
         };
       }
       case "workspaces": {
@@ -1078,6 +1195,7 @@ export class TerminalBrowser {
               footer="↑↓ choose · Enter switch · Esc close"
             />
           ),
+          click: listClick(items, overlay.selected, rect.height),
         };
       }
       case "confirm-close": {
@@ -1096,7 +1214,19 @@ export class TerminalBrowser {
                 running
                   ? `To keep it running, press Esc and use ${prefix} d (detach) instead.`
                   : `To keep it in the launcher, press Esc and use ${prefix} d instead.`,
-                "y end it · Esc keep it",
+              ]}
+              buttons={[
+                {
+                  id: "end",
+                  label: "[y] End it",
+                  action: { key: "y", confirm: true },
+                  color: "red",
+                },
+                {
+                  id: "keep",
+                  label: "[Esc] Keep it",
+                  action: { key: "escape" },
+                },
               ]}
               tone="warn"
               width={rect.width}
@@ -1127,6 +1257,7 @@ export class TerminalBrowser {
               footer="↑↓ choose · Enter open… · Esc close"
             />
           ),
+          click: listClick(items, overlay.selected, rect.height),
         };
       }
       case "open-url": {
@@ -1520,6 +1651,11 @@ export class TerminalBrowser {
       }
       return;
     }
+    this.onEvents(events);
+  }
+
+  /** Routed input: the terminal's events, and the keys a click stands for. */
+  private onEvents(events: readonly InputEvent[]): void {
     let sessionData = "";
     const flush = () => {
       if (sessionData) {
@@ -1606,13 +1742,53 @@ export class TerminalBrowser {
       event.y >= layout.body.y &&
       event.y < layout.body.y + layout.body.height &&
       event.x < layout.body.width;
+    // A click on browser chrome is the input it stands for: it selects what
+    // it lands on and sends the key that acts on it, through the same path.
+    const rect = this.overlayRect;
+    const onOverlay =
+      this.overlayVisible &&
+      event.x >= rect.x &&
+      event.x < rect.x + rect.width &&
+      event.y >= rect.y &&
+      event.y < rect.y + rect.height;
+    const hit =
+      onOverlay && event.action === "press" && event.button === 0
+        ? (this.overlayClick?.(event.x - rect.x, event.y - rect.y) ?? null)
+        : null;
+    if (this.router.pending) {
+      if (event.action !== "press") return;
+      if (hit?.key) this.onEvents([syntheticKey(hit.key)]);
+      else {
+        this.router.cancel();
+        this.changed();
+      }
+      return;
+    }
     if (this.isModalOpen()) {
       if (event.action === "wheel-up" || event.action === "wheel-down") {
-        this.onUiInput({
-          kind: "key",
-          name: event.action === "wheel-up" ? "up" : "down",
-          seq: "",
-        });
+        this.onUiInput(syntheticKey(event.action === "wheel-up" ? "up" : "down"));
+        return;
+      }
+      if (event.button !== 0 || (event.action !== "press" && event.action !== "release")) return;
+      const region = onOverlay ? this.overlayRegions.at(event.x - rect.x, event.y - rect.y) : null;
+      if (event.action === "release") {
+        // A decision acts only when released on the button it was pressed on.
+        const pressed = this.pressedRegion;
+        this.pressedRegion = null;
+        if (pressed !== null && region?.id === pressed) this.applyClick(region.action);
+        return;
+      }
+      this.pressedRegion = null;
+      if (region) {
+        if (region.action.confirm) this.pressedRegion = region.id;
+        else this.applyClick(region.action);
+        return;
+      }
+      if (hit) {
+        if (hit.select !== undefined) this.selectInOverlay(hit.select);
+        if (hit.key) this.onEvents([syntheticKey(hit.key)]);
+      } else if (!onOverlay && this.dismissedByClickAway()) {
+        this.onEvents([syntheticKey("escape")]);
       }
       return;
     }
@@ -1622,6 +1798,14 @@ export class TerminalBrowser {
       else if (event.x >= window.inset + window.count * window.share)
         this.focusTab(Math.min(this.sessions.length - 1, window.first + window.count));
       else this.focusTab(window.first + Math.floor((event.x - window.inset) / window.share));
+      return;
+    }
+    if (
+      (event.y === layout.status.y || event.y === layout.needsYou?.y) &&
+      event.action === "press" &&
+      this.approvals.length > 0
+    ) {
+      this.command({ kind: "approvals" });
       return;
     }
     if (!session || !inBody) return;
@@ -1772,10 +1956,26 @@ export class TerminalBrowser {
               : overlay.kind === "links"
                 ? this.linkItems(overlay)
                 : this.workspaceItems(overlay);
+        // With nothing open the launcher is the whole browser: Ctrl-C twice
+        // leaves it, the way it leaves the chat and most terminal programs.
+        if (overlay.kind === "launcher" && this.sessions.length === 0) {
+          const ctrlC = event.kind === "key" && event.name === "C-c";
+          if (ctrlC && this.quitArmed) {
+            this.finish({ kind: "quit" });
+            return;
+          }
+          this.quitArmed = ctrlC;
+          if (ctrlC) {
+            this.setNotice("Press Ctrl-C again to quit · your sessions keep running");
+            break;
+          }
+        }
         const result = editList(overlay, event, items.length);
         if (result === "cancel") {
           if (overlay.kind === "launcher" && this.sessions.length === 0) {
-            this.setNotice(`Choose something to open, or press ${this.prefix()} q to quit`);
+            this.setNotice(
+              `Choose something to open, or press Ctrl-C twice (or ${this.prefix()} q) to quit`
+            );
           } else this.overlay = null;
         } else if (result === "accept") {
           const item = items[overlay.selected];
@@ -1922,13 +2122,7 @@ export class TerminalBrowser {
     if (nav === "escape") {
       this.overlay = null;
     } else if (nav === "up" || nav === "down") {
-      const next = selected < 0 ? 0 : selected + (nav === "up" ? -1 : 1);
-      overlay.approvalId =
-        this.approvals[Math.min(Math.max(0, next), this.approvals.length - 1)]?.approvalId ?? null;
-      overlay.scroll = 0;
-      overlay.nav = INITIAL_INSTALL_REVIEW_NAV;
-      overlay.taskRules = INITIAL_TASK_RULES_NAV;
-      overlay.protectedInput = newProtectedInput();
+      this.selectApproval(overlay, selected < 0 ? 0 : selected + (nav === "up" ? -1 : 1));
     } else if (nav === "pageup" || nav === "pagedown") {
       const next = overlay.scroll + (nav === "pageup" ? -detailRows : detailRows);
       overlay.scroll = clampScroll(next, overlay.contentHeight, detailRows);
@@ -2050,10 +2244,11 @@ export class TerminalBrowser {
       case "search":
         if (session) this.openSearch(session);
         break;
-      case "approvals":
-        this.openApprovals(0);
+      case "approvals": {
+        this.openApprovals(this.firstApprovalIndex());
         void this.own(this.refreshApprovals());
         break;
+      }
       case "logs":
         this.overlay = { kind: "logs", scroll: 0 };
         break;
@@ -2106,6 +2301,69 @@ export class TerminalBrowser {
       protectedInput: newProtectedInput(),
       ...(origin ? { origin } : {}),
     };
+  }
+
+  /** Where approvals open, and what the status bar names: the focused tab's own, else the oldest. */
+  private firstApprovalIndex(): number {
+    const session = this.focusedSession();
+    const own = session
+      ? this.approvals.findIndex((approval) =>
+          approvalRequestedBy(approval, session.entry.principalId)
+        )
+      : -1;
+    return Math.max(0, own);
+  }
+
+  /** Show another request: its review starts fresh, and nothing typed for the last one carries over. */
+  private selectApproval(overlay: Extract<Overlay, { kind: "approvals" }>, index: number): void {
+    overlay.approvalId =
+      this.approvals[Math.min(Math.max(0, index), this.approvals.length - 1)]?.approvalId ?? null;
+    overlay.scroll = 0;
+    overlay.nav = INITIAL_INSTALL_REVIEW_NAV;
+    overlay.taskRules = INITIAL_TASK_RULES_NAV;
+    overlay.protectedInput = newProtectedInput();
+  }
+
+  /** A clicked region: focus what it names, then press its key through the usual input path. */
+  private applyClick(action: ClickAction): void {
+    const overlay = this.overlay;
+    if (overlay?.kind === "approvals") {
+      if (action.field !== undefined && !overlay.protectedInput.submitting)
+        overlay.protectedInput.field = action.field;
+      if (action.part !== undefined && action.part !== overlay.nav.partIndex)
+        overlay.nav = {
+          ...overlay.nav,
+          partIndex: action.part,
+          rowExpanded: false,
+          rowIndex: 0,
+        };
+      if (action.rule !== undefined)
+        overlay.taskRules = { ...overlay.taskRules, rowIndex: action.rule };
+    }
+    if (action.key) this.onEvents([syntheticKey(action.key)]);
+    else this.changed();
+  }
+
+  /** Move the open overlay's selection to what a click landed on. */
+  private selectInOverlay(index: number): void {
+    const overlay = this.overlay;
+    if (!overlay) return;
+    if (overlay.kind === "approvals") this.selectApproval(overlay, index);
+    else if ("selected" in overlay) overlay.selected = index;
+    this.changed();
+  }
+
+  /**
+   * Whether a click outside the open overlay closes it, as Esc does. Not where
+   * Esc does more than close: it aborts a file transfer, and in approvals it
+   * clears values typed into a protected form. Not the launcher with nothing
+   * open either: it is the whole screen.
+   */
+  private dismissedByClickAway(): boolean {
+    const overlay = this.overlay;
+    if (!overlay) return false;
+    if (overlay.kind === "file" || overlay.kind === "approvals") return false;
+    return !(overlay.kind === "launcher" && this.sessions.length === 0);
   }
 
   private approvalIndex(overlay: Extract<Overlay, { kind: "approvals" }>): number {
@@ -2174,6 +2432,13 @@ export class TerminalBrowser {
     return {
       changed: () => this.changed(),
       output: () => this.compositor.invalidate(),
+      exited: (session: ShellSessionTab, code: number | null, signal?: string) =>
+        this.guard(() => {
+          // Leaving a program on purpose (exit code 0) is done with it, as in any
+          // terminal: its tab closes, and with nothing open the launcher shows.
+          // Any other ending keeps the tab, its output and "start it again".
+          if (code === 0 && !signal) void this.own(this.closeSession(session.sessionId));
+        }),
       bell: (session: ShellSessionTab) => this.guard(() => this.onBell(session)),
       copy: (session: ShellSessionTab, text: string) =>
         this.guard(() => {
@@ -2634,6 +2899,7 @@ function editList(
   }
   switch (event.name) {
     case "escape":
+    case "C-c":
       return "cancel";
     case "enter":
       return "accept";
@@ -2786,4 +3052,33 @@ function relativeTime(timestamp: number): string {
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** What a click on an overlay stands for: a selection, then the key that acts on it. */
+interface OverlayHit {
+  select?: number;
+  key?: string;
+}
+
+/** Overlay-relative cell → what a click there means, or null for nothing. */
+type OverlayHitTest = (x: number, y: number) => OverlayHit | null;
+
+function syntheticKey(name: string): KeyEvent {
+  return { kind: "key", name, seq: "" };
+}
+
+/** The key that runs a prefix binding ("1-9" stands for tab 1). */
+function bindingKeyName(binding: Binding): string {
+  if (binding.key === "1-9") return "1";
+  if (binding.key === "Tab") return "tab";
+  return binding.key;
+}
+
+/** Clicking a list item selects it and opens it, as Enter does. */
+function listClick(items: readonly ListItem[], selected: number, height: number): OverlayHitTest {
+  const window = listWindow(items, selected, height);
+  return (_x, y) => {
+    const index = listItemAt(window, y);
+    return index === null ? null : { select: index, key: "enter" };
+  };
 }

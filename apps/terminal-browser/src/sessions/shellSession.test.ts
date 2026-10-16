@@ -29,6 +29,7 @@ function setup() {
   const events = {
     changed: vi.fn(),
     output: vi.fn(),
+    exited: vi.fn(),
     bell: vi.fn(),
     copy: vi.fn(),
     log: vi.fn(),

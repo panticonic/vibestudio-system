@@ -53,6 +53,42 @@ describe("approvalRequestedBy", () => {
     expect(approvalRequestedBy(raised, APP)).toBe(true);
   });
 
+  it("matches a workspace review that the app's parked work joined", () => {
+    const welcome: PendingApproval = {
+      kind: "unit-install-review",
+      approvalId: "welcome",
+      callerId: "system:units",
+      callerKind: "system",
+      repoPath: "meta",
+      effectiveVersion: "",
+      requestedAt: 1,
+      mode: "adopt-root",
+      title: "what's in your workspace",
+      description: "",
+      parts: [],
+      summary: { panels: 0, agents: 0, services: 0, clientApps: 0, extensions: 0 },
+      unchangedPartCount: 0,
+    };
+    expect(approvalRequestedBy(welcome, APP)).toBe(false);
+    const joined = {
+      ...welcome,
+      waiting: [
+        {
+          id: AGENT,
+          kind: "do" as const,
+          category: "agent" as const,
+          repoPath: "agents/chat",
+          effectiveVersion: "ev",
+          stableIdentityKey: "agents/chat@ev",
+          ephemeralInstanceKey: AGENT,
+          breadcrumbs: [{ id: APP, kind: "app" as const, category: "workspace-app" as const }],
+        },
+      ],
+    };
+    expect(approvalRequestedBy(joined, APP)).toBe(true);
+    expect(approvalRequestedBy(joined, "app:terminal-apps/other:1")).toBe(false);
+  });
+
   it("does not match another app's work or a tab without a principal", () => {
     const raised = approval(AGENT, {
       panel: { id: "panel:other" },

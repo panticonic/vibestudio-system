@@ -1,8 +1,9 @@
-import type { PendingApproval } from "@vibestudio/shared/approvals";
+import type { ApprovalRequesterIdentity, PendingApproval } from "@vibestudio/shared/approvals";
 
 /**
- * Whether an approval was raised by the terminal app whose runtime principal
- * is `principalId`, or by work that app started.
+ * Whether an approval belongs to the terminal app whose runtime principal is
+ * `principalId`: raised by the app or by work it started, or holding up such
+ * work that joined it (an agent parked on a review that was already open).
  *
  * The app's agents and workers run under their own principals, so the caller
  * alone misses them; the host attributes every requester to its owning panel
@@ -16,9 +17,16 @@ export function approvalRequestedBy(
 ): boolean {
   if (principalId === undefined) return false;
   if (approval.callerId === principalId) return true;
-  const requester = approval.requester;
-  if (!requester) return false;
+  if (approval.requester && startedBy(approval.requester, principalId)) return true;
   return (
+    approval.kind === "unit-install-review" &&
+    (approval.waiting ?? []).some((waiter) => startedBy(waiter, principalId))
+  );
+}
+
+function startedBy(requester: ApprovalRequesterIdentity, principalId: string): boolean {
+  return (
+    requester.id === principalId ||
     requester.panel?.id === principalId ||
     requester.breadcrumbs.some((breadcrumb) => breadcrumb.id === principalId)
   );

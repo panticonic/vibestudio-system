@@ -53,6 +53,8 @@ export interface SessionEvents {
   changed(): void;
   /** The grid shows new output. */
   output(): void;
+  /** The program exited while attached: the person watched it end. */
+  exited(session: ShellSessionTab, code: number | null, signal?: string): void;
   /** The program rang the bell (BEL). */
   bell(session: ShellSessionTab): void;
   /** The program asked to put text on the person's clipboard (OSC 52). */
@@ -274,6 +276,7 @@ export class ShellSessionTab {
             code: event.code,
             ...(event.signal ? { signal: event.signal } : {}),
           });
+          this.events.exited(this, event.code, event.signal);
           break;
       }
     }

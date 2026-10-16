@@ -1,4 +1,5 @@
 import { Terminal } from "@xterm/headless";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import {
   ATTR_BLINK,
   ATTR_BOLD,
@@ -109,6 +110,11 @@ export class VtGrid {
       // Ink emits bare "\n" and relies on the TTY's ONLCR translation.
       convertEol: true,
     });
+    // Ink, the programs in the tabs and the person's terminal all measure text
+    // with Unicode 11 widths, where an emoji takes two cells. xterm's default
+    // table gives it one, and every later cell on that row lands one column off.
+    this.term.loadAddon(new Unicode11Addon());
+    this.term.unicode.activeVersion = "11";
     this.cell = this.term.buffer.active.getNullCell();
     const trackPrivateMode = (params: (number | number[])[], set: boolean): boolean => {
       for (const param of params) {

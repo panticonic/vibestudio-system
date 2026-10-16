@@ -22,7 +22,7 @@ export interface LaunchRequest {
   source?: string;
   cols: number;
   rows: number;
-  /** How the browser opens approvals (e.g. "Ctrl-Space a"), for the app to mention. */
+  /** How the browser opens approvals (e.g. "Ctrl-B a"), for the app to mention. */
   approvalsKey?: string;
 }
 

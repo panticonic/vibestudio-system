@@ -1,9 +1,10 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { FuzzyMatch } from "../input/fuzzy.js";
-import { PREFIX_BINDINGS } from "../input/keymap.js";
+import { BINDING_GROUPS, PREFIX_BINDINGS, type Binding } from "../input/keymap.js";
 import { SETTING_ROWS, type BrowserSettings } from "../settings.js";
 import { Scrollable } from "./Scrollable.js";
+import { ButtonRow, type Button } from "./clickable.js";
 
 // ── tab strip ────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,8 @@ export interface StatusView {
   server: string;
   connection: { phase: "connected" | "reconnecting" | "lost"; cause?: string };
   approvals: number;
+  /** The approval opening approvals selects first: the focused tab's, else the oldest. */
+  approvalHeadline?: string;
   prefixLabel: string;
   prefixPending: boolean;
   /** Mode-specific key hints that replace the defaults (copy mode, launcher, ...). */
@@ -126,12 +129,11 @@ export function StatusBar({
   width: number;
 }): React.ReactElement {
   if (view.prefixPending) {
+    // The menu above lists every key; the bar only says what state this is.
     return (
       <Box width={width} height={1}>
-        <Text backgroundColor="yellow" color="black" wrap="truncate-end">
-          {` ${view.prefixLabel} › k palette · c new · 1-9 tabs · n/p next/prev · [ copy · o links · a approvals · d detach · ? help · q quit · Esc cancel `.padEnd(
-            width
-          )}
+        <Text backgroundColor="yellow" color="black" bold wrap="truncate-end">
+          {` ${view.prefixLabel} › press a key from the menu above · Esc cancels `.padEnd(width)}
         </Text>
       </Box>
     );
@@ -148,15 +150,23 @@ export function StatusBar({
             text: `disconnected (${view.connection.cause ?? "server gone"})`,
             color: "red",
           };
-  const right = view.hint ?? `${view.prefixLabel} ? help`;
+  // What the prefix is for, always in view; a one-shot notice needs the room more.
+  const right =
+    view.hint ??
+    (view.notice
+      ? `${view.prefixLabel} menu`
+      : `${view.prefixLabel} browser menu: tabs, approvals, quit`);
   return (
     <Box width={width} height={1} justifyContent="space-between">
       <Box flexShrink={1} flexGrow={1}>
         <Text wrap="truncate-end">
-          {/* Most important first: truncation cuts the server address, never approvals. */}
+          {/* Most important first: truncation cuts the server address, never approvals.
+              A waiting approval names itself and the key that opens it, before anything else. */}
           {view.approvals > 0 ? (
             <Text color="black" backgroundColor="yellow" bold>
-              {` ${view.approvals} approval${view.approvals === 1 ? "" : "s"} · ${view.prefixLabel} a `}
+              {` ! Approval needed — press ${view.prefixLabel} a`}
+              {view.approvalHeadline ? ` · ${view.approvalHeadline}` : ""}
+              {view.approvals > 1 ? ` (+${view.approvals - 1} more)` : ""}{" "}
             </Text>
           ) : null}
           {view.notice ? <Text color="cyan">{` ${view.notice} ·`}</Text> : null}
@@ -237,16 +247,61 @@ function Highlighted({
   return <>{parts}</>;
 }
 
-export function ListOverlay(props: ListOverlayProps): React.ReactElement {
-  const { items, selected, width, height } = props;
-  const inner = Math.max(1, height - (props.border === false ? 0 : 2));
+/**
+ * One geometry for painting a list overlay and hit testing it, like
+ * `tabWindow`: which items show, and the overlay-relative row each one starts
+ * on (a section header takes the row above its first item).
+ */
+export function listWindow(
+  items: readonly Pick<ListItem, "detail" | "section">[],
+  selected: number,
+  height: number,
+  border = true
+): {
+  first: number;
+  capacity: number;
+  rowsPerItem: number;
+  listRows: number;
+  rows: { index: number; y: number }[];
+} {
+  const inner = Math.max(1, height - (border ? 2 : 0));
   const rowsPerItem = items.some((item) => item.detail) ? 2 : 1;
   const sections = new Set(items.map((item) => item.section).filter(Boolean)).size;
-  const listRows = Math.max(1, inner - 3 - (props.query || items.length ? 0 : 0));
+  const listRows = Math.max(1, inner - 3);
   const capacity = Math.max(1, Math.floor((listRows - Math.min(sections, 2)) / rowsPerItem));
   const first = Math.min(
     Math.max(0, selected - Math.floor(capacity / 2)),
     Math.max(0, items.length - capacity)
+  );
+  // Below the border, the title and the query line.
+  const top = (border ? 1 : 0) + 2;
+  const rows: { index: number; y: number }[] = [];
+  let y = top;
+  let lastSection: string | undefined;
+  for (let index = first; index < Math.min(items.length, first + capacity); index++) {
+    const item = items[index]!;
+    if (item.section && item.section !== lastSection) y++;
+    lastSection = item.section;
+    if (y >= top + listRows) break;
+    rows.push({ index, y });
+    y += rowsPerItem;
+  }
+  return { first, capacity, rowsPerItem, listRows, rows };
+}
+
+/** The item whose rows cover overlay-relative row `y`, if any. */
+export function listItemAt(window: ReturnType<typeof listWindow>, y: number): number | null {
+  const row = window.rows.find((row) => y >= row.y && y < row.y + window.rowsPerItem);
+  return row ? row.index : null;
+}
+
+export function ListOverlay(props: ListOverlayProps): React.ReactElement {
+  const { items, selected, width, height } = props;
+  const { first, capacity, rowsPerItem, listRows } = listWindow(
+    items,
+    selected,
+    height,
+    props.border !== false
   );
   const visible = items.slice(first, first + capacity);
   let lastSection: string | undefined;
@@ -303,6 +358,203 @@ export function ListOverlay(props: ListOverlayProps): React.ReactElement {
       <Text dimColor wrap="truncate-end">
         {props.footer}
       </Text>
+    </Box>
+  );
+}
+
+// ── needs you ────────────────────────────────────────────────────────────────
+
+/**
+ * The bar above the status bar while the focused tab's work waits on an
+ * approval. The browser draws it, so no program can fake or hide it; the way
+ * to answer comes first, so a narrow terminal cuts the title, not the key.
+ */
+export function NeedsYouBar({
+  headline,
+  more,
+  prefixLabel,
+  width,
+}: {
+  headline: string;
+  more: number;
+  prefixLabel: string;
+  width: number;
+}): React.ReactElement {
+  return (
+    <Box width={width} height={1}>
+      <Text backgroundColor="yellow" color="black" bold wrap="truncate-end">
+        {` ! Needs you — click here or press ${prefixLabel} a · ${headline}${more > 0 ? ` (+${more} more)` : ""} `.padEnd(
+          width
+        )}
+      </Text>
+    </Box>
+  );
+}
+
+// ── prefix menu ──────────────────────────────────────────────────────────────
+
+type MenuSegment = {
+  text: string;
+  tone?: "key" | "title" | "head" | "dim";
+  /** The command this cell runs, so a click finds it where it is painted. */
+  binding?: Binding;
+};
+
+const MENU_GAP = 3;
+
+function wordWrap(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (!line) line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+    while (line.length > width) {
+      lines.push(line.slice(0, width));
+      line = line.slice(width);
+    }
+  }
+  return [...lines, line];
+}
+
+/**
+ * Every prefix command with its full description, grouped. Descriptions are
+ * never cut: a cell too narrow for one wraps it. The fewest columns that fit
+ * in `maxRows` win (one column reads best); a short terminal gets more.
+ * Lines are inside the border, so the panel's height is `lines.length + 2`.
+ */
+export function prefixMenuLines(
+  prefixLabel: string,
+  width: number,
+  maxRows = Number.POSITIVE_INFINITY
+): MenuSegment[][] {
+  const inner = Math.max(10, width - 4);
+  let best: MenuSegment[][] | null = null;
+  for (let columns = 1; columns <= 3; columns++) {
+    const cellWidth = Math.floor((inner - MENU_GAP * (columns - 1)) / columns);
+    if (columns > 1 && cellWidth < 24) break;
+    const lines = menuLinesIn(prefixLabel, inner, columns, cellWidth);
+    if (lines.length <= maxRows) return lines;
+    if (!best || lines.length < best.length) best = lines;
+  }
+  return best!;
+}
+
+function menuLinesIn(
+  prefixLabel: string,
+  inner: number,
+  columns: number,
+  cellWidth: number
+): MenuSegment[][] {
+  const keyWidth = Math.max(...PREFIX_BINDINGS.map((b) => b.key.length)) + 1;
+  const lines: MenuSegment[][] = [
+    ...wordWrap(`${prefixLabel} — the browser menu. Press one of these keys:`, inner).map(
+      (text) => [{ text, tone: "head" as const }]
+    ),
+  ];
+  const cell = (binding: Binding): MenuSegment[][] => {
+    const description = wordWrap(binding.description, Math.max(1, cellWidth - keyWidth - 1));
+    return description.map((text, index) => [
+      {
+        text: (index === 0 ? binding.key : "").padEnd(keyWidth + 1),
+        tone: "key",
+        binding,
+      },
+      { text: text.padEnd(cellWidth - keyWidth - 1), binding },
+    ]);
+  };
+  for (const group of BINDING_GROUPS) {
+    const bindings = PREFIX_BINDINGS.filter((binding) => binding.group === group.id);
+    lines.push([], [{ text: group.title, tone: "title" }]);
+    for (let start = 0; start < bindings.length; start += columns) {
+      const cells = bindings.slice(start, start + columns).map(cell);
+      const height = Math.max(...cells.map((c) => c.length));
+      for (let row = 0; row < height; row++) {
+        const line: MenuSegment[] = [];
+        cells.forEach((c, index) => {
+          if (index > 0) line.push({ text: " ".repeat(MENU_GAP) });
+          line.push(...(c[row] ?? [{ text: " ".repeat(cellWidth) }]));
+        });
+        lines.push(line);
+      }
+    }
+  }
+  lines.push(
+    [],
+    ...wordWrap(
+      `Esc cancels. ${prefixLabel} twice sends ${prefixLabel} itself to the program in this tab.`,
+      inner
+    ).map((text) => [{ text, tone: "dim" as const }])
+  );
+  return lines;
+}
+
+/**
+ * The binding painted at panel-relative cell (`x`, `y`) of a `PrefixMenu`
+ * showing `lines`: inside the border and one column of padding, segments sit
+ * left to right exactly as rendered.
+ */
+export function prefixMenuBindingAt(
+  lines: MenuSegment[][],
+  height: number,
+  x: number,
+  y: number
+): Binding | null {
+  const line = y >= 1 && y < height - 1 ? lines[y - 1] : undefined;
+  let column = 2;
+  for (const segment of line ?? []) {
+    const end = column + segment.text.length;
+    if (x >= column && x < end) return segment.binding ?? null;
+    column = end;
+  }
+  return null;
+}
+
+export function PrefixMenu({
+  lines,
+  width,
+  height,
+}: {
+  lines: MenuSegment[][];
+  width: number;
+  height: number;
+}): React.ReactElement {
+  return (
+    <Box
+      flexDirection="column"
+      width={width}
+      height={height}
+      borderStyle="round"
+      borderColor="yellow"
+      paddingX={1}
+    >
+      {lines.slice(0, Math.max(0, height - 2)).map((line, index) => (
+        <Text key={index} wrap="truncate-end">
+          {line.length === 0
+            ? " "
+            : line.map((segment, at) => (
+                <Text
+                  key={at}
+                  bold={
+                    segment.tone === "key" || segment.tone === "title" || segment.tone === "head"
+                  }
+                  color={
+                    segment.tone === "key"
+                      ? "yellow"
+                      : segment.tone === "title" || segment.tone === "head"
+                        ? "cyan"
+                        : undefined
+                  }
+                  dimColor={segment.tone === "dim"}
+                >
+                  {segment.text}
+                </Text>
+              ))}
+        </Text>
+      ))}
     </Box>
   );
 }
@@ -459,6 +711,33 @@ export function LogsOverlay(props: {
 
 // ── settings ─────────────────────────────────────────────────────────────────
 
+/** Rows above the first setting: border, title, explanation and a gap. */
+const SETTINGS_TOP = 4;
+
+function settingValueText(row: (typeof SETTING_ROWS)[number], settings: BrowserSettings): string {
+  return `‹ ${row.value(settings)} ›`;
+}
+
+/**
+ * What a click at overlay-relative (`x`, `y`) of a `SettingsOverlay` means:
+ * the setting on that row, and on its ‹ value › a step like ← or →.
+ */
+export function settingsAt(
+  settings: BrowserSettings,
+  width: number,
+  x: number,
+  y: number
+): { index: number; step: -1 | 0 | 1 } | null {
+  const index = y - SETTINGS_TOP;
+  const row = SETTING_ROWS[index];
+  if (!row) return null;
+  // Right-aligned inside the border and one column of padding.
+  const end = width - 2;
+  const start = end - settingValueText(row, settings).length;
+  if (x < start || x >= end) return { index, step: 0 };
+  return { index, step: x - start < 2 ? -1 : 1 };
+}
+
 export function SettingsOverlay(props: {
   settings: BrowserSettings;
   selected: number;
@@ -480,7 +759,7 @@ export function SettingsOverlay(props: {
       <Text bold color="cyan">
         Settings
       </Text>
-      <Text dimColor>
+      <Text dimColor wrap="truncate-end">
         {props.loading
           ? "Loading your saved settings before editing…"
           : "Saved for you on the server, so they follow you to other devices."}
@@ -491,7 +770,7 @@ export function SettingsOverlay(props: {
           <Text
             inverse={index === props.selected}
           >{`${index === props.selected ? "▸ " : "  "}${row.label}`}</Text>
-          <Text color="cyan">{`‹ ${row.value(props.settings)} ›`}</Text>
+          <Text color="cyan">{settingValueText(row, props.settings)}</Text>
         </Box>
       ))}
       <Box height={1} />
@@ -502,7 +781,7 @@ export function SettingsOverlay(props: {
         </Text>
       ) : null}
       <Box flexGrow={1} />
-      <Text dimColor>↑↓ choose · ←→ change · Esc close</Text>
+      <Text dimColor>↑↓ choose · ←→ or click ‹ › change · Esc close</Text>
     </Box>
   );
 }
@@ -568,20 +847,26 @@ export function OpenUrlDialog(props: {
         </Text>
       )}
       <Box flexGrow={1} />
-      <Text>
-        {props.allowed ? (
-          <>
-            <Text color="green" bold>
-              o
-            </Text>
-            {" open   "}
-          </>
-        ) : null}
-        <Text color="red" bold>
-          Esc
-        </Text>
-        {" cancel"}
-      </Text>
+      <ButtonRow
+        buttons={[
+          ...(props.allowed
+            ? [
+                {
+                  id: "open",
+                  label: "[o] Open",
+                  action: { key: "o", confirm: true },
+                  color: "green" as const,
+                },
+              ]
+            : []),
+          {
+            id: "cancel",
+            label: "[Esc] Cancel",
+            action: { key: "escape" },
+            color: "red" as const,
+          },
+        ]}
+      />
     </Box>
   );
 }
@@ -594,6 +879,8 @@ export function MessageBox(props: {
   tone: "info" | "warn" | "error";
   width: number;
   height: number;
+  /** The choices, as buttons for their keys. */
+  buttons?: readonly Button[];
 }): React.ReactElement {
   const color = props.tone === "error" ? "red" : props.tone === "warn" ? "yellow" : "cyan";
   return (
@@ -613,6 +900,7 @@ export function MessageBox(props: {
           {line}
         </Text>
       ))}
+      {props.buttons ? <ButtonRow buttons={props.buttons} /> : null}
     </Box>
   );
 }

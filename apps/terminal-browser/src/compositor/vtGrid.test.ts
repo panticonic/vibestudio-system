@@ -24,6 +24,17 @@ describe("VtGrid", () => {
     grid.dispose();
   });
 
+  it("gives emoji the two cells Ink and real terminals give them", async () => {
+    const grid = new VtGrid({ columns: 12, rows: 1 });
+    await grid.write("1:💬 Chat");
+    const screen = new Screen(12, 1);
+    grid.paint(screen, { x: 0, y: 0, width: 12, height: 1 });
+    expect(screen.widths[2]).toBe(2);
+    expect(screen.rowText(0)).toBe("1:💬 Chat");
+    expect(screen.chars[8]).toBe("t");
+    grid.dispose();
+  });
+
   it("tracks enhanced keyboard ownership independently across screen buffers", async () => {
     const reply = vi.fn();
     const grid = new VtGrid({ columns: 20, rows: 2 }, { signals: { reply } });

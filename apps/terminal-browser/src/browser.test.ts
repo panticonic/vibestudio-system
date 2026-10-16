@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import xterm from "@xterm/headless";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import type { RpcClient, RpcStreamOptions } from "@vibestudio/rpc";
 import { schemaRpcClientMock } from "@vibestudio/rpc/test-utils";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
@@ -19,6 +20,12 @@ import { FakeShell, FakeTerminalSessions } from "./testing/fakeShell.js";
 const { Terminal } = xterm as unknown as {
   Terminal: typeof import("@xterm/headless").Terminal;
 };
+
+function withUnicode11<T extends InstanceType<typeof Terminal>>(terminal: T): T {
+  terminal.loadAddon(new Unicode11Addon());
+  terminal.unicode.activeVersion = "11";
+  return terminal;
+}
 
 const ECHO = "terminal-apps/echo";
 const APP_ID = "app:apps/terminal-browser:dev-1";
@@ -233,11 +240,14 @@ class FakeTty {
       return this;
     },
   });
-  readonly screen = new Terminal({
-    cols: 100,
-    rows: 20,
-    allowProposedApi: true,
-  });
+  // The person's terminal, measuring text as current terminals do (emoji take two cells).
+  readonly screen = withUnicode11(
+    new Terminal({
+      cols: 100,
+      rows: 20,
+      allowProposedApi: true,
+    })
+  );
   readonly written: string[] = [];
   readonly stdout = Object.assign(new EventEmitter(), {
     isTTY: true,
@@ -270,6 +280,19 @@ class FakeTty {
   click(x: number, y: number): void {
     this.type(`\x1b[<0;${x + 1};${y + 1}M\x1b[<0;${x + 1};${y + 1}m`);
   }
+
+  /** The left button goes down at one cell and comes up at another (a drag off a button). */
+  pressAndRelease(from: { x: number; y: number }, to: { x: number; y: number }): void {
+    this.type(`\x1b[<0;${from.x + 1};${from.y + 1}M\x1b[<0;${to.x + 1};${to.y + 1}m`);
+  }
+
+  /** The cell where `text` starts on screen (first occurrence). */
+  find(text: string): { x: number; y: number } {
+    const lines = this.text().split("\n");
+    const y = lines.findIndex((line) => line.includes(text));
+    if (y === -1) throw new Error(`"${text}" is not on screen:\n${this.text()}`);
+    return { x: lines[y]!.indexOf(text), y };
+  }
 }
 
 let currentScreen: (() => string) | null = null;
@@ -281,7 +304,7 @@ async function until(predicate: () => boolean, what: string): Promise<void> {
   throw new Error(`timed out waiting for ${what}; screen:\n${currentScreen?.() ?? ""}`);
 }
 
-const PREFIX = "\x00";
+const PREFIX = "\x02";
 
 function setup(
   prepare?: (sessions: FakeTerminalSessions) => void,
@@ -390,13 +413,13 @@ describe("terminal browser", () => {
       app.tty.type(`${PREFIX}s\x1b[C`);
       await until(() => app.tty.text().includes("still loading"), "edit readiness notice");
       expect(app.sessions.settings).toEqual({});
-      complete({ prefixKey: "C-b", autoOpenApprovals: false });
-      await until(() => app.tty.text().includes("Ctrl-B"), "saved preferences");
+      complete({ prefixKey: "C-a", autoOpenApprovals: false });
+      await until(() => app.tty.text().includes("Ctrl-A"), "saved preferences");
       app.tty.type("\x1b[C");
-      await until(() => app.sessions.settings["prefixKey"] === "C-]", "new settings saved");
+      await until(() => app.sessions.settings["prefixKey"] === "C-b", "new settings saved");
       expect(app.sessions.settings["autoOpenApprovals"]).toBe(false);
     } finally {
-      complete({ prefixKey: "C-b", autoOpenApprovals: false });
+      complete({ prefixKey: "C-a", autoOpenApprovals: false });
     }
   });
 
@@ -419,7 +442,7 @@ describe("terminal browser", () => {
     } finally {
       release();
     }
-    await until(() => app.sessions.settings["prefixKey"] === "C-b", "ordered final settings");
+    await until(() => app.sessions.settings["prefixKey"] === "C-\\", "ordered final settings");
     expect(vi.mocked(app.sessions.setSettings)).toHaveBeenCalledTimes(2);
   });
 
@@ -460,6 +483,36 @@ describe("terminal browser", () => {
       () => app.workspace.resolved.includes("second:once"),
       "explicit replacement selection"
     );
+  });
+
+  it("names an approval no tab owns in the status bar without taking the keyboard", async () => {
+    const app = start();
+    const pty = await startEcho(app);
+    app.workspace.approvals = [
+      {
+        kind: "capability",
+        approvalId: "workspace",
+        callerId: "worker:somewhere-else",
+        callerKind: "worker",
+        repoPath: "workers/elsewhere",
+        effectiveVersion: "ev",
+        requestedAt: 1,
+        capability: "server-logs.read",
+        title: "Read logs",
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(
+      () =>
+        app.tty.text().split("\n").at(-1)!.includes("Approval needed — press Ctrl-B a · Read logs"),
+      "status bar approval"
+    );
+    expect(app.tty.text()).not.toContain("Approvals (1)");
+    app.tty.type("1");
+    await until(() => app.shell.typed(pty) === "1", "keys still reach the tab");
+    expect(app.workspace.resolved).toEqual([]);
+    app.tty.click(4, 19);
+    await until(() => app.tty.text().includes("Approvals (1)"), "status bar click opens approvals");
   });
 
   it("blocks hidden approval decisions and session bytes below usable size", async () => {
@@ -641,7 +694,10 @@ describe("terminal browser", () => {
     app.tty.type(`${PREFIX}1${PREFIX}kupload\r`);
     await until(() => app.tty.text().includes("Local source path"), "upload gesture");
     app.tty.type(`${PREFIX}2`);
-    vi.mocked(app.files.upload).mockResolvedValue({ path: "uploads/notes.txt", size: 8 });
+    vi.mocked(app.files.upload).mockResolvedValue({
+      path: "uploads/notes.txt",
+      size: 8,
+    });
     app.tty.type("/local/notes.txt\ruploads/notes.txt\r");
     await until(
       () => app.tty.text().includes("Upload and replace workspace destination"),
@@ -727,7 +783,7 @@ describe("terminal browser", () => {
     expect(screen).not.toContain("Resume");
     const pty = await startEcho(app);
     expect(sessions.launches).toEqual([
-      { source: ECHO, cols: 100, rows: 18, approvalsKey: "Ctrl-Space a" },
+      { source: ECHO, cols: 100, rows: 18, approvalsKey: "Ctrl-B a" },
     ]);
     shell.emit(pty, "echo is ready");
     await until(() => tty.text().includes("echo is ready"), "program output");
@@ -743,7 +799,7 @@ describe("terminal browser", () => {
     await until(() => app.tty.text().includes("Your login shell"), "launcher");
     app.tty.type("shell\r");
     await until(() => app.tty.tabs().includes("1:Shell"), "Shell tab");
-    expect(app.sessions.launches).toEqual([{ cols: 100, rows: 18, approvalsKey: "Ctrl-Space a" }]);
+    expect(app.sessions.launches).toEqual([{ cols: 100, rows: 18, approvalsKey: "Ctrl-B a" }]);
   });
 
   it("resumes the most recently active running session on start and lists the rest", async () => {
@@ -850,6 +906,16 @@ describe("terminal browser", () => {
     expect(app.opened).toHaveLength(1);
   });
 
+  it("closes the tab of a program the person quit, back to the launcher", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.sessions.exit(entry.sessionId, 0);
+    await until(() => app.sessions.closed.includes(entry.sessionId), "session closed");
+    await until(() => app.tty.text().includes("what would you like to open?"), "launcher");
+    expect(app.tty.tabs()).not.toContain("Echo");
+  });
+
   it("keeps an ended program's tab with its output and starts it again on prefix r", async () => {
     const app = start();
     const pty = await startEcho(app);
@@ -858,7 +924,7 @@ describe("terminal browser", () => {
     app.sessions.exit(entry.sessionId, 3);
     await until(() => app.tty.text().includes("Echo exited (code 3)"), "ended state");
     expect(app.tty.text()).toContain("last words");
-    expect(app.tty.text()).toContain("Ctrl-Space r start it again");
+    expect(app.tty.text()).toContain("Ctrl-B r start it again");
     app.tty.type(`${PREFIX}r`);
     await until(() => app.sessions.entries.get(entry.sessionId)!.running, "relaunched");
     const relaunched = app.sessions.entries.get(entry.sessionId)!.shellSessionId!;
@@ -903,7 +969,9 @@ describe("terminal browser", () => {
     const app = start();
     const pty = await startEcho(app);
     const entry = [...app.sessions.entries.values()][0]!;
-    app.sessions.update(entry.sessionId, { failure: "exit observation failed" });
+    app.sessions.update(entry.sessionId, {
+      failure: "exit observation failed",
+    });
     const resume = vi.spyOn(app.sessions, "resume").mockImplementation(async ({ sessionId }) => {
       const recovered = { ...app.sessions.entries.get(sessionId)! };
       delete recovered.failure;
@@ -1007,14 +1075,319 @@ describe("terminal browser", () => {
     await until(() => app.workspace.resolved.includes("a2:deny"), "denied");
   });
 
+  it("opens a workspace review once this tab's work is parked on it, and badges the tab", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    const welcome: PendingApproval = {
+      kind: "unit-install-review",
+      approvalId: "welcome",
+      callerId: "system:units",
+      callerKind: "system",
+      repoPath: "meta",
+      effectiveVersion: "",
+      requestedAt: 1,
+      mode: "adopt-root",
+      title: "what's in your workspace",
+      description: "Everything already in this workspace.",
+      parts: [],
+      summary: {
+        panels: 0,
+        agents: 0,
+        services: 0,
+        clientApps: 0,
+        extensions: 0,
+      },
+      unchangedPartCount: 0,
+    };
+    app.workspace.approvals = [welcome];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approval needed"), "status bar approval");
+    expect(app.tty.text()).not.toContain("Approvals (1)");
+    expect(app.tty.tabs()).not.toContain("!");
+    app.workspace.approvals = [
+      {
+        ...welcome,
+        waiting: [
+          {
+            id: "do:agents/chat:ChatAgent:1",
+            kind: "do",
+            category: "agent",
+            repoPath: "agents/chat",
+            effectiveVersion: "ev",
+            stableIdentityKey: "agents/chat@ev",
+            ephemeralInstanceKey: "do:agents/chat:ChatAgent:1",
+            breadcrumbs: [
+              {
+                id: entry.principalId!,
+                kind: "app",
+                category: "workspace-app",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approvals (1)"), "approvals overlay");
+    expect(app.tty.text()).toContain("(this tab)");
+    app.tty.type("\x1b[27u");
+    await until(() => app.tty.tabs().includes("!"), "badge on the tab");
+    // The browser's own bar names it above the status bar; the tab gives it a row.
+    const lines = () => app.tty.text().split("\n");
+    await until(() => lines().at(-2)!.includes("Needs you — click here or press Ctrl-B a"), "bar");
+    expect(lines().at(-2)).toContain("Welcome — here's what's in your workspace");
+    const pty = app.latestPty();
+    await until(() => app.shell.pty(pty).rows === 17, "tab one row shorter");
+    app.tty.click(10, 18);
+    await until(() => app.tty.text().includes("Approvals (1)"), "bar click opens it");
+    app.tty.type("\x1b[27u");
+    app.workspace.approvals = [];
+    app.workspace.emitApprovalsChanged();
+    await until(() => !app.tty.text().includes("Needs you"), "bar gone once answered");
+    await until(() => app.shell.pty(pty).rows === 18, "tab gets its row back");
+  });
+
+  it("decides an approval by clicking its button, only when released on that button", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.workspace.approvals = [
+      {
+        kind: "capability",
+        approvalId: "c1",
+        callerId: entry.principalId!,
+        callerKind: "app",
+        repoPath: ECHO,
+        effectiveVersion: "ev",
+        requestedAt: 1,
+        capability: "native.shell.execute",
+        title: "Run a command",
+        cardType: "confirm.critical",
+        allowedDecisions: ["once", "deny"],
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("[1] Confirm"), "decision buttons");
+    // Only the decisions this request allows are buttons.
+    expect(app.tty.text()).not.toContain("[3]");
+    const confirm = app.tty.find("[1] Confirm");
+    // Pressed on the button, released off it: nothing is decided.
+    app.tty.pressAndRelease(
+      { x: confirm.x + 1, y: confirm.y },
+      { x: confirm.x + 1, y: confirm.y - 2 }
+    );
+    // Pressed off it, released on it: nothing either.
+    app.tty.pressAndRelease(
+      { x: confirm.x + 1, y: confirm.y - 2 },
+      { x: confirm.x + 1, y: confirm.y }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(app.workspace.resolved).toEqual([]);
+    app.tty.click(confirm.x + 1, confirm.y);
+    await until(() => app.workspace.resolved.length > 0, "decided");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(app.workspace.resolved).toEqual(["c1:once"]);
+  });
+
+  it("fills and submits a protected form by clicking its field and Submit", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.workspace.approvals = [
+      {
+        kind: "secret-input",
+        approvalId: "protected",
+        callerId: entry.principalId!,
+        callerKind: "app",
+        repoPath: ECHO,
+        effectiveVersion: "ev",
+        requestedAt: 1,
+        title: "Provide token",
+        fields: [{ name: "token", label: "Token", required: true, type: "secret" }],
+      },
+    ];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("[Enter] Submit"), "protected form");
+    app.tty.type("\t"); // focus leaves the field for the Submit stop
+    const field = app.tty.find("Token *:");
+    app.tty.click(field.x + 1, field.y);
+    app.tty.type("\x1b[200~secret-value\x1b[201~");
+    await until(() => app.tty.text().includes("•"), "typed into the clicked field");
+    expect(app.tty.text()).not.toContain("secret-value");
+    const submit = app.tty.find("[Enter] Submit");
+    app.tty.click(submit.x + 1, submit.y);
+    await until(() => app.workspace.submitted.length === 1, "submitted");
+    expect(app.workspace.submitted[0]).toMatchObject({
+      id: "protected",
+      values: { token: "secret-value" },
+    });
+    expect(app.tty.written.join("")).not.toContain("secret-value");
+  });
+
+  it("ends a session from its confirmation by clicking End it", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    app.tty.type(`${PREFIX}x`);
+    await until(() => app.tty.text().includes("[y] End it"), "confirmation buttons");
+    const end = app.tty.find("[y] End it");
+    app.tty.pressAndRelease({ x: end.x + 1, y: end.y }, { x: end.x + 1, y: end.y - 3 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(app.sessions.closed).toEqual([]);
+    app.tty.click(end.x + 1, end.y);
+    await until(() => app.sessions.closed.includes(entry.sessionId), "ended");
+  });
+
   it("returns to the launcher when an overlay closes with nothing open", async () => {
     const { tty } = start();
     await until(() => tty.text().includes("what would you like to open?"), "launcher");
     tty.type(`${PREFIX}?`);
     await until(() => tty.text().includes("Every key goes to the session"), "help");
-    expect(tty.text()).toContain("Ctrl-Space o");
+    expect(tty.text()).toContain("Ctrl-B o");
     tty.type("\x1b[27u");
     await until(() => tty.text().includes("what would you like to open?"), "launcher again");
+  });
+
+  it("lists every prefix command in full when the prefix is pressed", async () => {
+    const app = start();
+    await startEcho(app);
+    app.tty.stdout.rows = 40;
+    app.tty.screen.resize(100, 40);
+    app.tty.stdout.emit("resize");
+    app.tty.type(PREFIX);
+    await until(() => app.tty.text().includes("the browser menu"), "prefix menu");
+    const text = app.tty.text();
+    for (const description of [
+      "Search retained terminal rows (literal, case-sensitive)",
+      "Detach: close this tab, the program keeps running",
+      "Quit (programs keep running; resume them later)",
+    ])
+      expect(text).toContain(description);
+    expect(text).toContain("press a key from the menu above");
+    app.tty.type("\x1b[27u");
+    await until(() => !app.tty.text().includes("the browser menu"), "menu closed");
+    // Narrow terminals get one column that wraps instead of cutting descriptions.
+    app.tty.stdout.columns = 40;
+    app.tty.screen.resize(40, 40);
+    app.tty.stdout.emit("resize");
+    app.tty.type(PREFIX);
+    await until(() => app.tty.text().includes("the browser"), "narrow prefix menu");
+    const narrow = app.tty
+      .text()
+      .replace(/[│╭╮╰╯─]/g, " ")
+      .replace(/\s+/g, " ");
+    expect(narrow).toContain("Quit (programs keep running; resume them later)");
+  });
+
+  it("quits from the empty launcher on Ctrl-C twice", async () => {
+    const app = start();
+    await until(() => app.tty.text().includes("what would you like to open?"), "launcher");
+    app.tty.type("\x03");
+    await until(() => app.tty.text().includes("Press Ctrl-C again to quit"), "armed");
+    app.tty.type("x\x03");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    let finished = false;
+    void app.done.then(() => {
+      finished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(finished).toBe(false);
+    app.tty.type("\x03");
+    await expect(app.done).resolves.toEqual({ kind: "quit" });
+  });
+
+  /** The screen cell where `text` is painted (first match). */
+  function cellOf(tty: App["tty"], text: string): { x: number; y: number } {
+    const lines = tty.text().split("\n");
+    const y = lines.findIndex((line) => line.includes(text));
+    if (y === -1) throw new Error(`"${text}" is not on screen:\n${tty.text()}`);
+    return { x: lines[y]!.indexOf(text), y };
+  }
+
+  it("starts what a click lands on in the launcher", async () => {
+    const app = start();
+    await until(() => app.tty.text().includes("Echoes what you type."), "launcher");
+    const { x, y } = cellOf(app.tty, "Echoes what you type.");
+    app.tty.click(x, y);
+    await until(() => app.tty.tabs().includes("1:🔊 Echo"), "Echo tab");
+  });
+
+  it("runs a prefix menu entry on click, and a click elsewhere cancels the prefix", async () => {
+    const app = start();
+    await startEcho(app);
+    app.tty.stdout.rows = 40;
+    app.tty.screen.resize(100, 40);
+    app.tty.stdout.emit("resize");
+    app.tty.type(PREFIX);
+    await until(() => app.tty.text().includes("the browser menu"), "prefix menu");
+    app.tty.click(50, 0);
+    await until(() => !app.tty.text().includes("the browser menu"), "cancelled by a click away");
+    expect(app.tty.text()).not.toContain("press a key from the menu above");
+    app.tty.type(PREFIX);
+    await until(() => app.tty.text().includes("the browser menu"), "prefix menu again");
+    const { x, y } = cellOf(app.tty, "Help: every key binding");
+    app.tty.click(x + 2, y);
+    await until(() => app.tty.text().includes("Every key goes to the session"), "help");
+  });
+
+  it("closes the palette on a click outside it", async () => {
+    const app = start();
+    await startEcho(app);
+    app.tty.type(`${PREFIX}k`);
+    await until(() => app.tty.text().includes("Commands"), "palette");
+    app.tty.click(1, 10);
+    await until(() => !app.tty.text().includes("Commands"), "palette closed");
+  });
+
+  it("steps a setting when its ‹ › arrows are clicked", async () => {
+    const app = start();
+    await until(() => app.tty.text().includes("Echo"), "launcher");
+    app.tty.type(`${PREFIX}s`);
+    await until(() => app.tty.text().includes("Prefix key"), "settings");
+    const line = cellOf(app.tty, "Prefix key");
+    const arrow = app.tty.text().split("\n")[line.y]!.lastIndexOf("›");
+    app.tty.click(arrow, line.y);
+    await until(() => app.sessions.settings["prefixKey"] === "C-]", "stepped forward");
+    const back = app.tty.text().split("\n")[line.y]!.lastIndexOf("‹");
+    app.tty.click(back, line.y);
+    await until(() => app.sessions.settings["prefixKey"] === "C-b", "stepped back");
+  });
+
+  it("selects an approval on click but leaves every decision to keys", async () => {
+    const app = start();
+    await startEcho(app);
+    const entry = [...app.sessions.entries.values()][0]!;
+    const request = (approvalId: string, title: string): PendingApproval => ({
+      kind: "capability",
+      approvalId,
+      callerId: entry.principalId!,
+      callerKind: "app",
+      repoPath: ECHO,
+      effectiveVersion: "ev",
+      requestedAt: 1,
+      capability: "server-logs.read",
+      title,
+    });
+    app.workspace.approvals = [request("first", "Read logs"), request("second", "Write notes")];
+    app.workspace.emitApprovalsChanged();
+    await until(() => app.tty.text().includes("Approvals (2)"), "approvals overlay");
+    const { x, y } = cellOf(app.tty, "2. Write notes");
+    // The detail below the queue names the selected request on a line of its own.
+    const detailOf = (title: string) =>
+      app.tty
+        .text()
+        .split("\n")
+        .some((line) => new RegExp(`^│ ${title}\\s+│$`).test(line));
+    expect(detailOf("Read logs")).toBe(true);
+    app.tty.click(x, y);
+    await until(() => detailOf("Write notes"), "second request selected");
+    // Clicking the selected request, or anywhere outside, never consents or closes.
+    app.tty.click(x, y);
+    app.tty.click(1, 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(app.workspace.resolved).toEqual([]);
+    expect(app.tty.text()).toContain("Approvals (2)");
   });
 
   it("quits with the terminal restored", async () => {
@@ -1124,12 +1497,12 @@ describe("terminal browser", () => {
     tty.type(`${PREFIX}s`);
     await until(() => tty.text().includes("Prefix key"), "settings");
     tty.type("\x1b[C"); // right: next prefix
-    await until(() => sessions.settings["prefixKey"] === "C-a", "saved");
+    await until(() => sessions.settings["prefixKey"] === "C-]", "saved");
     tty.type("\x1b[27u");
-    tty.type("\x01?");
+    tty.type("\x1d?");
     await until(() => tty.text().includes("Every key goes to the session"), "help via new prefix");
     tty.type("\x1b[27u");
-    tty.type("\x01q");
+    tty.type("\x1dq");
   });
 
   it("refuses to run without a terminal", async () => {
