@@ -190,14 +190,15 @@ For terminal client apps:
   `adoption: "artifact-only"`. The server only builds terminal client apps; it
   never runs them.
 - Run the app with `vibestudio terminal` (from the host checkout,
-  `pnpm terminal [--instance ID]`). The CLI runs the launch gate for the
+  `pnpm dev:terminal` for a fresh instance, `pnpm cli --instance ID terminal`
+  for a running one, or `pnpm start:terminal` for your profile). The CLI runs the launch gate for the
   `terminal` target, obtains the device's app principal through
   `auth.grantAppPrincipal([{ principal: "terminal-app", source }])`, downloads
   the build's primary `index.mjs`, and calls its exported `run(host)` in the
   CLI process. The app named by `hostTargets.terminal.app` is the one opened.
 - Server output for a server the command started is in
   `<stateDir>/logs/server.log` (`<instanceRoot>/logs/server.log` for
-  `pnpm terminal`). For host build, launch-gate, or grant failures, use
+  `pnpm dev:terminal`). For host build, launch-gate, or grant failures, use
   `serverLog.query` (eval: `services.serverLog.query(...)`; app/panel/worker:
   pass `mainRpcMethods["serverLog.query"]` from
   `@vibestudio/service-schemas/mainRpc`) or the `about/server-logs` live
