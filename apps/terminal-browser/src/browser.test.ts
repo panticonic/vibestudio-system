@@ -522,8 +522,12 @@ describe("terminal browser", () => {
     await until(() => app.shell.typed(pty) === "1", "keys reach the tab again");
     // Asked for, it answers to keys.
     app.tty.click(4, 19);
-    await until(() => app.tty.text().includes("Approvals (1)"), "status bar click opens approvals");
-    expect(app.tty.text()).not.toContain("Click a button to answer");
+    await until(
+      () =>
+        app.tty.text().includes("Approvals (1)") &&
+        app.tty.text().includes("Click a button or press its key"),
+      "status bar click opens approvals, answerable with keys"
+    );
     app.tty.type("1");
     await until(() => app.workspace.resolved.includes("workspace:once"), "decided by key");
   });
@@ -1435,8 +1439,12 @@ describe("terminal browser", () => {
     app.tty.type(PREFIX);
     await until(() => app.tty.text().includes("the browser menu"), "prefix menu");
     app.tty.click(50, 0);
-    await until(() => !app.tty.text().includes("the browser menu"), "cancelled by a click away");
-    expect(app.tty.text()).not.toContain("press a key from the menu above");
+    await until(
+      () =>
+        !app.tty.text().includes("the browser menu") &&
+        !app.tty.text().includes("press a key from the menu above"),
+      "cancelled by a click away"
+    );
     app.tty.type(PREFIX);
     await until(() => app.tty.text().includes("the browser menu"), "prefix menu again");
     const { x, y } = cellOf(app.tty, "Help: every key binding");
