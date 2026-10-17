@@ -28,6 +28,9 @@ several units sharing a `vibestudio.client.id`.
 
 ## Web Runtime
 
+Scaffold: `prepareProjects([{ projectType: "client", name, title, runtime: "web-host-1" }])`
+creates `index.html` and `index.ts` (see [AUTHORING.md](AUTHORING.md#scaffold)).
+
 Manifest:
 
 ```json
@@ -91,6 +94,8 @@ Behavior:
 
 ## React Native Runtime
 
+Scaffold: `runtime: "rn-host-6"` creates `App.tsx` and `tsconfig.json`.
+
 Manifest:
 
 ```json
@@ -141,6 +146,8 @@ Behavior:
   host-owned.
 
 ## Terminal Runtime
+
+Scaffold: `runtime: "terminal-host-1"` creates `src/index.ts` exporting `run(host)`.
 
 Manifest:
 

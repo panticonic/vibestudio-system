@@ -12,6 +12,28 @@ Trusted workspace clients live under `clients/` and use flat source paths:
 Do not add a package scope segment to the filesystem path. The path
 `clients/@workspace-clients/foo` is wrong.
 
+## Scaffold
+
+Create a client with `prepareProjects` from `@workspace-skills/workspace-dev`
+(see [workspace-dev](../workspace-dev/PROJECTS.md)); there is no `createProject`
+function:
+
+```ts
+import { prepareProjects } from "@workspace-skills/workspace-dev";
+scope.prepared = await prepareProjects([
+  { projectType: "client", name: "foo", title: "Foo", runtime: "web-host-1" },
+]);
+```
+
+`runtime` is the host ABI: `web-host-1`, `terminal-host-1` or `rn-host-6`; it
+fixes the client's runtime and entry. The scaffold is `clients/foo` with
+package `@workspace-clients/foo`, client `id` equal to the name, no
+capabilities, an empty authority manifest, and one foreground `open` intent.
+Preparation does not declare the client: add it under `clients:` (see
+[Workspace Declaration](#workspace-declaration)). To add a background intent,
+create its handler worker with `prepareProjects` `projectType: "worker"` and
+follow [Background Intent Handlers](#background-intent-handlers).
+
 ## Package Manifest
 
 Each client is a normal package with a `vibestudio.client` manifest block in

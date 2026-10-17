@@ -26,10 +26,17 @@ the worked examples: copy their manifest, intent and entry structure.
 
 ### The eight steps
 
-1. **Create** `clients/<name>` with package name `@workspace-clients/<name>` and
-   a `vibestudio.client` block ([AUTHORING.md](AUTHORING.md)): `id`, `runtime`,
-   `hostAbi`, `entry`, `capabilities`, and `intents`. A background intent also
-   needs a service handler ([AUTHORING.md](AUTHORING.md#background-intent-handlers)).
+1. **Create** `clients/<name>` with `prepareProjects` from
+   `@workspace-skills/workspace-dev`, `projectType: "client"` and a `runtime`
+   (`web-host-1`, `terminal-host-1` or `rn-host-6`):
+   `prepareProjects([{ projectType: "client", name, title, runtime }])`. It
+   scaffolds a minimal, buildable client with package name
+   `@workspace-clients/<name>` and a `vibestudio.client` block ([AUTHORING.md](AUTHORING.md)):
+   `id`, `runtime`, `hostAbi`, `entry`, no capabilities, and one foreground
+   `open` intent. Then edit it to what you need. A background intent also needs
+   a service handler ([AUTHORING.md](AUTHORING.md#background-intent-handlers)):
+   create the handler's worker with `prepareProjects` `projectType: "worker"`,
+   then edit its Durable Object to the recipe.
 2. **Declare** it: `- source: clients/<name>` under `clients:` in
    `meta/vibestudio.yml` (and the handler's `services:` / `singletonObjects:`
    entries). Add it to `trust.clients` only if it needs a device-level

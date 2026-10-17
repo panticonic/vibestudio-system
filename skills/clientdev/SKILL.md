@@ -100,7 +100,8 @@ For original illustrations, creative content, or other visual assets that
 enrich the client (games, learning tools, storytelling, visual exploration),
 follow [creative imagery and visual assets](../workspace-dev/SKILL.md#creative-imagery-and-visual-assets).
 
-Create `clients/<name>` with package name `@workspace-clients/<name>` and
+Create `clients/<name>` with `prepareProjects` (`projectType: "client"` and a
+`runtime`, see [AUTHORING.md](AUTHORING.md#scaffold)) and
 declare it under `clients:` in `meta/vibestudio.yml`. Follow
 [DEV_LOOP.md](DEV_LOOP.md) to run it on an already-running host without
 restarting anything. Use the live generated docs and manifest schema for exact
