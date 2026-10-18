@@ -21,7 +21,7 @@ relay application traffic.
   workspace's current reach by workspace ID.
 - A reach contains only the protocol version, the Endpoint ID, and an ordered
   list of explicit HTTPS relays.
-- Pairing links are complete compact-v4 URLs minted by the server. Never build
+- Pairing links are complete reach v5 URLs minted by the server. Never build
   a reach or a link yourself, guess a workspace from its display name, or
   expose a pairing secret.
 - Production endpoints disable n0 address lookup and implicit public relays.

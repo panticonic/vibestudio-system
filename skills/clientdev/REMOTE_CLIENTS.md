@@ -112,7 +112,7 @@ System have a single owner and cannot have other members.
   HTTPS relays. Do not add public-ingress, VPN, or cleartext-host exceptions
   for RPC reachability.
 - Pairing QR codes use the HTTPS form `https://vibestudio.app/p#...`; native
-  links use `vibestudio://connect/...`. Both carry the same compact-v4 payload
+  links use `vibestudio://connect/...`. Both carry the same reach v5 payload
   and use the same parser.
 - In a pairing invite, `deepLink`, `pairUrl`, `endpointId`, `relays`, and
   `code` are always non-null. Do not add handling for bare codes or missing
