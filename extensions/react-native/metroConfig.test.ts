@@ -82,6 +82,33 @@ describe("React Native provider Metro projection", () => {
     expect(config).not.toContain("packageExportTarget");
   });
 
+  it("owns the path polyfill, so an application need not declare it", () => {
+    // The provider injects `path` -> path-browserify for every client; a client
+    // whose dependency projection lacks the package (chat-mobile) must still
+    // build.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "metro-path-polyfill-"));
+    temporaryRoots.push(root);
+    const sourcePath = path.join(root, "source");
+    const nodeModulesPath = path.join(root, "node_modules");
+    fs.mkdirSync(sourcePath, { recursive: true });
+    fs.mkdirSync(nodeModulesPath, { recursive: true });
+    const input: BuildProviderInput = {
+      target: "react-native",
+      unitName: "@workspace-clients/chat-mobile",
+      sourcePath,
+      dependencyProjection: { nodeModulesPath, modules: {} },
+      effectiveVersion: "ev-test",
+      client: mobileClient,
+    };
+
+    const configPath = writeProjectedMetroConfig(input, root);
+
+    expect(() => require(configPath)).not.toThrow();
+    expect(fs.readFileSync(configPath, "utf8")).toContain(
+      JSON.stringify(require.resolve("path-browserify")),
+    );
+  });
+
   it("injects the Babel plugins a bare app source tree cannot resolve for itself", () => {
     // A built workspace app has no node_modules beside it, so plugins named in
     // an app-authored babel.config.js would not resolve. Without these two the

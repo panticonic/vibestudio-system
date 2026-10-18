@@ -188,15 +188,38 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
 `ask` is `vibestudio.quickfire.v1#ask` in the Base `workers/quickfire-service`).
 
 1. **The service.** A worker `workers/hello-echo` with a Durable Object class.
-   The method receives `{ params, principalId }` (the intent's declared
+   Scaffold it with the `durable-service` template, then turn it into this
+   service: replace `index.ts` with the class below, delete `contract.ts` and
+   the `exports` entry for it in `package.json` (the scaffold's `listRecords`
+   and `upsertRecord` are a record store you do not want). Preparation needs an
+   explicit empty authority manifest, a reason, and a receiver policy for each
+   of those two scaffold methods (the `@rpc` policy below will do):
+
+   ```ts
+   import { prepareProjects } from "@workspace-skills/workspace-dev";
+   const policy = { website: { kind: "closed", reason: "Client background intents are invoked by the server for a paired device." },
+                    principals: ["host"], effect: { kind: "open" }, tier: "open", sensitivity: "write" };
+   scope.worker = await prepareProjects([{
+     projectType: "worker", name: "hello-echo", title: "Hello Echo", template: "durable-service",
+     authority: { requests: [], provides: [] },
+     authorityReason: "Answers the client's echo intent from the text it is given; no other authority.",
+     methods: { listRecords: policy, upsertRecord: policy },
+   }]);
+   ```
+
+   The scaffold's class is named after the project (`HelloEcho`) and
+   `package.json` already declares it under `vibestudio.durable.classes`.
+   The echo method receives `{ params, principalId }` (the intent's declared
    parameters and the calling client principal) and returns a **string**. It
    must admit the `host` principal and nothing the client cannot reach:
 
    ```ts
    import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";
 
-   export class HelloEchoDO extends DurableObjectBase {
+   export class HelloEcho extends DurableObjectBase {
      static override schemaVersion = 1;
+
+     protected override createTables(): void {} // stateless: no tables
 
      @rpc({
        website: { kind: "closed", reason: "Client background intents are invoked by the server for a paired device." },
@@ -224,7 +247,7 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
      - name: hello
        source: workers/hello-echo
    singletonObjects:
-     - className: HelloEchoDO
+     - className: HelloEcho
        key: workspace-hello
        source: workers/hello-echo
    ```
@@ -241,7 +264,7 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
    "authority": {
      "serviceRequests": [{ "protocol": "vibestudio.hello.v1", "availability": "required" }],
      "requests": [{ "capability": "workspace-service:hello",
-                    "resource": { "kind": "exact", "key": "do:workers/hello-echo:HelloEchoDO:workspace-hello" },
+                    "resource": { "kind": "exact", "key": "do:workers/hello-echo:HelloEcho:workspace-hello" },
                     "tier": "gated", "evidence": "exact" }]
    }
    ```

@@ -62,6 +62,7 @@
     "@babel/plugin-transform-export-namespace-from": "^7.27.1",
     "@react-native/metro-babel-transformer": "^0.79.7",
     "@react-native/metro-config": "^0.79.7",
-    "@vibestudio/shared": "workspace:*"
+    "@vibestudio/shared": "workspace:*",
+    "path-browserify": "^1.0.1"
   }
 }

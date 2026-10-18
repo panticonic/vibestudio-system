@@ -54,6 +54,10 @@ export function writeProjectedMetroConfig(
     "..",
     "..",
   );
+  // The `path` polyfill is injected by this provider, so the provider owns the
+  // package: an application that never imports `path` must not have to declare
+  // it just to build.
+  const pathPolyfill = providerRequire.resolve("path-browserify");
   const babelTransformerPath = writeBabelTransformer({
     tempDir,
     nodeModulesPath,
@@ -68,6 +72,7 @@ export function writeProjectedMetroConfig(
     metroConfigPackage,
     providerNodeModulesPath,
     babelTransformerPath,
+    pathPolyfill,
   });
   fs.writeFileSync(configPath, metroConfigSource(data));
   return configPath;
@@ -176,10 +181,10 @@ const guardNativeImport = (moduleName, originModulePath) => {
   );
 };
 const polyfills = {
-  path: require.resolve("path-browserify", { paths: [data.nodeModulesPath] }),
+  path: data.pathPolyfill,
   crypto: path.join(data.sourcePath, "src/polyfills/crypto.js"),
   "node:crypto": path.join(data.sourcePath, "src/polyfills/crypto.js"),
-  "node:path": require.resolve("path-browserify", { paths: [data.nodeModulesPath] }),
+  "node:path": data.pathPolyfill,
 };
 const config = {
   transformer: {
