@@ -108,6 +108,10 @@ Changing who holds a device-level capability is a **trust change**:
   meet this gate again.
 - revoking trust closes the client's device sessions with a stated reason
   (`trust-revoked`).
+- declare a device-level capability `optional` when the client should keep
+  running, without it, after its trust is withdrawn. Declared `required`, it
+  makes the client `unavailable` the moment trust is revoked, and the host
+  cannot launch it again until trust is restored or the declaration changes.
 
 A client that needs no device-level capability never meets the gate.
 
