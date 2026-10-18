@@ -238,7 +238,20 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
    (`vibestudio.kind: "worker"`, `vibestudio.durable.classes`) with a
    `vibestudio.services` entry whose `protocols` contains the handler's
    protocol (`"vibestudio.hello.v1"`), `authority.principals` including
-   `host`, and `durableObject.className`.
+   `host`, and `durableObject.className`. Add `services` to the `vibestudio`
+   object the scaffold already wrote (a second `"vibestudio"` key silently
+   replaces the first):
+
+   ```json
+   "services": [{
+     "name": "hello",
+     "action": "echo client text",
+     "presentation": { "domain": "automation", "verb": "act" },
+     "protocols": ["vibestudio.hello.v1"],
+     "authority": { "principals": ["host"] },
+     "durableObject": { "className": "HelloEcho" }
+   }]
+   ```
 
 3. **The selection and singleton** in the System `meta/vibestudio.yml`:
 

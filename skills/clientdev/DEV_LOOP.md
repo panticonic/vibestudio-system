@@ -47,6 +47,10 @@ the worked examples: copy their manifest, intent and entry structure.
    builds the unit. The `clients:changed` event makes every host refresh its
    client index: the new client appears in `vibestudio clients list`, a
    browser's client list, launcher menus and shortcut entries. No restart.
+   The client index and launching belong to device hosts (`clients.list` and
+   `clients.launch` refuse an agent session with `EACCES`); an agent confirms
+   its work with `verify` and the publication, and the person's device does
+   the rest.
 4. **Review.** The unit install review (and a trust-change card, if any)
    appears in the running browser's approval surface, or as a question in the
    terminal when `vibestudio open` starts. Answer it. Until then the client is
@@ -76,8 +80,13 @@ Steps 1 to 4 and 8 are identical; steps 5 to 7 differ.
    (`--develop=false` ends the mode).
 6. A rebuild re-enters the client at the next safe point (`host.update`
    `restartAtSafePoint()`; in development mode the host re-enters it). Keep
-   state in `host.state` or on the server. Without `--develop` the client sees
-   `host.update.pending()` and decides when to restart.
+   state in `host.state` or on the server. Without `--develop` the host only
+   offers the build: `host.update.pending()` is a snapshot of the offer at the
+   moment it is called, and `host.update.onUpdate(listener)` is how a running
+   client learns of a build that arrives later. A client that shows an update
+   notice checks `pending()` once at start and subscribes with `onUpdate`; it
+   decides when to call `restartAtSafePoint()`, and keeps running (it does not
+   quit) until the host re-enters it.
 7. `vibestudio clients link <id> [--name <command>]` writes a shim into
    `~/.local/bin` (or a test-owned bin directory); `vibestudio clients unlink`
    removes it. A client that declares `integration.terminal.command` is also
@@ -309,7 +318,10 @@ For terminal clients:
 Write terminal client source as a clean Node ESM module that exports
 `run(host: TerminalClientHost)`, uses `host.rpc` (already authenticated as the
 client principal) and `host.stdin`/`host.stdout`, and resolves with its exit
-instead of calling `process.exit`.
+instead of calling `process.exit`. The terminal is in line mode when `run`
+starts: a client that reacts to single key presses ("press q") calls
+`host.stdin.setRawMode(true)` when `host.stdin.isTTY`; the host restores the
+terminal when `run` settles.
 
 ## Debugging Headless Client State
 
