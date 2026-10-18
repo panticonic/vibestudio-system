@@ -203,7 +203,11 @@ Behavior:
   `restartAtSafePoint()`; in development mode the host re-enters the client
   itself, so keep state on the server or in `state`). `host.signal` is the
   invocation's cancellation. `run` resolves with `quit`, `switch-workspace`, or
-  `connection-lost`.
+  `connection-lost`, and the CLI exits once it does. So `run` stays pending
+  for as long as the client is open: it settles when the user quits, on
+  `host.signal`, or when the connection state turns `lost`, which is also how
+  the host ends a run to re-enter it on an update. The scaffold shows the
+  minimal form.
 - A background intent never loads the client: the host runs
   `clients.invokeIntent`, with piped stdin as the intent's one `text`
   parameter, and prints the handler's text to stdout.
