@@ -28,7 +28,10 @@ scope.prepared = await prepareProjects([
 `runtime` is the host ABI: `web-host-1`, `terminal-host-1` or `rn-host-6`; it
 fixes the client's runtime and entry. The scaffold is `clients/foo` with
 package `@workspace-clients/foo`, client `id` equal to the name, no
-capabilities, an empty authority manifest, and one foreground `open` intent.
+capabilities, one foreground `open` intent, and an authority manifest that is
+empty except for an `rn-host-6` client: the React Native host gives every
+client a workspace context boundary, so its scaffold requests the critical
+`context.boundary` and its review shows that.
 Preparation does not declare the client: add it under `clients:` (see
 [Workspace Declaration](#workspace-declaration)). To add a background intent,
 create its handler worker with `prepareProjects` `projectType: "worker"` and
