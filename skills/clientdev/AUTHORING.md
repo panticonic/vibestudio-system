@@ -190,7 +190,11 @@ workspace service**. A handler is the one place a client needs a worker, so
 here is the complete recipe (worked example: `clients/chat-terminal`, whose
 `ask` is `vibestudio.quickfire.v1#ask` in the Base `workers/quickfire-service`).
 
-1. **The service.** A worker `workers/hello-echo` with a Durable Object class.
+1. **The service.** A worker `workers/<client-id>-echo` with a Durable Object class. Every name
+   below derives from the client id (`<client-id>`; `<Echo>` is the scaffold's
+   PascalCase class name for that worker), so the client owns its handler and
+   retiring the client removes exactly its own service; never reuse a service
+   another client declared.
    Scaffold it with the `durable-service` template, then turn it into this
    service: replace `index.ts` with the class below, delete `contract.ts` and
    the `exports` entry for it in `package.json` (the scaffold's `listRecords`
@@ -203,14 +207,14 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
    const policy = { website: { kind: "closed", reason: "Client background intents are invoked by the server for a paired device." },
                     principals: ["host"], effect: { kind: "open" }, tier: "open", sensitivity: "write" };
    scope.worker = await prepareProjects([{
-     projectType: "worker", name: "hello-echo", title: "Hello Echo", template: "durable-service",
+     projectType: "worker", name: "<client-id>-echo", title: "<client-id> Echo", template: "durable-service",
      authority: { requests: [], provides: [] },
      authorityReason: "Answers the client's echo intent from the text it is given; no other authority.",
      methods: { listRecords: policy, upsertRecord: policy },
    }]);
    ```
 
-   The scaffold's class is named after the project (`HelloEcho`) and
+   The scaffold's class is named after the project (`<Echo>`) and
    `package.json` already declares it under `vibestudio.durable.classes`.
    The echo method receives `{ params, principalId }` (the intent's declared
    parameters and the calling client principal) and returns a **string**. It
@@ -219,7 +223,7 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
    ```ts
    import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";
 
-   export class HelloEcho extends DurableObjectBase {
+   export class <Echo> extends DurableObjectBase {
      static override schemaVersion = 1;
 
      protected override createTables(): void {} // stateless: no tables
@@ -240,19 +244,19 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
 2. **The service declaration** in the worker's `package.json`
    (`vibestudio.kind: "worker"`, `vibestudio.durable.classes`) with a
    `vibestudio.services` entry whose `protocols` contains the handler's
-   protocol (`"vibestudio.hello.v1"`), `authority.principals` including
+   protocol (`"vibestudio.<client-id>.v1"`), `authority.principals` including
    `host`, and `durableObject.className`. Add `services` to the `vibestudio`
    object the scaffold already wrote (a second `"vibestudio"` key silently
    replaces the first):
 
    ```json
    "services": [{
-     "name": "hello",
+     "name": "<client-id>",
      "action": "echo client text",
      "presentation": { "domain": "automation", "verb": "act" },
-     "protocols": ["vibestudio.hello.v1"],
+     "protocols": ["vibestudio.<client-id>.v1"],
      "authority": { "principals": ["host"] },
-     "durableObject": { "className": "HelloEcho" }
+     "durableObject": { "className": "<Echo>" }
    }]
    ```
 
@@ -260,12 +264,12 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
 
    ```yaml
    services:
-     - name: hello
-       source: workers/hello-echo
+     - name: <client-id>
+       source: workers/<client-id>-echo
    singletonObjects:
-     - className: HelloEcho
-       key: workspace-hello
-       source: workers/hello-echo
+     - className: <Echo>
+       key: workspace-<client-id>
+       source: workers/<client-id>-echo
    ```
 
 4. **The client's request.** The client declares the intent and asks for the
@@ -273,14 +277,14 @@ here is the complete recipe (worked example: `clients/chat-terminal`, whose
 
    ```json
    "intents": [{ "name": "echo", "kind": "background", "title": "Echo",
-                 "params": { "text": "text" }, "handler": "vibestudio.hello.v1#echo" }],
+                 "params": { "text": "text" }, "handler": "vibestudio.<client-id>.v1#echo" }],
    ```
 
    ```json
    "authority": {
-     "serviceRequests": [{ "protocol": "vibestudio.hello.v1", "availability": "required" }],
-     "requests": [{ "capability": "workspace-service:hello",
-                    "resource": { "kind": "exact", "key": "do:workers/hello-echo:HelloEcho:workspace-hello" },
+     "serviceRequests": [{ "protocol": "vibestudio.<client-id>.v1", "availability": "required" }],
+     "requests": [{ "capability": "workspace-service:<client-id>",
+                    "resource": { "kind": "exact", "key": "do:workers/<client-id>-echo:<Echo>:workspace-<client-id>" },
                     "tier": "gated", "evidence": "exact" }]
    }
    ```

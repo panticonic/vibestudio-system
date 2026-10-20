@@ -72,8 +72,9 @@ Read only references relevant to the runtime and change.
   `trust.clients` in `meta/vibestudio.yml` (see
   [CAPABILITIES.md](CAPABILITIES.md)).
 - A client never holds device secrets. The host owns the device credential,
-  the connection and the OS integration; the client receives a one-use,
-  build-bound principal grant.
+  the connection and the OS integration; the client receives a
+  device-level, build-bound principal credential that is valid in every
+  workspace and revoked when its trust, device or build changes.
 - Read [Vibestudio VCS](../vibestudio-vcs/SKILL.md) before editing managed
   source. Check the working head, commit the complete local chain, and publish
   explicitly.

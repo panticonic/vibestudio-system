@@ -41,7 +41,10 @@ the worked examples: copy their manifest, intent and entry structure.
    `meta/vibestudio.yml` (and the handler's `services:` / `singletonObjects:`
    entries). Add it to `trust.clients` only if it needs a device-level
    capability; that edit is a trust change with one `critical` confirmation,
-   see [CAPABILITIES.md](CAPABILITIES.md#trustclients).
+   see [CAPABILITIES.md](CAPABILITIES.md#trustclients). A client that
+   still lists a device-level capability under `capabilities.required` becomes
+   `unavailable` the moment it leaves `trust.clients`, so move that capability
+   to `capabilities.optional` in the same publish that removes the trust entry.
 3. **Publish** with `vcs.publish({ message })`. Manifest hot reload re-reads
    the manifest, the server reconciles the declarations, re-seeds trust, and
    builds the unit. The `clients:changed` event makes every host refresh its
@@ -64,7 +67,8 @@ the worked examples: copy their manifest, intent and entry structure.
    restarts only itself. Other clients, the host process and the server keep
    running. Without development mode the host offers the update instead (see
    "Update Errors And Rollback").
-7. **Install a launcher** so the OS can start the client.
+7. **Install a launcher** so the OS can start the client. Only an available
+   (runnable) client can be installed; do this before withdrawing trust.
 8. **Retire**: remove the client (and its handler service, and any
    `trust.clients` entry) from the manifest and publish. The host removes the
    launchers it wrote and closes the running instances with a stated reason
@@ -123,6 +127,11 @@ naming it; and, on desktop, that a trust change produces a `confirm.critical`
 card, applies live, and revokes with `trust-revoked`. `client-launch-*`,
 `client-intent-background` and `client-update-swap` cover launch, background
 intents and the update swap on the template chat clients and a hello client.
+`client-panel-creation-desktop`, `client-approval-desktop` and
+`client-revoke-desktop` cover a desktop client's panel creation, a gated call
+approved on the approval surface under the client's own principal, and the
+revocation of that principal (the window is closed with the stated reason and
+its old credential is refused).
 The Android variant is a `mobile-smoke` extension.
 
 ## Standard Loop

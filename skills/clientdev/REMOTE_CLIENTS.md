@@ -73,9 +73,9 @@ terminal client.
 `vibestudio terminal` routes to the account's System workspace, runs the
 launch gate for the `terminal` runtime (startup approvals are asked in line
 mode before the TUI starts), then calls `auth.grantClientPrincipal` over its
-own device connection. The grant is one-use and bound to that connection's
-transport endpoint and the exact build, so it works locally and over Iroh. It
-returns the connection grant, the device-scoped principal id
+own device connection. The credential is bound to the device key (over Iroh) and the exact
+build, and is valid in every workspace until trust, the device or the build
+changes. The call returns the credential, the device-scoped principal id
 (`client:browser:terminal:<device-id>`), and the build the principal may run.
 The host fetches that build's primary `index.mjs` over the same connection into
 its verified cache, checks its integrity, imports it, and calls its exported

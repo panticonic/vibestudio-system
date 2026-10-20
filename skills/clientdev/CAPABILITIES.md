@@ -93,7 +93,10 @@ trust:
 ```
 
 A client not listed never receives a device-level capability, even if its own
-manifest requires it; it is reported `unavailable`.
+manifest requires it; it is reported `unavailable`. So when you drop a client
+from `trust.clients`, move its device-level capability from
+`capabilities.required` to `capabilities.optional` in the same publish, or the
+client can no longer be installed or launched.
 
 Changing who holds a device-level capability is a **trust change**:
 
