@@ -26,6 +26,7 @@ describe("client menu", () => {
       const ids = new Set([
         ...model.menus.flatMap((menu) => actionIds(menu.items)),
         ...actionIds(model.popup),
+        ...actionIds(model.app ?? []),
       ]);
       expect(ids.size).toBeGreaterThan(20);
       for (const id of ids) {
@@ -35,6 +36,15 @@ describe("client menu", () => {
       }
     });
   }
+
+  it("offers Settings from the application menu on macOS and from File elsewhere", () => {
+    const mac = buildClientMenu("mac");
+    expect(actionIds(mac.app ?? [])).toEqual(["settings"]);
+    expect(mac.menus.flatMap((menu) => actionIds(menu.items))).not.toContain("settings");
+    const other = buildClientMenu("other");
+    expect(other.app).toBeUndefined();
+    expect(other.menus.flatMap((menu) => actionIds(menu.items))).toContain("settings");
+  });
 
   it("reserves chords only for entries that have one, and keeps closing a panel unreserved", () => {
     const model = buildClientMenu("other");

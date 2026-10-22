@@ -29,6 +29,8 @@ export interface MenuItem {
 export interface MenuModel {
   menus: Array<{ label: string; items: MenuItem[] }>;
   popup: MenuItem[];
+  /** macOS only: entries of the application menu, after About. */
+  app?: MenuItem[];
 }
 
 /**
@@ -195,6 +197,8 @@ export function buildClientMenu(platform: DesktopKeyPlatform): MenuModel {
       { label: "Developer", submenu: [panelDevTools, clientDevTools, sep, clearBuildCache] },
       { label: "Help", submenu: [command, shortcuts, documentation, sep, report, about] },
     ],
+    // On macOS Settings lives in the application menu, not under File.
+    ...(isMac ? { app: [settings] } : {}),
   };
 }
 
