@@ -21,6 +21,7 @@ export interface MenuItem {
   label?: string;
   accelerator?: string;
   chromeOwned?: boolean;
+  enabled?: boolean;
   role?: string;
   separator?: true;
   submenu?: MenuItem[];
@@ -56,59 +57,124 @@ const CHROME_OWNED: readonly DesktopBindingId[] = [
 ];
 
 export function keyPlatformOfBrowser(userAgent: string): DesktopKeyPlatform {
-  return desktopKeyPlatform(/Macintosh|Mac OS X/u.test(userAgent) ? "darwin" : "linux");
+  return desktopKeyPlatform(
+    /Macintosh|Mac OS X/u.test(userAgent) ? "darwin" : "linux",
+  );
 }
 
-export function buildClientMenu(platform: DesktopKeyPlatform): MenuModel {
-  const item = (id: string, label: string, binding?: DesktopBindingId): MenuItem => ({
+export function buildClientMenu(
+  platform: DesktopKeyPlatform,
+  options: { panelCommandsEnabled?: boolean } = {},
+): MenuModel {
+  const item = (
+    id: string,
+    label: string,
+    binding?: DesktopBindingId,
+  ): MenuItem => ({
     id,
     label,
     ...(binding
       ? {
           accelerator: desktopAccelerator(binding, platform),
-          ...(CHROME_OWNED.includes(binding) ? { chromeOwned: true as const } : {}),
+          ...(CHROME_OWNED.includes(binding)
+            ? { chromeOwned: true as const }
+            : {}),
         }
       : {}),
   });
+  const panelItem = (
+    id: string,
+    label: string,
+    binding?: DesktopBindingId,
+  ): MenuItem => ({
+    ...item(id, label, binding),
+    enabled: options.panelCommandsEnabled ?? true,
+  });
   const sep: MenuItem = { separator: true };
 
-  const newPanel = item("new-panel", "New Panel", "newPanel");
-  const command = item("command", "Command…", "commandPalette");
-  const focusApproval = item("focus-approval", "Focus Pending Approval", "focusApproval");
-  const switchWorkspace = item("switch-workspace", "Switch Workspace…", "switchWorkspace");
+  const newPanel = panelItem("new-panel", "New Panel", "newPanel");
+  const command = panelItem("command", "Command…", "commandPalette");
+  const focusApproval = item(
+    "focus-approval",
+    "Focus Pending Approval",
+    "focusApproval",
+  );
+  const switchWorkspace = item(
+    "switch-workspace",
+    "Switch Workspace…",
+    "switchWorkspace",
+  );
   const settings = item("settings", "Settings…");
-  const bookmarks = item("about:bookmarks", "Bookmarks…", "bookmarks");
-  const history = item("about:history", "History…", "history");
-  const downloads = item("about:downloads", "Downloads…");
-  const credentials = item("about:credentials", "Credentials…");
-  const permissions = item("about:permissions", "Permissions…");
-  const back = item("back", "Back", "back");
-  const forward = item("forward", "Forward", "forward");
-  const reload = item("reload-panel", "Reload Panel", "reload");
-  const forceReload = item("force-reload-view", "Force Reload View", "forceReload");
-  const stop = item("stop", "Stop Loading");
-  const focusAddress = item("focus-address", "Focus Address Bar", "focusAddress");
-  const addressBar = item("toggle-address-bar", "Toggle Address Bar");
-  const find = item("find", "Find in Page…", "findInPage");
-  const findNext = item("find-next", "Find Next", "findNext");
-  const findPrevious = item("find-previous", "Find Previous", "findPrevious");
-  const nextPanel = item("next-panel", "Next Panel", "nextPanel");
-  const previousPanel = item("previous-panel", "Previous Panel", "previousPanel");
-  const closePanel = item("close-panel", "Close Panel", "closePanel");
-  const zoomIn = item("zoom-in", "Zoom In", "zoomIn");
-  const zoomOut = item("zoom-out", "Zoom Out", "zoomOut");
-  const resetZoom = item("reset-zoom", "Reset Zoom", "resetZoom");
-  const fullScreen = item("toggle-fullscreen", "Toggle Full Screen", "toggleFullScreen");
-  const panelFullScreen = item("toggle-panel-fullscreen", "Toggle Panel Full Screen");
-  const refreshDisplay = item("refresh-display", "Refresh Panel Display");
-  const copyDiagnostics = item("copy-display-diagnostics", "Copy Panel Display Diagnostics");
-  const panelDevTools = item("panel-devtools", "Toggle Panel DevTools", "panelDevTools");
-  const clientDevTools = item("client-devtools", "Toggle Client DevTools", "appDevTools");
+  const bookmarks = panelItem("about:bookmarks", "Bookmarks…", "bookmarks");
+  const history = panelItem("about:history", "History…", "history");
+  const downloads = panelItem("about:downloads", "Downloads…");
+  const credentials = panelItem("about:credentials", "App credentials…");
+  const permissions = panelItem("about:permissions", "Permissions…");
+  const back = panelItem("back", "Back", "back");
+  const forward = panelItem("forward", "Forward", "forward");
+  const reload = panelItem("reload-panel", "Reload Panel", "reload");
+  const forceReload = panelItem(
+    "force-reload-view",
+    "Force Reload View",
+    "forceReload",
+  );
+  const stop = panelItem("stop", "Stop Loading");
+  const focusAddress = panelItem(
+    "focus-address",
+    "Focus Address Bar",
+    "focusAddress",
+  );
+  const addressBar = panelItem("toggle-address-bar", "Toggle Address Bar");
+  const find = panelItem("find", "Find in Page…", "findInPage");
+  const findNext = panelItem("find-next", "Find Next", "findNext");
+  const findPrevious = panelItem(
+    "find-previous",
+    "Find Previous",
+    "findPrevious",
+  );
+  const nextPanel = panelItem("next-panel", "Next Panel", "nextPanel");
+  const previousPanel = panelItem(
+    "previous-panel",
+    "Previous Panel",
+    "previousPanel",
+  );
+  const closePanel = panelItem("close-panel", "Close Panel", "closePanel");
+  const zoomIn = panelItem("zoom-in", "Zoom In", "zoomIn");
+  const zoomOut = panelItem("zoom-out", "Zoom Out", "zoomOut");
+  const resetZoom = panelItem("reset-zoom", "Reset Zoom", "resetZoom");
+  const fullScreen = item(
+    "toggle-fullscreen",
+    "Toggle Full Screen",
+    "toggleFullScreen",
+  );
+  const panelFullScreen = panelItem(
+    "toggle-panel-fullscreen",
+    "Toggle Panel Full Screen",
+  );
+  const refreshDisplay = panelItem("refresh-display", "Refresh Panel Display");
+  const copyDiagnostics = panelItem(
+    "copy-display-diagnostics",
+    "Copy Panel Display Diagnostics",
+  );
+  const panelDevTools = panelItem(
+    "panel-devtools",
+    "Toggle Panel DevTools",
+    "panelDevTools",
+  );
+  const clientDevTools = item(
+    "client-devtools",
+    "Toggle Client DevTools",
+    "appDevTools",
+  );
   const clearBuildCache = item("clear-build-cache", "Clear Build Cache");
-  const shortcuts = item("about:keyboard-shortcuts", "Keyboard Shortcuts", "keyboardShortcuts");
-  const documentation = item("about:help", "Documentation");
+  const shortcuts = panelItem(
+    "about:keyboard-shortcuts",
+    "Keyboard Shortcuts",
+    "keyboardShortcuts",
+  );
+  const documentation = panelItem("about:help", "Documentation");
   const report = item("report-problem", "Report a problem");
-  const about = item("about:about", "About Vibestudio");
+  const about = panelItem("about:about", "About Vibestudio");
 
   const isMac = platform === "mac";
   return {
@@ -165,7 +231,15 @@ export function buildClientMenu(platform: DesktopKeyPlatform): MenuModel {
       },
       {
         label: "Help",
-        items: [shortcuts, sep, documentation, credentials, permissions, report, about],
+        items: [
+          shortcuts,
+          sep,
+          documentation,
+          credentials,
+          permissions,
+          report,
+          about,
+        ],
       },
     ],
     popup: [
@@ -192,10 +266,42 @@ export function buildClientMenu(platform: DesktopKeyPlatform): MenuModel {
           closePanel,
         ],
       },
-      { label: "View", submenu: [zoomIn, zoomOut, resetZoom, sep, fullScreen, panelFullScreen, sep, refreshDisplay, copyDiagnostics] },
-      { label: "Workspace", submenu: [switchWorkspace, settings, sep, bookmarks, history, downloads, sep, credentials, permissions] },
-      { label: "Developer", submenu: [panelDevTools, clientDevTools, sep, clearBuildCache] },
-      { label: "Help", submenu: [command, shortcuts, documentation, sep, report, about] },
+      {
+        label: "View",
+        submenu: [
+          zoomIn,
+          zoomOut,
+          resetZoom,
+          sep,
+          fullScreen,
+          panelFullScreen,
+          sep,
+          refreshDisplay,
+          copyDiagnostics,
+        ],
+      },
+      {
+        label: "Workspace",
+        submenu: [
+          switchWorkspace,
+          settings,
+          sep,
+          bookmarks,
+          history,
+          downloads,
+          sep,
+          credentials,
+          permissions,
+        ],
+      },
+      {
+        label: "Developer",
+        submenu: [panelDevTools, clientDevTools, sep, clearBuildCache],
+      },
+      {
+        label: "Help",
+        submenu: [command, shortcuts, documentation, sep, report, about],
+      },
     ],
     // On macOS Settings lives in the application menu, not under File.
     ...(isMac ? { app: [settings] } : {}),
@@ -203,6 +309,7 @@ export function buildClientMenu(platform: DesktopKeyPlatform): MenuModel {
 }
 
 export interface MenuActionContext {
+  menu?: MenuModel;
   /** Run something only the host's compositor can do to the panel surface. */
   panelHost(action: string): Promise<void>;
   clearBuildCache(): Promise<void>;
@@ -236,7 +343,26 @@ const HOST_ACTIONS: Record<string, string> = {
 };
 
 /** Perform a chosen menu entry: this client's own commands, or a host-only compositor action. */
-export function runMenuAction(actionId: string, context: MenuActionContext): void {
+export function runMenuAction(
+  actionId: string,
+  context: MenuActionContext,
+): void {
+  const entries = context.menu
+    ? [
+        ...context.menu.menus.flatMap((menu) => menu.items),
+        ...context.menu.popup,
+        ...(context.menu.app ?? []),
+      ]
+    : [];
+  const find = (items: readonly MenuItem[]): MenuItem | undefined => {
+    for (const item of items) {
+      if (item.id === actionId) return item;
+      const child = item.submenu && find(item.submenu);
+      if (child) return child;
+    }
+    return undefined;
+  };
+  if (find(entries)?.enabled === false) return;
   const fail = (error: unknown) => context.failed(actionId, error);
   const hostAction = HOST_ACTIONS[actionId];
   if (hostAction) {
@@ -265,10 +391,14 @@ export function runMenuAction(actionId: string, context: MenuActionContext): voi
       localShellEvents.emit("open-settings", { section: "connection" });
       return;
     case "reload-panel":
-      localShellEvents.emit("panel-chrome-command", { command: "reload-panel" });
+      localShellEvents.emit("panel-chrome-command", {
+        command: "reload-panel",
+      });
       return;
     case "force-reload-view":
-      localShellEvents.emit("panel-chrome-command", { command: "force-reload-view" });
+      localShellEvents.emit("panel-chrome-command", {
+        command: "force-reload-view",
+      });
       return;
     case "stop":
       localShellEvents.emit("panel-chrome-command", { command: "stop" });
@@ -280,7 +410,9 @@ export function runMenuAction(actionId: string, context: MenuActionContext): voi
       localShellEvents.emit("panel-chrome-command", { command: "forward" });
       return;
     case "focus-address":
-      localShellEvents.emit("panel-chrome-command", { command: "focus-address" });
+      localShellEvents.emit("panel-chrome-command", {
+        command: "focus-address",
+      });
       return;
     case "find-next":
       localShellEvents.emit("find-in-page-step", { forward: true });
@@ -301,7 +433,9 @@ export function runMenuAction(actionId: string, context: MenuActionContext): voi
       context.clearBuildCache().catch(fail);
       return;
     case "report-problem":
-      localShellEvents.emit("open-command-agent", { prompt: problemReportingConversation() });
+      localShellEvents.emit("open-command-agent", {
+        prompt: problemReportingConversation(),
+      });
       return;
     default:
       fail(new Error(`Unknown menu action: ${actionId}`));

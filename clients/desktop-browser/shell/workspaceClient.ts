@@ -44,8 +44,14 @@ import {
   quickfireRpcMethods,
 } from "@workspace/quickfire-core/service";
 import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
-import { createApprovalsClient, type ApprovalsClient } from "@workspace/approvals-core";
-import { observePendingApprovals, type ApprovalEvents } from "./approvalObservation";
+import {
+  createApprovalsClient,
+  type ApprovalsClient,
+} from "@workspace/approvals-core";
+import {
+  observePendingApprovals,
+  type ApprovalEvents,
+} from "./approvalObservation";
 import { shellPresenceMethods } from "@vibestudio/service-schemas/shellPresence";
 import { autofillMethods } from "@vibestudio/service-schemas/autofill";
 import { blobstoreMethods } from "@vibestudio/service-schemas/blobstore";
@@ -789,6 +795,9 @@ export function createShellWorkspaceClient(
   const connectNativePanelAdapter =
     ownership.nativePresentation.connectNativePanelAdapter;
   const view = {
+    setBrowserDataSurface: (
+      options: Parameters<typeof viewClient.setBrowserDataSurface>[0],
+    ) => viewClient.setBrowserDataSurface(options),
     forwardMouseClick: (viewId: string, point: { x: number; y: number }) =>
       viewClient.forwardMouseClick(viewId, point),
     setThemeCss: (css: string) => viewClient.setThemeCss(css),
@@ -1261,7 +1270,11 @@ export function createShellWorkspaceClient(
       opts: Omit<NotificationPayload, "id" | "sourcePanelId" | "iconDataUrl">,
     ) => notificationClient.show(opts),
     reportAction: (id: string, actionId: string, text?: string) =>
-      notificationClient.reportAction(id, actionId, ...(text === undefined ? [] : [text])),
+      notificationClient.reportAction(
+        id,
+        actionId,
+        ...(text === undefined ? [] : [text]),
+      ),
     dismiss: (id: string) => notificationClient.dismiss(id),
   };
   // =============================================================================

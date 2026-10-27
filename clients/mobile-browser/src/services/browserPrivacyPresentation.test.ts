@@ -5,10 +5,10 @@ describe("BrowserPrivacyPresentationState", () => {
     const state = new BrowserPrivacyPresentationState();
     const listener = jest.fn();
 
-    const presented = state.accept("inspect");
+    const presented = state.accept("siteData");
     state.subscribe(listener);
 
-    expect(listener).toHaveBeenCalledWith("inspect");
+    expect(listener).toHaveBeenCalledWith("siteData");
     await expect(presented).resolves.toBeUndefined();
   });
 
@@ -17,12 +17,12 @@ describe("BrowserPrivacyPresentationState", () => {
     const listener = jest.fn();
     const unsubscribe = state.subscribe(listener);
 
-    const presented = state.accept("formFill");
+    const presented = state.accept("autofill");
     unsubscribe();
-    const pending = state.accept("debug");
+    const pending = state.accept("siteData");
 
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith("formFill");
+    expect(listener).toHaveBeenCalledWith("autofill");
     await expect(presented).resolves.toBeUndefined();
     state.subscribe(jest.fn());
     await expect(pending).resolves.toBeUndefined();
@@ -33,17 +33,23 @@ describe("BrowserPrivacyPresentationState", () => {
     const listener = jest.fn();
     state.subscribe(listener);
 
-    await expect(state.accept("credentials")).resolves.toBeUndefined();
-    await expect(state.accept("debug")).resolves.toBeUndefined();
+    await expect(state.accept("passwords")).resolves.toBeUndefined();
+    await expect(state.accept("siteData")).resolves.toBeUndefined();
 
-    expect(listener).toHaveBeenNthCalledWith(1, "credentials");
-    expect(listener).toHaveBeenNthCalledWith(2, "debug");
+    expect(listener).toHaveBeenNthCalledWith(1, "passwords");
+    expect(listener).toHaveBeenNthCalledWith(2, "siteData");
   });
 
-  it("rejects the desktop-only export section instead of silently opening another view", async () => {
+  it("rejects obsolete navigation sections", async () => {
     const state = new BrowserPrivacyPresentationState();
-    await expect(state.accept("export")).rejects.toThrow(
-      "Protected browser-data export is available in the Vibestudio desktop app."
-    );
+    for (const section of [
+      "credentials",
+      "formFill",
+      "inspect",
+      "debug",
+      "export",
+    ]) {
+      expect(() => state.accept(section)).toThrow();
+    }
   });
 });

@@ -3,23 +3,20 @@ import {
   type BrowserPrivacySection,
 } from "@vibestudio/service-schemas/browserPrivacy";
 
-export type MobileBrowserPrivacySection = Exclude<BrowserPrivacySection, "export">;
+export type MobileBrowserPrivacySection = BrowserPrivacySection;
 
 /** Durable across transport reconnects; the trusted shell owns presentation. */
 export class BrowserPrivacyPresentationState {
-  private readonly listeners = new Set<(section: MobileBrowserPrivacySection) => void>();
+  private readonly listeners = new Set<
+    (section: MobileBrowserPrivacySection) => void
+  >();
   private pending: {
     section: MobileBrowserPrivacySection;
     resolve: () => void;
   } | null = null;
 
   accept(value: unknown): Promise<void> {
-    const section = BrowserPrivacySectionSchema.parse(value ?? "credentials");
-    if (section === "export") {
-      return Promise.reject(
-        new Error("Protected browser-data export is available in the Vibestudio desktop app."),
-      );
-    }
+    const section = BrowserPrivacySectionSchema.parse(value ?? "passwords");
     if (this.listeners.size > 0) {
       for (const listener of this.listeners) listener(section);
       return Promise.resolve();
@@ -32,7 +29,9 @@ export class BrowserPrivacyPresentationState {
     });
   }
 
-  subscribe(listener: (section: MobileBrowserPrivacySection) => void): () => void {
+  subscribe(
+    listener: (section: MobileBrowserPrivacySection) => void,
+  ): () => void {
     this.listeners.add(listener);
     if (this.pending !== null) {
       const pending = this.pending;

@@ -36,8 +36,8 @@ vi.mock("../shell/useShellEvent", async () => {
       (
         event: string,
         callback: (payload: unknown) => void,
-        readSnapshot?: (signal: AbortSignal) => void | Promise<void>
-      ) => useShellEventFixture(listeners, event, callback, readSnapshot)
+        readSnapshot?: (signal: AbortSignal) => void | Promise<void>,
+      ) => useShellEventFixture(listeners, event, callback, readSnapshot),
     ),
   };
 });
@@ -60,6 +60,10 @@ vi.mock("./WorkspaceConnectionsSection", () => ({
   WorkspaceConnectionsSection: () => <div>Workspace connection settings</div>,
 }));
 
+vi.mock("./BrowserDataSection", () => ({
+  BrowserDataSection: () => <div>Protected browser settings</div>,
+}));
+
 const { ConnectionSettingsDialog } = await import("./ConnectionSettingsDialog");
 
 describe("ConnectionSettingsDialog", () => {
@@ -67,18 +71,23 @@ describe("ConnectionSettingsDialog", () => {
     const onSectionChange = vi.fn();
     render(
       <Theme>
-        <ConnectionSettingsDialog section={null} onSectionChange={onSectionChange} />
+        <ConnectionSettingsDialog
+          section={null}
+          onSectionChange={onSectionChange}
+        />
       </Theme>,
     );
     expect(screen.queryByRole("dialog")).toBeNull();
     const apply = vi.mocked(incomingPairLink.onLink).mock.lastCall?.[0];
     if (!apply) throw new Error("Pairing-link listener is not mounted");
-    act(() => apply({
-      endpointId: "ab".repeat(32),
-      relays: ["https://relay.example.test/"],
-      code: "A".repeat(22),
-      v: 5,
-    }));
+    act(() =>
+      apply({
+        endpointId: "ab".repeat(32),
+        relays: ["https://relay.example.test/"],
+        code: "A".repeat(22),
+        v: 5,
+      }),
+    );
     expect(onSectionChange).toHaveBeenCalledWith("connection");
   });
 
@@ -117,7 +126,8 @@ describe("ConnectionSettingsDialog", () => {
         | "profile"
         | "appearance"
         | "apps"
-        | "templates",
+        | "templates"
+        | "browser-data",
     ) => (
       <Theme>
         <ConnectionSettingsDialog
@@ -149,7 +159,9 @@ describe("ConnectionSettingsDialog", () => {
     ).toBeNull();
 
     rerender(renderDialog("workspaces"));
-    expect(await screen.findByText("Workspace connection settings")).toBeTruthy();
+    expect(
+      await screen.findByText("Workspace connection settings"),
+    ).toBeTruthy();
 
     rerender(renderDialog("profile"));
     expect(await screen.findByText("Account profile settings")).toBeTruthy();
@@ -157,7 +169,10 @@ describe("ConnectionSettingsDialog", () => {
     expect(await screen.findByText("Appearance settings")).toBeTruthy();
     rerender(renderDialog("apps"));
     expect(await screen.findByText("Workspace app settings")).toBeTruthy();
+    rerender(renderDialog("browser-data"));
+    expect(await screen.findByText("Protected browser settings")).toBeTruthy();
     rerender(renderDialog("templates"));
+    expect(screen.queryByText("Protected browser settings")).toBeNull();
     expect(await screen.findByText("Template settings")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
     expect(onSectionChange).toHaveBeenCalledWith(null);

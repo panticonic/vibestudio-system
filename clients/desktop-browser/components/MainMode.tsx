@@ -21,7 +21,10 @@ import {
 import { WorkspaceDesktop } from "./WorkspaceDesktop";
 import { deferredFeature } from "./deferredFeature";
 import { WorkspaceConnectionNotice } from "./WorkspaceConnectionNotice";
-import { DesktopClientUpdatePrompt, DesktopClientUpdates } from "./DesktopClientUpdates";
+import {
+  DesktopClientUpdatePrompt,
+  DesktopClientUpdates,
+} from "./DesktopClientUpdates";
 
 const WorkspaceChooser = deferredFeature(async () => ({
   default: (await import("./WorkspaceChooser")).WorkspaceChooser,
@@ -50,9 +53,25 @@ export default function MainMode() {
     useCallback((target) => setSettingsTarget(target), [setSettingsTarget]),
   );
 
+  useShellEvent(
+    "close-settings",
+    useCallback(
+      ({ workspaceId }) => {
+        setSettingsTarget((current) =>
+          current?.section === "browser-data" &&
+          current.workspaceId === workspaceId
+            ? null
+            : current,
+        );
+      },
+      [setSettingsTarget],
+    ),
+  );
+
   // This client's native menus; the host builds them from this data and relays choices back.
   const { app, notification } = client;
   useClientMenu({
+    panelCommandsEnabled: settingsTarget?.section !== "browser-data",
     clearBuildCache: useCallback(() => app.clearBuildCache(), [app]),
     failed: useCallback(
       (action: string, error: unknown) => {
@@ -101,7 +120,9 @@ export default function MainMode() {
           connectionNotice={
             <>
               <WorkspaceConnectionNotice
-                onOpenSettings={() => setSettingsTarget({ section: "connection" })}
+                onOpenSettings={() =>
+                  setSettingsTarget({ section: "connection" })
+                }
               />
               <DesktopClientUpdatePrompt />
             </>
@@ -140,8 +161,26 @@ export default function MainMode() {
         <ConnectionSettingsDialog
           section={settingsTarget?.section ?? null}
           workspaceId={settingsTarget?.workspaceId}
+          browserDataSection={settingsTarget?.browserDataSection}
+          onBrowserDataSectionChange={(browserDataSection) =>
+            setSettingsTarget((current) =>
+              current ? { ...current, browserDataSection } : null,
+            )
+          }
+          onBrowserDataWorkspaceChange={(workspaceId) =>
+            setSettingsTarget((current) =>
+              current ? { ...current, workspaceId } : null,
+            )
+          }
           onSectionChange={(section) =>
-            setSettingsTarget(section ? { ...settingsTarget, section } : null)
+            setSettingsTarget(
+              section
+                ? section === "browser-data" &&
+                  settingsTarget?.section !== "browser-data"
+                  ? { section }
+                  : { ...settingsTarget, section }
+                : null,
+            )
           }
         />
       </DesktopClientUpdates>

@@ -24,10 +24,9 @@ import { Button } from "./ui/primitives";
 const PAGE_SIZE = 25;
 const SECTIONS: readonly { id: MobileBrowserPrivacySection; label: string }[] =
   [
-    { id: "credentials", label: "Passwords" },
-    { id: "formFill", label: "Form fill" },
-    { id: "inspect", label: "Site data" },
-    { id: "debug", label: "Session" },
+    { id: "passwords", label: "Passwords" },
+    { id: "autofill", label: "Autofill" },
+    { id: "siteData", label: "Site data" },
   ];
 
 type Client = ShellClient["browserPrivacy"];
@@ -64,7 +63,6 @@ export function BrowserPrivacyManager({
   const [formFillTotal, setFormFillTotal] = useState(0);
   const [cookieOrigins, setCookieOrigins] = useState<string[]>([]);
   const [cookieOriginTotal, setCookieOriginTotal] = useState(0);
-  const [cookieRevision, setCookieRevision] = useState(0);
 
   const [fieldName, setFieldName] = useState("");
   const [fieldType, setFieldType] = useState("");
@@ -123,13 +121,12 @@ export function BrowserPrivacyManager({
     const page = await client.listCookieOriginsPage(0, PAGE_SIZE);
     setCookieOrigins(page.items);
     setCookieOriginTotal(page.total);
-    setCookieRevision(page.revision);
   }, [client]);
 
   const refreshSection = useCallback(async () => {
-    if (section === "credentials") await loadPasswords();
-    else if (section === "formFill") await loadFormFill();
-    else if (section === "debug") await loadCookieOrigins();
+    if (section === "passwords") await loadPasswords();
+    else if (section === "autofill") await loadFormFill();
+    else if (section === "siteData") await loadCookieOrigins();
   }, [loadCookieOrigins, loadFormFill, loadPasswords, section]);
 
   useEffect(() => {
@@ -208,7 +205,6 @@ export function BrowserPrivacyManager({
       );
       setCookieOrigins((current) => [...current, ...page.items]);
       setCookieOriginTotal(page.total);
-      setCookieRevision(page.revision);
     });
 
   const resetForm = useCallback(() => {
@@ -313,7 +309,7 @@ export function BrowserPrivacyManager({
               accessibilityRole="header"
               style={[styles.title, { color: colors.text }]}
             >
-              Browser privacy
+              Browser data
             </Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               {title}
@@ -370,7 +366,7 @@ export function BrowserPrivacyManager({
           ]}
           keyboardShouldPersistTaps="handled"
         >
-          {section === "credentials" ? (
+          {section === "passwords" ? (
             <CredentialsSection
               colors={colors}
               passwords={passwords}
@@ -400,7 +396,7 @@ export function BrowserPrivacyManager({
               }
             />
           ) : null}
-          {section === "formFill" ? (
+          {section === "autofill" ? (
             <FormFillSection
               colors={colors}
               values={formFill}
@@ -445,8 +441,8 @@ export function BrowserPrivacyManager({
               onLoadMore={loadMoreFormFill}
             />
           ) : null}
-          {section === "inspect" ? (
-            <InspectSection
+          {section === "siteData" ? (
+            <SiteSummarySection
               colors={colors}
               origin={inspectOrigin}
               result={inspectResult}
@@ -479,23 +475,13 @@ export function BrowserPrivacyManager({
               }
             />
           ) : null}
-          {section === "debug" ? (
-            <DebugSection
+          {section === "siteData" ? (
+            <SiteCookiesSection
               colors={colors}
               origins={cookieOrigins}
               total={cookieOriginTotal}
-              revision={cookieRevision}
               busy={busy}
               onLoadMore={loadMoreCookieOrigins}
-              onEndSession={() =>
-                void mutate(
-                  "End browser session?",
-                  "This removes session cookies from the shared browser vault.",
-                  () => client.endBrowserSession(),
-                  "Browser session ended.",
-                  loadCookieOrigins,
-                )
-              }
               onClearAll={() =>
                 void mutate(
                   "Clear all browser cookies?",
@@ -795,7 +781,7 @@ function FormFillSection(props: {
   );
 }
 
-function InspectSection(props: {
+function SiteSummarySection(props: {
   colors: ThemeColors;
   origin: string;
   result: { origin: string; cookieCount: number; passwordCount: number } | null;
@@ -855,35 +841,27 @@ function InspectSection(props: {
   );
 }
 
-function DebugSection(props: {
+function SiteCookiesSection(props: {
   colors: ThemeColors;
   origins: string[];
   total: number;
-  revision: number;
   busy: boolean;
   onLoadMore(): void;
-  onEndSession(): void;
   onClearAll(): void;
 }) {
   return (
     <>
       <Card colors={props.colors}>
         <Text style={[styles.sectionTitle, { color: props.colors.text }]}>
-          Browser session
+          Shared site data
         </Text>
         <Text style={[styles.body, { color: props.colors.textSecondary }]}>
-          The canonical vault currently has cookies for {props.total} origin
-          {props.total === 1 ? "" : "s"} (revision {props.revision}). Mobile
-          WebViews keep their own isolated site data; these controls manage the
-          shared vault and desktop browser projection.
+          Saved cookies are shared with your desktop browser for {props.total}{" "}
+          site
+          {props.total === 1 ? "" : "s"}. These controls do not clear cookies
+          inside this device's WebViews.
         </Text>
         <View style={styles.actions}>
-          <Button
-            label="End session"
-            variant="danger"
-            disabled={props.busy}
-            onPress={props.onEndSession}
-          />
           <Button
             label="Clear all cookies"
             variant="danger"

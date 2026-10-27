@@ -15,7 +15,10 @@ import {
 } from "@radix-ui/themes";
 import { Cross2Icon, ExclamationTriangleIcon } from "@radix-ui/react-icons";
 import { AppDialog } from "@workspace/ui/overlay";
-import type { SettingsSection } from "@vibestudio/shared/shellSurface";
+import type {
+  BrowserDataSection,
+  SettingsSection,
+} from "@vibestudio/shared/shellSurface";
 import {
   createConnectDeepLink,
   parseConnectLink,
@@ -24,7 +27,10 @@ import {
 import { type RemoteCredCurrent } from "../shell/client";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
-import { connectionSentence, viewFromTransport } from "@workspace/connection-core";
+import {
+  connectionSentence,
+  viewFromTransport,
+} from "@workspace/connection-core";
 import "./connectionSettingsDialog.css";
 
 // The dialog keeps pairing and connection listeners alive while closed.
@@ -45,7 +51,11 @@ const TemplatesSection = deferredFeature(async () => ({
   default: (await import("./TemplatesSection")).TemplatesSection,
 }));
 const WorkspaceConnectionsSection = deferredFeature(async () => ({
-  default: (await import("./WorkspaceConnectionsSection")).WorkspaceConnectionsSection,
+  default: (await import("./WorkspaceConnectionsSection"))
+    .WorkspaceConnectionsSection,
+}));
+const BrowserDataSectionView = deferredFeature(async () => ({
+  default: (await import("./BrowserDataSection")).BrowserDataSection,
 }));
 const ProblemReportingSection = deferredFeature(async () => ({
   default: (await import("./ProblemReportingSection")).ProblemReportingSection,
@@ -60,12 +70,18 @@ type LiveConnection = {
 interface Props {
   section: SettingsSection | null;
   workspaceId?: string;
+  browserDataSection?: BrowserDataSection;
+  onBrowserDataSectionChange?: (section: BrowserDataSection) => void;
+  onBrowserDataWorkspaceChange?: (workspaceId: string) => void;
   onSectionChange: (section: SettingsSection | null) => void;
 }
 
 export function ConnectionSettingsDialog({
   section,
   workspaceId,
+  browserDataSection,
+  onBrowserDataSectionChange,
+  onBrowserDataWorkspaceChange,
   onSectionChange,
 }: Props) {
   const { app, incomingPairLink, remoteCred } = useShellWorkspaceClient();
@@ -242,6 +258,9 @@ export function ConnectionSettingsDialog({
           <Tabs.Trigger value="appearance" aria-label="Appearance">
             Appearance
           </Tabs.Trigger>
+          <Tabs.Trigger value="browser-data" aria-label="Browser data">
+            Browser data
+          </Tabs.Trigger>
           <Tabs.Trigger value="apps" aria-label="Apps">
             Apps
           </Tabs.Trigger>
@@ -253,6 +272,14 @@ export function ConnectionSettingsDialog({
           </Tabs.Trigger>
         </Tabs.List>
 
+        <Tabs.Content value="browser-data">
+          <BrowserDataSectionView
+            workspaceId={workspaceId}
+            section={browserDataSection ?? "passwords"}
+            onSectionChange={onBrowserDataSectionChange}
+            onWorkspaceResolved={onBrowserDataWorkspaceChange}
+          />
+        </Tabs.Content>
         <Tabs.Content value="workspaces">
           <WorkspaceConnectionsSection
             key={workspaceId ?? "choose-workspace"}
@@ -298,7 +325,10 @@ export function ConnectionSettingsDialog({
               <Callout.Root size="1" color="amber" mb="3">
                 <Callout.Text>
                   {connectionSentence({
-                    view: viewFromTransport({ status: live.status, everOnline: true }),
+                    view: viewFromTransport({
+                      status: live.status,
+                      everOnline: true,
+                    }),
                     isRemote: true,
                   })}
                   . Vibestudio will reconnect automatically when your server is
@@ -359,7 +389,8 @@ export function ConnectionSettingsDialog({
                     value={pairLink}
                     onChange={(e) => setPairLink(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !busy && pairLink.trim()) void savePairing();
+                      if (e.key === "Enter" && !busy && pairLink.trim())
+                        void savePairing();
                     }}
                   />
                 </Box>
@@ -385,11 +416,7 @@ export function ConnectionSettingsDialog({
                       setError(null);
                       void remoteCred
                         .reconnectNow()
-                        .catch((err) =>
-                          setError(
-                            userFacingError(err),
-                          ),
-                        );
+                        .catch((err) => setError(userFacingError(err)));
                     }}
                   >
                     Reconnect now

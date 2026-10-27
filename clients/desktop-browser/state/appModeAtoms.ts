@@ -1,5 +1,8 @@
 import { atom } from "jotai";
-import type { SettingsSection } from "@vibestudio/shared/shellSurface";
+import type {
+  BrowserDataSection,
+  SettingsSection,
+} from "@vibestudio/shared/shellSurface";
 
 // =============================================================================
 // Panel Pin State (client-local)
@@ -49,6 +52,7 @@ export const workspaceChooserTemplateAtom = atom<
 export const settingsDialogAtom = atom<{
   section: SettingsSection;
   workspaceId?: string;
+  browserDataSection?: BrowserDataSection;
 } | null>(null);
 
 /** Local invalidation after this window changes the hub workspace catalog. */
