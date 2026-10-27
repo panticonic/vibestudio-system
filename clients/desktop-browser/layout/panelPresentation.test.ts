@@ -1,5 +1,15 @@
+import {
+  applyLayoutAction,
+  computeViewport,
+  type LayoutEnv,
+} from "./placementEngine";
+import { MIN_COLUMN_WIDTH, PANE_VERTICAL_CHROME_HEIGHT } from "./types";
 import { describe, expect, it } from "vitest";
-import { openInNewColumnAction, panelCreatedLayoutAction } from "./panelPresentation";
+import {
+  openInNewColumnAction,
+  panelCreatedLayoutAction,
+  panelNavigationAction,
+} from "./panelPresentation";
 import type { PanelLayout } from "./types";
 
 describe("openInNewColumnAction", () => {
@@ -94,7 +104,7 @@ describe("panelCreatedLayoutAction", () => {
         parentId: "panel-parent",
         focus: true,
         placement: { disposition: "side", minWidth: 480 },
-      })
+      }),
     ).toEqual({
       type: "open-child",
       panelId: "panel-child",
@@ -109,7 +119,7 @@ describe("panelCreatedLayoutAction", () => {
         panelId: "panel-root",
         parentId: null,
         focus: true,
-      })
+      }),
     ).toEqual({
       type: "show-panel",
       panelId: "panel-root",
@@ -119,7 +129,7 @@ describe("panelCreatedLayoutAction", () => {
         panelId: "panel-background",
         parentId: "panel-parent",
         focus: false,
-      })
+      }),
     ).toBeNull();
   });
 
@@ -130,11 +140,102 @@ describe("panelCreatedLayoutAction", () => {
         parentId: null,
         focus: true,
         placement: { disposition: "side-if-room" },
-      })
+      }),
     ).toEqual({
       type: "present-panel",
       panelId: "panel-new",
       hint: { disposition: "side-if-room" },
     });
+  });
+});
+
+describe("panel navigation placement", () => {
+  const layout: PanelLayout = {
+    columns: [
+      {
+        id: "parent-column",
+        widthFr: 1,
+        panes: [{ id: "parent-pane", panelId: "parent", heightFr: 1 }],
+      },
+    ],
+    focusedPaneId: "parent-pane",
+  };
+  const parents = new Map([
+    ["child", "parent"],
+    ["grandchild", "child"],
+    ["sibling", "parent"],
+  ]);
+  const env = (width: number): LayoutEnv => ({
+    viewportWidth: width,
+    viewportHeight: 800,
+    paneChromeHeight: PANE_VERTICAL_CHROME_HEIGHT,
+    minWidthOf: () => MIN_COLUMN_WIDTH,
+    firstRootPanelId: () => "parent",
+  });
+
+  it.each(["child", "grandchild"])(
+    "keeps the parent beside a selected %s when both fit",
+    (panelId) => {
+      const next = applyLayoutAction(
+        layout,
+        panelNavigationAction(layout, panelId, parents),
+        env(1600),
+      );
+      expect(
+        next.columns.map((column) => column.panes.map((pane) => pane.panelId)),
+      ).toEqual([["parent"], [panelId]]);
+      expect(computeViewport(next, env(1600)).residentColumnIds).toHaveLength(
+        2,
+      );
+    },
+  );
+
+  it("reuses the chosen pane when there is not room beside it", () => {
+    const next = applyLayoutAction(
+      layout,
+      panelNavigationAction(layout, "child", parents),
+      env(900),
+    );
+    expect(next.columns).toHaveLength(1);
+    expect(next.columns[0]?.panes[0]).toMatchObject({
+      id: "parent-pane",
+      panelId: "child",
+    });
+  });
+
+  it("replaces a selected sibling without losing its parent's pane", () => {
+    const split = applyLayoutAction(
+      layout,
+      panelNavigationAction(layout, "child", parents),
+      env(1600),
+    );
+    const next = applyLayoutAction(
+      split,
+      panelNavigationAction(split, "sibling", parents),
+      env(1600),
+    );
+    expect(
+      next.columns.map((column) => column.panes.map((pane) => pane.panelId)),
+    ).toEqual([["parent"], ["sibling"]]);
+  });
+
+  it("focuses an already open child without creating another column", () => {
+    const split = applyLayoutAction(
+      layout,
+      panelNavigationAction(layout, "child", parents),
+      env(1600),
+    );
+    const focusedParent = applyLayoutAction(
+      split,
+      { type: "focus-pane", paneId: "parent-pane" },
+      env(1600),
+    );
+    const next = applyLayoutAction(
+      focusedParent,
+      panelNavigationAction(focusedParent, "child", parents),
+      env(1600),
+    );
+    expect(next.columns).toEqual(split.columns);
+    expect(next.focusedPaneId).toBe(split.focusedPaneId);
   });
 });

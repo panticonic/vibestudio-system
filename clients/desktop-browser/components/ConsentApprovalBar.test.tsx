@@ -537,7 +537,6 @@ describe("ConsentApprovalBar coordinator", () => {
             value={{
               element: null,
               scrollElement: null,
-              titleBarHost: null,
               notificationHost: document.body,
               setNotificationHost: () => {},
               workspaceId: id,

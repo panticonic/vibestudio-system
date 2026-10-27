@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isMac } from "./windowChrome";
+import type { ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Flex } from "@radix-ui/themes";
 
 import {
@@ -15,6 +24,7 @@ import { ResizableDivider } from "./ResizableDivider";
 import { minWidthOfPanel } from "../layout/treeEnv";
 
 interface ColumnRowProps {
+  renderTitleBar: (paneId: string, panelId: string) => ReactNode;
   layout: PanelLayout;
   residentColumnIds: string[];
   layoutEpoch: number;
@@ -29,9 +39,15 @@ interface ColumnRowProps {
   /** Apply a drag placement; the engine owns what the coordinate means. */
   onPlacePanel: (panelId: string, target: LayoutDropTarget) => void;
   /** Engine's chance to downgrade a target the layout cannot honor. */
-  onRefineDropTarget: (target: LayoutDropTarget, panelId: string) => LayoutDropTarget;
+  onRefineDropTarget: (
+    target: LayoutDropTarget,
+    panelId: string,
+  ) => LayoutDropTarget;
   /** Keyboard placement from a pane's grip. */
-  onMovePane: (paneId: string, direction: "left" | "right" | "up" | "down") => void;
+  onMovePane: (
+    paneId: string,
+    direction: "left" | "right" | "up" | "down",
+  ) => void;
 }
 
 const COLUMN_TRANSITION_MS = 150;
@@ -45,6 +61,7 @@ const COLUMN_TRANSITION_MS = 150;
  * point.
  */
 export function ColumnRow({
+  renderTitleBar,
   layout,
   residentColumnIds,
   layoutEpoch,
@@ -66,13 +83,17 @@ export function ColumnRow({
     geometry: dragGeometry,
     registerPlacementHost,
   } = useLayoutDrag();
-  const residentSet = useMemo(() => new Set(residentColumnIds), [residentColumnIds]);
-  const residentColumns = layout.columns.filter((column) => residentSet.has(column.id));
-  const layoutPaneCount = layout.columns.reduce((total, column) => total + column.panes.length, 0);
-  // With a single pane on screen there is nothing for a focus rail to
-  // distinguish it from, so it would be decoration on every panel.
-  const showPaneFocus =
-    residentColumns.reduce((total, column) => total + column.panes.length, 0) > 1;
+  const residentSet = useMemo(
+    () => new Set(residentColumnIds),
+    [residentColumnIds],
+  );
+  const residentColumns = layout.columns.filter((column) =>
+    residentSet.has(column.id),
+  );
+  const layoutPaneCount = layout.columns.reduce(
+    (total, column) => total + column.panes.length,
+    0,
+  );
   const paneTitles = useMemo(() => {
     const titles = new Map<string, string>();
     for (const column of layout.columns) {
@@ -88,10 +109,10 @@ export function ColumnRow({
         Math.max(
           minimum,
           minWidthOfPanel({ panelMap, parentMap }, pane.panelId),
-          pane.minWidthOverride ?? 0
+          pane.minWidthOverride ?? 0,
         ),
-      MIN_COLUMN_WIDTH
-    )
+      MIN_COLUMN_WIDTH,
+    ),
   );
 
   // Residency transitions (park/un-park, column enter/exit) hide surfaces for
@@ -130,10 +151,10 @@ export function ColumnRow({
               refine: (target, panelId) => refineRef.current(target, panelId),
               commit: (panelId, target) => placeRef.current(panelId, target),
             }
-          : null
+          : null,
       );
     },
-    [registerPlacementHost]
+    [registerPlacementHost],
   );
   const dragColumnWidthsRef = useRef<number[] | null>(null);
 
@@ -141,18 +162,23 @@ export function ColumnRow({
   const totalFr = frs.reduce((sum, fr) => sum + fr, 0);
 
   const prepareDrag = () => {
-    const elements = rowRef.current?.querySelectorAll<HTMLElement>("[data-column-id]");
+    const elements =
+      rowRef.current?.querySelectorAll<HTMLElement>("[data-column-id]");
     const widths = residentColumns.map(
-      (_column, columnIndex) => elements?.[columnIndex]?.getBoundingClientRect().width ?? 0
+      (_column, columnIndex) =>
+        elements?.[columnIndex]?.getBoundingClientRect().width ?? 0,
     );
-    dragColumnWidthsRef.current = widths.every((width) => width > 0) ? widths : null;
+    dragColumnWidthsRef.current = widths.every((width) => width > 0)
+      ? widths
+      : null;
   };
 
   const dragBetween = (index: number, deltaPx: number) => {
     const widths = dragColumnWidthsRef.current;
     if (!widths) return;
     const columnsWidth = widths.reduce((sum, width) => sum + width, 0);
-    const current = liveFrsRef.current ?? residentColumns.map((column) => column.widthFr);
+    const current =
+      liveFrsRef.current ?? residentColumns.map((column) => column.widthFr);
     const total = current.reduce((sum, fr) => sum + fr, 0);
     const beforeWidth = widths[index] ?? 0;
     const afterWidth = widths[index + 1] ?? 0;
@@ -161,7 +187,7 @@ export function ColumnRow({
     const afterMin = columnMinWidths[index + 1] ?? MIN_COLUMN_WIDTH;
     const appliedPx = Math.max(
       Math.min(deltaPx, afterWidth - afterMin),
-      -(beforeWidth - beforeMin)
+      -(beforeWidth - beforeMin),
     );
     const deltaFr = (appliedPx / columnsWidth) * total;
     const next = [...current];
@@ -187,8 +213,10 @@ export function ColumnRow({
     let cursor = 0;
     onResizeColumns(
       layout.columns.map((column) =>
-        residentSet.has(column.id) ? (live[cursor++] ?? column.widthFr) : column.widthFr
-      )
+        residentSet.has(column.id)
+          ? (live[cursor++] ?? column.widthFr)
+          : column.widthFr,
+      ),
     );
   };
 
@@ -207,14 +235,22 @@ export function ColumnRow({
           sourceTitle={dragSource.title}
         />
       )}
-      <Flex ref={rowRef} gap="0" style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}>
+      <Flex
+        ref={rowRef}
+        gap="0"
+        style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}
+      >
         {residentColumns.map((column, index) => (
           <Fragment key={column.id}>
             {index > 0 && (
               <ResizableDivider
                 orientation="vertical"
                 label={`Resize columns ${index} and ${index + 1}`}
-                valueNow={(frs.slice(0, index).reduce((sum, fr) => sum + fr, 0) / totalFr) * 100}
+                valueNow={
+                  (frs.slice(0, index).reduce((sum, fr) => sum + fr, 0) /
+                    totalFr) *
+                  100
+                }
                 onDragStart={prepareDrag}
                 onDrag={(deltaPx) => dragBetween(index - 1, deltaPx)}
                 onDragEnd={commit}
@@ -227,10 +263,13 @@ export function ColumnRow({
               />
             )}
             <PaneColumn
+              reserveWindowControls={
+                index === residentColumns.length - 1 && !isMac
+              }
+              renderTitleBar={renderTitleBar}
               column={{ ...column, widthFr: frs[index] } as LayoutColumn}
               minWidth={columnMinWidths[index] ?? MIN_COLUMN_WIDTH}
               focusedPaneId={layout.focusedPaneId}
-              showPaneFocus={showPaneFocus}
               paneTitles={paneTitles}
               resident={!transitioning}
               layoutEpoch={layoutEpoch}

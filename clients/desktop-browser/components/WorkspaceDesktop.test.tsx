@@ -59,6 +59,7 @@ const api = vi.hoisted(() => {
       create: ReturnType<typeof vi.fn>;
       close: ReturnType<typeof vi.fn>;
       surface: ReturnType<typeof vi.fn>;
+      menu: ReturnType<typeof vi.fn>;
     }
   >();
   return {
@@ -79,10 +80,12 @@ const api = vi.hoisted(() => {
       const create = vi.fn(async () => ({ id: "panel" }));
       const close = vi.fn();
       const surface = vi.fn(async () => {});
-      calls.set(id, { create, close, surface });
+      const menu = vi.fn(async () => {});
+      calls.set(id, { create, close, surface, menu });
       return {
         close,
         client: {
+          menu: { showHamburger: menu },
           panel: {
             searchTree: async () => ({
               revision: 1,
@@ -734,6 +737,53 @@ describe("desktop workspace ownership", () => {
     } finally {
       window.set(themeModeAtom, "system");
       result.unmount();
+    }
+  });
+  it("keeps app controls in the collapsed rail and routes them to its selected workspace", async () => {
+    const previous = localStorage.getItem("workspace-sidebar-collapsed");
+    localStorage.removeItem("workspace-sidebar-collapsed");
+    const result = render(<Desktop />);
+    try {
+      const personal = await screen.findByLabelText("personal draft");
+      fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      await screen.findByLabelText("garden draft");
+      expect(personal.getAttribute("data-visible")).toBe("true");
+      expect(
+        screen
+          .getByLabelText("Workspace navigation")
+          .getAttribute("data-collapsed"),
+      ).toBe("true");
+      expect(
+        screen.getByRole("button", { name: "Expand sidebar" }),
+      ).toBeTruthy();
+      expect(localStorage.getItem("workspace-sidebar-collapsed")).toBe("true");
+      fireEvent.click(screen.getByRole("button", { name: "Open Garden" }));
+      await waitFor(() =>
+        expect(
+          screen.getByLabelText("garden draft").getAttribute("data-visible"),
+        ).toBe("true"),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "App menu" }));
+      await waitFor(() =>
+        expect(api.calls.get("garden")?.menu).toHaveBeenCalledTimes(1),
+      );
+      expect(api.calls.get("personal")?.menu).not.toHaveBeenCalled();
+      for (const owner of api.calls.values()) owner.create.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "New panel" }));
+      await waitFor(() =>
+        expect(api.calls.get("garden")?.create).toHaveBeenCalledWith("new"),
+      );
+      expect(api.calls.get("personal")?.create).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+      expect(
+        screen.getByRole("searchbox", { name: "Find panels" }),
+      ).toBeTruthy();
+      expect(localStorage.getItem("workspace-sidebar-collapsed")).toBe("false");
+    } finally {
+      result.unmount();
+      if (previous === null)
+        localStorage.removeItem("workspace-sidebar-collapsed");
+      else localStorage.setItem("workspace-sidebar-collapsed", previous);
     }
   });
 });

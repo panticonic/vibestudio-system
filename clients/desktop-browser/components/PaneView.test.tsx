@@ -6,7 +6,9 @@ import type { ReactNode } from "react";
 import { PaneView } from "./PaneView";
 
 const drag = vi.hoisted(() => ({ beginPaneDrag: vi.fn(), source: null }));
-vi.mock("../shell/hooks/LayoutDragContext", () => ({ useLayoutDrag: () => drag }));
+vi.mock("../shell/hooks/LayoutDragContext", () => ({
+  useLayoutDrag: () => drag,
+}));
 vi.mock("@workspace/react/responsive", () => ({ useTouchDevice: () => false }));
 vi.mock("./PaneContent", () => ({ PaneContent: () => null }));
 afterEach(() => {
@@ -24,9 +26,9 @@ describe("PaneView placement controls", () => {
     const { getByRole } = render(
       <PaneView
         pane={{ id: "pane-a", panelId: "a", heightFr: 1 }}
+        titleBar={<button>Mail breadcrumb</button>}
         title="Mail"
         focused={false}
-        showPaneFocus
         resident
         layoutEpoch={1}
         unresponsive={false}
@@ -35,13 +37,14 @@ describe("PaneView placement controls", () => {
         onClosePane={vi.fn()}
         onMovePane={vi.fn()}
       />,
-      { wrapper }
+      { wrapper },
     );
-    const button = getByRole("button", { name: "Focus Mail" });
+    const button = getByRole("button", { name: "Mail breadcrumb" });
     fireEvent.pointerDown(button);
     fireEvent.click(button);
     expect(focus).toHaveBeenCalledWith("pane-a");
     expect(drag.beginPaneDrag).not.toHaveBeenCalled();
+    expect(getByRole("button", { name: "Close pane" }).tabIndex).toBe(0);
   });
 
   it("moves through the grip without a post-drag click focusing its former occupant", () => {
@@ -50,9 +53,9 @@ describe("PaneView placement controls", () => {
     const { getByRole } = render(
       <PaneView
         pane={{ id: "pane-a", panelId: "a", heightFr: 1 }}
+        titleBar={<button>Mail breadcrumb</button>}
         title="Mail"
         focused={false}
-        showPaneFocus
         resident
         layoutEpoch={1}
         unresponsive={false}
@@ -61,7 +64,7 @@ describe("PaneView placement controls", () => {
         onClosePane={vi.fn()}
         onMovePane={move}
       />,
-      { wrapper }
+      { wrapper },
     );
     const grip = getByRole("button", { name: "Move Mail" });
     fireEvent.pointerDown(grip);
@@ -75,5 +78,28 @@ describe("PaneView placement controls", () => {
     expect(focus).not.toHaveBeenCalled();
     fireEvent.keyDown(grip, { key: "ArrowRight" });
     expect(move).toHaveBeenCalledWith("pane-a", "right");
+  });
+  it("closes its own pane without hovering or starting a drag", () => {
+    const close = vi.fn();
+    const { getByRole, container } = render(
+      <PaneView
+        pane={{ id: "pane-b", panelId: "b", heightFr: 1 }}
+        title="Notes"
+        titleBar={<span>Notes</span>}
+        focused={false}
+        resident
+        layoutEpoch={1}
+        unresponsive={false}
+        onDismissUnresponsive={vi.fn()}
+        onFocusPane={vi.fn()}
+        onClosePane={close}
+        onMovePane={vi.fn()}
+      />,
+      { wrapper },
+    );
+    fireEvent.click(getByRole("button", { name: "Close pane" }));
+    expect(close).toHaveBeenCalledWith("pane-b");
+    expect(drag.beginPaneDrag).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-pane-rail]")).toBeNull();
   });
 });

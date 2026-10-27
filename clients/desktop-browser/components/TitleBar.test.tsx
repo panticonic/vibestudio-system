@@ -1,21 +1,22 @@
 // @vitest-environment jsdom
 
-import { cleanup, render } from "@testing-library/react";
-import { useEffect } from "react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NavigationProvider, useNavigationActions } from "./NavigationContext";
+import { NavigationProvider } from "./NavigationContext";
 import type { LazyTitleNavigationData } from "./navigationTypes";
 import { TitleBar } from "./TitleBar";
 
-const state = vi.hoisted(() => ({ mobile: false }));
 vi.mock("@workspace/react/responsive", () => ({
-  useIsMobile: () => state.mobile,
+  useIsMobile: () => false,
   useTouchDevice: () => false,
 }));
 vi.mock("../shell/workspaceContext", () => ({
   useShellWorkspaceClient: () => ({ menu: {}, notification: {}, panel: {} }),
-  useWorkspaceNavigationHost: () => ({ workspaceLabel: "Personal", sidebarVisible: true }),
+  useWorkspaceNavigationHost: () => ({
+    workspaceLabel: "Personal",
+    sidebarVisible: true,
+  }),
   useWorkspaceVisible: () => true,
 }));
 vi.mock("../shell/client", () => ({}));
@@ -25,22 +26,25 @@ vi.mock("./usePanelTrust", () => ({
 vi.mock("./PanelIcon", () => ({ PanelIcon: () => null }));
 vi.mock("./BrowserFavicon", () => ({ BrowserFavicon: () => null }));
 
-function Chrome({ navigation }: { navigation: LazyTitleNavigationData | null }) {
-  const { setLazyTitleNavigation } = useNavigationActions();
-  useEffect(() => setLazyTitleNavigation(navigation), [navigation, setLazyTitleNavigation]);
-  return <TitleBar />;
+function Chrome({
+  navigation,
+}: {
+  navigation: LazyTitleNavigationData | null;
+}) {
+  return <TitleBar navigationData={navigation} />;
 }
 
 const panel: LazyTitleNavigationData = {
   ancestors: [],
-  currentSiblings: [],
-  currentId: "last-panel",
-  currentTitle: "I just opened this workspace",
-  currentChildCount: 0,
+  current: {
+    id: "last-panel",
+    title: "I just opened this workspace",
+    childCount: 0,
+    position: 0,
+  },
 };
 
 beforeEach(() => {
-  state.mobile = false;
   localStorage.clear();
   vi.stubGlobal("requestAnimationFrame", () => 1);
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
@@ -51,22 +55,103 @@ afterEach(() => {
 });
 
 describe("TitleBar", () => {
-  it.each([false, true])("clears the last closed panel on mobile=%s", (mobile) => {
-    state.mobile = mobile;
+  it("clears the last closed panel", () => {
     const chrome = (navigation: LazyTitleNavigationData | null) => (
-      <Theme><NavigationProvider><Chrome navigation={navigation} /></NavigationProvider></Theme>
+      <Theme>
+        <NavigationProvider>
+          <Chrome navigation={navigation} />
+        </NavigationProvider>
+      </Theme>
     );
-    const { container, getByText, queryByText, rerender } = render(chrome(panel));
-    expect(getByText(panel.currentTitle)).toBeTruthy();
+    const { container, getByText, queryByText, rerender } = render(
+      chrome(panel),
+    );
+    expect(getByText(panel.current.title)).toBeTruthy();
 
     rerender(chrome(null));
-    expect(queryByText(panel.currentTitle)).toBeNull();
+    expect(queryByText(panel.current.title)).toBeNull();
     expect(container.querySelector("[data-breadcrumb-id]")).toBeNull();
-    if (mobile) expect(getByText("Vibestudio")).toBeTruthy();
-    else expect(getByText("Personal")).toBeTruthy();
+    expect(queryByText("Personal")).toBeNull();
 
-    rerender(chrome({ ...panel, currentId: "new-panel", currentTitle: "New panel" }));
+    rerender(
+      chrome({
+        ...panel,
+        current: { ...panel.current, id: "new-panel", title: "New panel" },
+      }),
+    );
     expect(getByText("New panel")).toBeTruthy();
-    expect(queryByText(panel.currentTitle)).toBeNull();
+    expect(queryByText(panel.current.title)).toBeNull();
+  });
+  it("keeps each pane's path and child navigation inside its own titlebar", () => {
+    const navigateMail = vi.fn();
+    const navigateNotes = vi.fn();
+    const { getByTestId } = render(
+      <Theme>
+        <NavigationProvider>
+          <div data-testid="mail-pane">
+            <TitleBar
+              reserveWindowControls={false}
+              focused={false}
+              navigationData={{
+                ...panel,
+                current: { ...panel.current, id: "mail", title: "Mail" },
+                ancestors: [
+                  { id: "inbox", title: "Inbox", childCount: 2, depth: 0 },
+                ],
+              }}
+              statusNavigation={{
+                visiblePanelId: "mail",
+                descendantGroups: [
+                  {
+                    depth: 1,
+                    parentId: "mail",
+                    selectedId: "draft",
+                    siblings: [
+                      {
+                        id: "draft",
+                        title: "Draft",
+                        childCount: 0,
+                        position: 0,
+                      },
+                    ],
+                  },
+                ],
+              }}
+              onNavigateToId={navigateMail}
+            />
+          </div>
+          <div data-testid="notes-pane">
+            <TitleBar
+              reserveWindowControls={false}
+              navigationData={{
+                ...panel,
+                current: { ...panel.current, id: "notes", title: "Notes" },
+              }}
+              onNavigateToId={navigateNotes}
+            />
+          </div>
+        </NavigationProvider>
+      </Theme>,
+    );
+    const mail = within(getByTestId("mail-pane"));
+    const notes = within(getByTestId("notes-pane"));
+    expect(mail.queryByText("Notes")).toBeNull();
+    expect(
+      mail
+        .getByRole("button", { name: "Mail" })
+        .hasAttribute("data-breadcrumb-current"),
+    ).toBe(false);
+    expect(
+      notes
+        .getByRole("button", { name: "Notes" })
+        .getAttribute("data-breadcrumb-current"),
+    ).toBe("true");
+    expect(notes.queryByText("Mail")).toBeNull();
+    expect(notes.queryByText("Draft")).toBeNull();
+    fireEvent.click(mail.getByRole("button", { name: "Inbox" }));
+    fireEvent.click(mail.getByRole("button", { name: "Draft" }));
+    fireEvent.click(mail.getByRole("button", { name: "Mail" }));
+    expect(navigateMail.mock.calls).toEqual([["inbox"], ["draft"], ["mail"]]);
+    expect(navigateNotes).not.toHaveBeenCalled();
   });
 });

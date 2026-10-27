@@ -14,7 +14,6 @@ export const useWorkspaceVisible = () => useContext(WorkspaceVisibilityContext);
 export const WorkspaceNavigationHostContext = createContext<{
   element: HTMLElement | null;
   scrollElement: HTMLElement | null;
-  titleBarHost: HTMLElement | null;
   notificationHost: HTMLElement | null;
   setNotificationHost(element: HTMLElement | null): void;
   workspaceId: string;
@@ -32,7 +31,9 @@ export const useWorkspaceNavigationHost = () =>
 
 export const WorkspaceDesktopHostContext = createContext<{
   openWorkspace(workspaceId: string): Promise<void>;
-  inspectWorkspaceFolder?(): Promise<import("@vibestudio/service-schemas/templates").TemplateInspection | null>;
+  inspectWorkspaceFolder?(): Promise<
+    import("@vibestudio/service-schemas/templates").TemplateInspection | null
+  >;
 } | null>(null);
 export const useWorkspaceDesktopHost = () => {
   const host = useContext(WorkspaceDesktopHostContext);

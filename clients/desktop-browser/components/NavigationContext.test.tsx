@@ -8,8 +8,6 @@ import {
   NavigationProvider,
   useNavigation,
   useNavigationActions,
-  useNavigationLazy,
-  useNavigationLayout,
 } from "./NavigationContext";
 
 function ModeProbe() {
@@ -19,56 +17,28 @@ function ModeProbe() {
 
 function NavigationProbe({ handler }: { handler: ReturnType<typeof vi.fn> }) {
   const { navigateToId, registerNavigateToId } = useNavigation();
-  useEffect(() => registerNavigateToId(handler), [handler, registerNavigateToId]);
-  return (
-    <button onClick={() => navigateToId("panel-child")}>
-      Navigate
-    </button>
+  useEffect(
+    () => registerNavigateToId(handler),
+    [handler, registerNavigateToId],
   );
+  return <button onClick={() => navigateToId("panel-child")}>Navigate</button>;
 }
 
-function LayoutRenderProbe({ rendered }: { rendered: ReturnType<typeof vi.fn> }) {
-  rendered();
-  const { mode } = useNavigationLayout();
-  return <span>{mode}</span>;
-}
-
-function ActionsRenderProbe({ rendered }: { rendered: ReturnType<typeof vi.fn> }) {
+function ActionsRenderProbe({
+  rendered,
+}: {
+  rendered: ReturnType<typeof vi.fn>;
+}) {
   rendered();
   useNavigationActions();
   return null;
-}
-
-function LazyRenderProbe({ rendered }: { rendered: ReturnType<typeof vi.fn> }) {
-  rendered();
-  useNavigationLazy();
-  return null;
-}
-
-function LazyNavigationWriter() {
-  const { setLazyTitleNavigation } = useNavigationActions();
-  return (
-    <button
-      onClick={() =>
-        setLazyTitleNavigation({
-          ancestors: [],
-          currentSiblings: [],
-          currentId: "panel-1",
-          currentTitle: "Panel 1",
-          currentChildCount: 0,
-        })
-      }
-    >
-      Publish lazy navigation
-    </button>
-  );
 }
 
 function renderMode() {
   render(
     <NavigationProvider>
       <ModeProbe />
-    </NavigationProvider>
+    </NavigationProvider>,
   );
 
   return screen.getByTestId("mode").textContent;
@@ -116,7 +86,7 @@ describe("NavigationProvider", () => {
     render(
       <NavigationProvider>
         <NavigationProbe handler={handler} />
-      </NavigationProvider>
+      </NavigationProvider>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Navigate" }));
@@ -124,26 +94,21 @@ describe("NavigationProvider", () => {
     expect(handler).toHaveBeenCalledWith("panel-child");
   });
 
-  it("does not rerender layout consumers when only lazy breadcrumb data changes", () => {
-    const layoutRendered = vi.fn();
+  it("keeps navigation actions stable while layout visibility changes", () => {
     const actionsRendered = vi.fn();
-    const lazyRendered = vi.fn();
+    function Toggle() {
+      const { setAddressBarVisible } = useNavigationActions();
+      return (
+        <button onClick={() => setAddressBarVisible(true)}>Edit address</button>
+      );
+    }
     render(
       <NavigationProvider>
-        <LayoutRenderProbe rendered={layoutRendered} />
         <ActionsRenderProbe rendered={actionsRendered} />
-        <LazyRenderProbe rendered={lazyRendered} />
-        <LazyNavigationWriter />
-      </NavigationProvider>
+        <Toggle />
+      </NavigationProvider>,
     );
-    expect(layoutRendered).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Edit address" }));
     expect(actionsRendered).toHaveBeenCalledTimes(1);
-    expect(lazyRendered).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "Publish lazy navigation" }));
-
-    expect(layoutRendered).toHaveBeenCalledTimes(1);
-    expect(actionsRendered).toHaveBeenCalledTimes(1);
-    expect(lazyRendered).toHaveBeenCalledTimes(2);
   });
 });

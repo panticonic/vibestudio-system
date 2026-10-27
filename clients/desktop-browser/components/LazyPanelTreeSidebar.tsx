@@ -29,12 +29,7 @@ import {
 } from "react";
 import { useTouchDevice } from "@workspace/react/responsive";
 import { useAtomValue } from "jotai";
-import {
-  CaretRightIcon,
-  Cross2Icon,
-  DrawingPinFilledIcon,
-  PlusIcon,
-} from "@radix-ui/react-icons";
+import { CaretRightIcon, Cross2Icon, DrawingPinFilledIcon, PlusIcon } from "@radix-ui/react-icons";
 import { Badge, Box, Button, Flex, IconButton, Text } from "@radix-ui/themes";
 import { VibestudioLogo } from "@workspace/ui/brand";
 import { useSortable } from "@dnd-kit/sortable";
@@ -49,7 +44,6 @@ import {
   INDENTATION_WIDTH,
   END_DROP_ZONE_ID,
   type FlattenedPanel,
-  type PanelTreeViewNode,
   type ShellAccountProfile,
 } from "../shell/hooks/index.js";
 import { isPanelClosePointerButton } from "@vibestudio/shared/panelCommands";
@@ -57,6 +51,9 @@ import { isPanelClosePointerButton } from "@vibestudio/shared/panelCommands";
 import { pinnedPanelIdsAtom } from "../state/appModeAtoms.js";
 import { assertPresent } from "../utils/assertPresent";
 import { PanelIcon } from "./PanelIcon";
+import { PanelTreeRailItem } from "./PanelTreeRailItem";
+import { buildSidebarRows, type SidebarRow } from "./panelTreeRows";
+import { flattenTree } from "../shell/hooks/PanelTreeContext";
 import { confirmClosePanel } from "./ConfirmDialog";
 import { buildGuides } from "./panelTreeGuides.js";
 import { panelTreeKeyboardTarget, type TreeMoveKey } from "./panelTreeKeyboard.js";
@@ -469,8 +466,7 @@ const SortableTreeItem = memo(
     const rowStyle: CSSProperties = {
       height: ROW_HEIGHT,
       cursor: "pointer",
-      backgroundColor:
-        getRowBackground(isSelected, isHovered, isVisible) ?? trust.backgroundColor,
+      backgroundColor: getRowBackground(isSelected, isHovered, isVisible) ?? trust.backgroundColor,
       borderRadius: "var(--radius-2)",
       paddingLeft: ROW_PADDING_LEFT + depth * INDENTATION_WIDTH,
       paddingRight: ROW_PADDING_LEFT,
@@ -625,40 +621,43 @@ const SortableTreeItem = memo(
           <Flex
             align="center"
             gap="1"
-            style={{ visibility: showActions ? "visible" : "hidden", flexShrink: 0 }}
+            style={{
+              visibility: showActions ? "visible" : "hidden",
+              flexShrink: 0,
+            }}
           >
-              <IconButton
-                size="1"
-                variant="ghost"
-                color="gray"
-                aria-label="Add child panel"
-                onClick={handleAddChild}
-                className="app-tree-action"
-                style={{
-                  width: ACTION_BUTTON_SIZE,
-                  height: ACTION_BUTTON_SIZE,
-                  flexShrink: 0,
-                  margin: 0,
-                }}
-              >
-                <PlusIcon width={12} height={12} />
-              </IconButton>
-              <IconButton
-                size="1"
-                variant="ghost"
-                color="gray"
-                aria-label="Close panel"
-                onClick={handleArchive}
-                className="app-tree-action app-tree-action-danger"
-                style={{
-                  width: ACTION_BUTTON_SIZE,
-                  height: ACTION_BUTTON_SIZE,
-                  flexShrink: 0,
-                  margin: 0,
-                }}
-              >
-                <Cross2Icon width={12} height={12} />
-              </IconButton>
+            <IconButton
+              size="1"
+              variant="ghost"
+              color="gray"
+              aria-label="Add child panel"
+              onClick={handleAddChild}
+              className="app-tree-action"
+              style={{
+                width: ACTION_BUTTON_SIZE,
+                height: ACTION_BUTTON_SIZE,
+                flexShrink: 0,
+                margin: 0,
+              }}
+            >
+              <PlusIcon width={12} height={12} />
+            </IconButton>
+            <IconButton
+              size="1"
+              variant="ghost"
+              color="gray"
+              aria-label="Close panel"
+              onClick={handleArchive}
+              className="app-tree-action app-tree-action-danger"
+              style={{
+                width: ACTION_BUTTON_SIZE,
+                height: ACTION_BUTTON_SIZE,
+                flexShrink: 0,
+                margin: 0,
+              }}
+            >
+              <Cross2Icon width={12} height={12} />
+            </IconButton>
           </Flex>
         </Flex>
 
@@ -762,93 +761,8 @@ function ownerDisplayName(owner: string, profile: ShellAccountProfile | undefine
   return `Member ${suffix}`;
 }
 
-/** A virtualized panel or pagination row. */
-type SidebarRow =
-  | { kind: "panel"; item: FlattenedPanel }
-  | { kind: "root-groups-more" }
-  | {
-      kind: "load-more";
-      groupKey: string;
-      parentSlotId: string | null;
-      ownerUserId?: string | null;
-      depth: number;
-      remaining: number;
-    };
-
-/** Keep ownership-scoped pagination within one continuous panel tree. */
-function buildSidebarRows(
-  flattenedItems: FlattenedPanel[],
-  forest: Array<{
-    owner: string;
-    rootCount: number;
-    rootLoadedCount?: number;
-    rootsHaveMore?: boolean;
-    rootPanels: PanelTreeViewNode[];
-  }>
-): SidebarRow[] {
-  const populated = forest.filter((group) => group.rootPanels.length > 0);
-  const itemById = new Map(flattenedItems.map((item) => [item.id, item]));
-  const rows: SidebarRow[] = [];
-
-  const appendGroup = (
-    panels: PanelTreeViewNode[],
-    totalCount: number,
-    loadedCount: number,
-    hasMore: boolean,
-    groupKey: string,
-    parentSlotId: string | null,
-    ownerUserId: string | null | undefined,
-    depth: number
-  ) => {
-    for (const panel of panels) {
-      const item = itemById.get(panel.id);
-      if (!item) continue;
-      rows.push({ kind: "panel", item });
-      if (!item.collapsed && panel.childCount > 0) {
-        appendGroup(
-          panel.children,
-          panel.childCount,
-          panel.childrenLoadedCount ?? panel.children.length,
-          panel.childrenHasMore ?? panel.children.length < panel.childCount,
-          `children:${panel.id}`,
-          panel.id,
-          undefined,
-          depth + 1
-        );
-      }
-    }
-    if (hasMore) {
-      rows.push({
-        kind: "load-more",
-        groupKey,
-        parentSlotId,
-        ...(ownerUserId !== undefined ? { ownerUserId } : {}),
-        depth,
-        remaining: Math.max(0, totalCount - loadedCount),
-      });
-    }
-  };
-
-  for (const group of populated) {
-    appendGroup(
-      group.rootPanels,
-      group.rootCount,
-      group.rootLoadedCount ?? group.rootPanels.length,
-      group.rootsHaveMore ?? group.rootPanels.length < group.rootCount,
-      `roots:${group.owner}`,
-      null,
-      group.owner || null,
-      0
-    );
-  }
-  return rows;
-}
-
-// ============================================================================
-// Sidebar Component
-// ============================================================================
-
 interface LazyPanelTreeSidebarProps {
+  compact?: boolean;
   /** The one scroll owner shared by every workspace section. */
   scrollElement: HTMLElement | null;
   revealSelection: boolean;
@@ -862,6 +776,7 @@ interface LazyPanelTreeSidebarProps {
 }
 
 export function LazyPanelTreeSidebar({
+  compact = false,
   scrollElement,
   revealSelection,
   selectedId,
@@ -877,6 +792,9 @@ export function LazyPanelTreeSidebar({
 
   const {
     ownerGroups,
+    allRootPanels,
+    parentMap,
+    panelMap,
     selfUserId,
     selfIdentityError,
     treeLoadError,
@@ -886,6 +804,7 @@ export function LazyPanelTreeSidebar({
     hasMoreRootGroups,
   } = usePanelTree();
   const [loadingGroupKey, setLoadingGroupKey] = useState<string | null>(null);
+  const [railLoadError, setRailLoadError] = useState<string | null>(null);
   const ownerIds = useMemo(
     () => ownerGroups.map((group) => group.owner).filter((owner) => owner !== ""),
     [ownerGroups]
@@ -906,10 +825,15 @@ export function LazyPanelTreeSidebar({
   const { activeId, overId, projectedDepth, indicatorItemId, showIndicatorBelow } =
     usePanelDndDrag();
 
+  const displayedItems = useMemo(
+    () => (compact ? flattenTree(allRootPanels, new Set()) : flattenedItems),
+    [compact, allRootPanels, flattenedItems]
+  );
+
   // Preserve forest ordering and pagination without ownership headings.
   const treeRows = useMemo(
-    () => buildSidebarRows(flattenedItems, ownerGroups),
-    [flattenedItems, ownerGroups]
+    () => buildSidebarRows(displayedItems, ownerGroups),
+    [displayedItems, ownerGroups]
   );
   const rows = useMemo<SidebarRow[]>(() => {
     return hasMoreRootGroups ? [...treeRows, { kind: "root-groups-more" as const }] : treeRows;
@@ -923,13 +847,13 @@ export function LazyPanelTreeSidebar({
 
   // Auto-expand ancestors of selected panel (batched for performance)
   useEffect(() => {
-    if (ancestorIds.length > 0) {
+    if (!compact && ancestorIds.length > 0) {
       const toExpand = ancestorIds.filter((id) => collapsedIds.has(id));
       if (toExpand.length > 0) {
         expandIds(toExpand);
       }
     }
-  }, [ancestorIds, collapsedIds, expandIds]);
+  }, [compact, ancestorIds, collapsedIds, expandIds]);
 
   const handleNewPanel = useCallback(async () => {
     const interactionId = crypto.randomUUID();
@@ -977,16 +901,21 @@ export function LazyPanelTreeSidebar({
   );
 
   const handleLoadMore = useCallback(
-    async (row: Extract<SidebarRow, { kind: "load-more" }>) => {
+    async (row: Exclude<SidebarRow, { kind: "panel" }>) => {
       if (loadingGroupKey) return;
-      setLoadingGroupKey(row.groupKey);
+      const key = row.kind === "load-more" ? row.groupKey : "root-owners";
+      setLoadingGroupKey(key);
+      setRailLoadError(null);
       try {
-        await loadMore(
-          row.parentSlotId === null
-            ? { kind: "roots", ownerUserId: row.ownerUserId ?? null }
-            : { kind: "children", parentSlotId: row.parentSlotId }
-        );
+        if (row.kind === "root-groups-more") await loadMoreRootGroups();
+        else
+          await loadMore(
+            row.parentSlotId === null
+              ? { kind: "roots", ownerUserId: row.ownerUserId ?? null }
+              : { kind: "children", parentSlotId: row.parentSlotId }
+          );
       } catch (error) {
+        setRailLoadError(key);
         void notification.show({
           type: "error",
           title: "Couldn't load older panels",
@@ -996,7 +925,7 @@ export function LazyPanelTreeSidebar({
         setLoadingGroupKey(null);
       }
     },
-    [loadMore, loadingGroupKey]
+    [loadMore, loadMoreRootGroups, loadingGroupKey]
   );
 
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
@@ -1043,18 +972,24 @@ export function LazyPanelTreeSidebar({
     getScrollElement: () => scrollElement,
     scrollMargin: scrollMargin ?? 0,
     // Keep revealed rows below the sticky workspace and section headings.
-    scrollPaddingStart: 64,
+    scrollPaddingStart: compact ? 34 : 64,
     estimateSize: (index) =>
-      index === rows.length ? (dragging ? END_DROP_ZONE_DRAG_HEIGHT : 0) : ROW_HEIGHT,
+      index === rows.length
+        ? dragging
+          ? END_DROP_ZONE_DRAG_HEIGHT
+          : 0
+        : compact
+          ? 32
+          : ROW_HEIGHT,
     overscan: 10,
   });
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
   const moveFocus = useCallback(
     (panelId: string, key: TreeMoveKey) => {
       const targetIndex = panelTreeKeyboardTarget(
-        rows.map((row) => row.kind === "panel" ? row.item.id : null),
+        rows.map((row) => (row.kind === "panel" ? row.item.id : null)),
         panelId,
-        key,
+        key
       );
       if (targetIndex === null) return;
       const target = rows[targetIndex];
@@ -1062,14 +997,17 @@ export function LazyPanelTreeSidebar({
       setPendingFocusId(target.item.id);
       virtualizer.scrollToIndex(targetIndex, { align: "auto" });
     },
-    [rows, virtualizer],
+    [rows, virtualizer]
   );
   // The estimate above changes with the drag, and the virtualizer caches it.
-  useLayoutEffect(() => virtualizer.measure(), [dragging, virtualizer]);
+  useLayoutEffect(() => virtualizer.measure(), [compact, dragging, virtualizer]);
 
   // Only a new selection in the focused workspace may move the common
   // sidebar. Background row loads and section resizing preserve its position.
   const revealedSelection = useRef<string | null>(null);
+  useEffect(() => {
+    revealedSelection.current = null;
+  }, [compact]);
   useEffect(() => {
     if (!revealSelection) {
       revealedSelection.current = null;
@@ -1082,7 +1020,7 @@ export function LazyPanelTreeSidebar({
         virtualizer.scrollToIndex(index, { align: "auto", behavior: "smooth" });
       }
     }
-  }, [revealSelection, selectedId, rows, virtualizer, scrollMargin]);
+  }, [compact, revealSelection, selectedId, rows, virtualizer, scrollMargin]);
 
   const diagnostics =
     treeLoadError || selfIdentityError ? (
@@ -1122,10 +1060,21 @@ export function LazyPanelTreeSidebar({
     ) : null;
 
   const virtualItems = virtualizer.getVirtualItems();
+  useEffect(() => {
+    if (!compact || loadingGroupKey || railLoadError) return;
+    // Load only the next page on screen, one request per workspace at a time.
+    // The same query cache backs both views; folding the wide tree is preserved.
+    const next = virtualItems
+      .map((item) => rows[item.index])
+      .find((row): row is Exclude<SidebarRow, { kind: "panel" }> =>
+        Boolean(row && row.kind !== "panel")
+      );
+    if (next) void handleLoadMore(next);
+  }, [compact, virtualItems, rows, loadingGroupKey, railLoadError, handleLoadMore]);
   useLayoutEffect(() => {
     if (!pendingFocusId || !listElement) return;
     const row = Array.from(
-      listElement.querySelectorAll<HTMLElement>('[data-panel-tree-row="true"]'),
+      listElement.querySelectorAll<HTMLElement>('[data-panel-tree-row="true"]')
     ).find((element) => element.dataset["panelId"] === pendingFocusId);
     if (row) {
       row.focus();
@@ -1133,7 +1082,13 @@ export function LazyPanelTreeSidebar({
     }
   }, [listElement, pendingFocusId, virtualItems]);
 
-  if (flattenedItems.length === 0) {
+  if (displayedItems.length === 0) {
+    if (compact)
+      return (
+        <Button variant="ghost" aria-label="New panel" title="New panel" onClick={handleNewPanel}>
+          <PlusIcon />
+        </Button>
+      );
     return (
       <Flex direction="column">
         {diagnostics}
@@ -1210,13 +1165,14 @@ export function LazyPanelTreeSidebar({
               return (
                 <Box
                   key={`__load_more__${row.groupKey}`}
+                  className={compact ? "panel-tree-rail-page" : undefined}
                   style={{
                     position: "absolute",
                     top: 0,
                     left: 0,
                     width: "100%",
                     transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
-                    paddingLeft: ROW_PADDING_LEFT + row.depth * INDENTATION_WIDTH,
+                    paddingLeft: compact ? 0 : ROW_PADDING_LEFT + row.depth * INDENTATION_WIDTH,
                   }}
                 >
                   <Button
@@ -1226,10 +1182,17 @@ export function LazyPanelTreeSidebar({
                     disabled={loadingGroupKey !== null}
                     onClick={() => void handleLoadMore(row)}
                     aria-label={`Load ${Math.min(row.remaining, PANEL_TREE_PAGE_SIZE)} older panels`}
+                    title={
+                      railLoadError === row.groupKey ? "Retry loading panels" : "Load more panels"
+                    }
                   >
-                    {loadingGroupKey === row.groupKey
-                      ? "Loading…"
-                      : `Load older panels (${row.remaining})`}
+                    {compact ? (
+                      <PlusIcon />
+                    ) : loadingGroupKey === row.groupKey ? (
+                      "Loading…"
+                    ) : (
+                      `Load older panels (${row.remaining})`
+                    )}
                   </Button>
                 </Box>
               );
@@ -1239,13 +1202,14 @@ export function LazyPanelTreeSidebar({
               return (
                 <Box
                   key={row.kind}
+                  className={compact ? "panel-tree-rail-page" : undefined}
                   style={{
                     position: "absolute",
                     top: 0,
                     left: 0,
                     width: "100%",
                     transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
-                    paddingLeft: ROW_PADDING_LEFT,
+                    paddingLeft: compact ? 0 : ROW_PADDING_LEFT,
                   }}
                 >
                   <Button
@@ -1253,9 +1217,11 @@ export function LazyPanelTreeSidebar({
                     variant="ghost"
                     color="gray"
                     disabled={loadingGroupKey !== null}
-                    onClick={() => void loadMoreRootGroups()}
+                    onClick={() => void handleLoadMore(row)}
+                    aria-label="Load more panel owners"
+                    title="Load more panel owners"
                   >
-                    Load more panel owners
+                    {compact ? <PlusIcon /> : "Load more panel owners"}
                   </Button>
                 </Box>
               );
@@ -1282,32 +1248,53 @@ export function LazyPanelTreeSidebar({
                   transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
                 }}
               >
-                <SortableTreeItem
-                  item={item}
-                  ownerDescription={attribution}
-                  ownerLabel={
-                    owner && owner !== selfUserId
-                      ? ownerDisplayName(owner, ownerProfiles.get(owner))
-                      : undefined
-                  }
-                  guides={guidesById.get(item.id) ?? ""}
-                  isSelected={item.id === selectedId}
-                  isVisible={item.id !== selectedId && (visibleIds?.has(item.id) ?? false)}
-                  showIndicator={item.id === indicatorItemId}
-                  projectedDepth={item.id === indicatorItemId ? projectedDepth : null}
-                  isDraggingAny={dragging}
-                  showIndicatorBelow={showIndicatorBelow}
-                  isTouch={isTouch}
-                  isSortable
-                  onSelect={onSelect}
-                  onToggleCollapse={toggleCollapse}
-                  onPanelContextMenu={onPanelContextMenu}
-                  onArchive={onArchive}
-                  onAddChild={handleAddChild}
-                  onIndent={indentPanel}
-                  onUnindent={unindentPanel}
-                  onMoveFocus={moveFocus}
-                />
+                {compact ? (
+                  <PanelTreeRailItem
+                    item={item}
+                    title={(() => {
+                      const path = [item.panel.title];
+                      let parent = item.parentId;
+                      while (parent) {
+                        path.unshift(panelMap.get(parent)?.title ?? "Panel");
+                        parent = parentMap.get(parent) ?? null;
+                      }
+                      return path.join(" › ");
+                    })()}
+                    selected={item.id === selectedId}
+                    visible={visibleIds?.has(item.id) ?? false}
+                    onSelect={onSelect}
+                    onMoveFocus={moveFocus}
+                    onPanelContextMenu={onPanelContextMenu}
+                    onArchive={onArchive}
+                  />
+                ) : (
+                  <SortableTreeItem
+                    item={item}
+                    ownerDescription={attribution}
+                    ownerLabel={
+                      owner && owner !== selfUserId
+                        ? ownerDisplayName(owner, ownerProfiles.get(owner))
+                        : undefined
+                    }
+                    guides={guidesById.get(item.id) ?? ""}
+                    isSelected={item.id === selectedId}
+                    isVisible={item.id !== selectedId && (visibleIds?.has(item.id) ?? false)}
+                    showIndicator={item.id === indicatorItemId}
+                    projectedDepth={item.id === indicatorItemId ? projectedDepth : null}
+                    isDraggingAny={dragging}
+                    showIndicatorBelow={showIndicatorBelow}
+                    isTouch={isTouch}
+                    isSortable
+                    onSelect={onSelect}
+                    onToggleCollapse={toggleCollapse}
+                    onPanelContextMenu={onPanelContextMenu}
+                    onArchive={onArchive}
+                    onAddChild={handleAddChild}
+                    onIndent={indentPanel}
+                    onUnindent={unindentPanel}
+                    onMoveFocus={moveFocus}
+                  />
+                )}
               </Box>
             );
           })}

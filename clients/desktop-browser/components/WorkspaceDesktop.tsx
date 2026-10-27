@@ -1,3 +1,4 @@
+import { isMac, WORKSPACE_CONTROL_RAIL_WIDTH_PX } from "./windowChrome";
 import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { measureShellPhase } from "../shell/startupPerformance";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
@@ -19,7 +20,14 @@ import {
   useStore,
 } from "jotai";
 import { Button, Callout, Text } from "@radix-ui/themes";
-import { GearIcon, LightningBoltIcon, ReloadIcon } from "@radix-ui/react-icons";
+import {
+  GearIcon,
+  LightningBoltIcon,
+  ReloadIcon,
+  HamburgerMenuIcon,
+  ViewVerticalIcon,
+  PlusIcon,
+} from "@radix-ui/react-icons";
 import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
 import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import {
@@ -66,6 +74,7 @@ type OpenWorkspace = ClientOwner & {
 
 const DEFAULT_SIDEBAR_WIDTH = 272;
 const SIDEBAR_WIDTH_STORAGE_KEY = "workspace-sidebar-width";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "workspace-sidebar-collapsed";
 
 function sidebarWidthBounds(windowWidth: number) {
   const min = windowWidth <= 720 ? 180 : 220;
@@ -98,7 +107,25 @@ export function WorkspaceDesktop({
   const owners = useRef(new Map<string, OpenWorkspace>());
   const accessibleIds = useRef<Set<string> | null>(null);
   const openings = useRef(new Map<string, Promise<OpenWorkspace>>());
-  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarVisible, setSidebarVisible] = useState(() => {
+    try {
+      return (
+        window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) !== "true"
+      );
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_COLLAPSED_STORAGE_KEY,
+        String(!sidebarVisible),
+      );
+    } catch {
+      /* Navigation still works without persistent storage. */
+    }
+  }, [sidebarVisible]);
   const [panelQuery, setPanelQuery] = useState("");
   const navigatePanelHandlers = useRef(
     new Map<string, (panelId: string) => void>(),
@@ -217,7 +244,6 @@ export function WorkspaceDesktop({
   const [error, setError] = useState<string | null>(null);
   const visibleError = error ?? nativeSync.error;
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
-  const [titleBarHost, setTitleBarHost] = useState<HTMLElement | null>(null);
   const [notificationHost, setNotificationHost] = useState<HTMLElement | null>(
     null,
   );
@@ -332,7 +358,9 @@ export function WorkspaceDesktop({
         );
         if (!workspace) {
           const entries = await measureShellPhase(
-            "workspace-catalog", "window", () => hubControl.listWorkspaces(),
+            "workspace-catalog",
+            "window",
+            () => hubControl.listWorkspaces(),
           );
           if (generation !== focusGeneration.current) return;
           workspace = entries.find((entry) => entry.workspaceId === id);
@@ -377,7 +405,9 @@ export function WorkspaceDesktop({
         if (sourceId !== pair.system.workspaceId)
           throw new Error("Desktop chrome must run from your System workspace");
         const entries = await measureShellPhase(
-          "workspace-catalog", "window", () => hubControl.listWorkspaces(),
+          "workspace-catalog",
+          "window",
+          () => hubControl.listWorkspaces(),
         );
         if (!focusedRef.current && !focusWorkspaceId) {
           focusWorkspaceId = initialInfo?.initialFocusedWorkspaceId;
@@ -551,6 +581,25 @@ export function WorkspaceDesktop({
       setError(userFacingError(error));
     }
   };
+  useEffect(() => {
+    if (sidebarVisible) return;
+    let cancelled = false;
+    // The full rail uses the same retained workspace owners as the wide tree.
+    // Open them serially without changing the selected workspace.
+    void (async () => {
+      for (const workspace of catalog) {
+        if (cancelled) return;
+        try {
+          await open(workspace);
+        } catch (error) {
+          if (!cancelled) setError(userFacingError(error));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sidebarVisible, catalog, open]);
   const selectSearchResult = (workspaceId: string, panelId: string) => {
     setPanelQuery("");
     const sequence = ++panelNavigationSequence.current;
@@ -635,28 +684,90 @@ export function WorkspaceDesktop({
         }}
       >
         <div className="workspace-desktop">
-          <header
-            className="workspace-desktop-titlebar"
-            ref={setTitleBarHost}
-          />
           {connectionNotice}
           <div className="workspace-desktop-body">
             <aside
               className="workspace-desktop-navigation"
-              hidden={!sidebarVisible}
-              style={{ width: visibleSidebarWidth }}
+              data-collapsed={!sidebarVisible}
+              aria-label="Workspace navigation"
+              style={{
+                width: sidebarVisible
+                  ? visibleSidebarWidth
+                  : WORKSPACE_CONTROL_RAIL_WIDTH_PX,
+              }}
             >
-              <PanelFinder
-                workspaces={catalog}
-                query={panelQuery}
-                onQueryChange={setPanelQuery}
-                search={searchWorkspacePanels}
-                onSelect={selectSearchResult}
-              />
+              {isMac && (
+                <div
+                  className="workspace-desktop-macos-controls"
+                  aria-hidden="true"
+                />
+              )}
+              <div
+                className="workspace-desktop-toolbar"
+                role="toolbar"
+                aria-label="App controls"
+              >
+                <button
+                  type="button"
+                  aria-label="App menu"
+                  title="App menu"
+                  disabled={!focusedId}
+                  onClick={(event) => {
+                    const owner = focusedId
+                      ? owners.current.get(focusedId)
+                      : undefined;
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    void owner?.client.menu
+                      .showHamburger({
+                        x: Math.round(rect.left),
+                        y: Math.round(rect.bottom),
+                      })
+                      .catch((error: unknown) =>
+                        setError(userFacingError(error)),
+                      );
+                  }}
+                >
+                  <HamburgerMenuIcon />
+                </button>
+                <button
+                  type="button"
+                  aria-label={
+                    sidebarVisible ? "Collapse sidebar" : "Expand sidebar"
+                  }
+                  title={sidebarVisible ? "Collapse sidebar" : "Expand sidebar"}
+                  aria-expanded={sidebarVisible}
+                  onClick={() => setSidebarVisible((visible) => !visible)}
+                >
+                  <ViewVerticalIcon />
+                </button>
+                <button
+                  type="button"
+                  aria-label="New panel"
+                  title="New panel"
+                  disabled={!focusedId}
+                  onClick={() => {
+                    if (focusedId) void createPanel(focusedId);
+                  }}
+                >
+                  <PlusIcon />
+                </button>
+              </div>
+              {sidebarVisible && (
+                <>
+                  <PanelFinder
+                    workspaces={catalog}
+                    query={panelQuery}
+                    onQueryChange={setPanelQuery}
+                    search={searchWorkspacePanels}
+                    onSelect={selectSearchResult}
+                  />
+                </>
+              )}
               <WorkspaceStack
+                compact={!sidebarVisible}
                 scrollRef={setScrollElement}
                 sections={sections}
-                hidden={Boolean(panelQuery.trim())}
+                hidden={sidebarVisible && Boolean(panelQuery.trim())}
                 onToggleExpanded={(id) => {
                   if (!owners.current.has(id)) {
                     void openWorkspace(id).catch(() => undefined);
@@ -700,6 +811,8 @@ export function WorkspaceDesktop({
                   variant="soft"
                   color="gray"
                   size="2"
+                  aria-label="Quickfire"
+                  title="Quickfire"
                   disabled={!focusedId}
                   onClick={() => {
                     const owner = focusedId
@@ -708,7 +821,8 @@ export function WorkspaceDesktop({
                     owner?.store.set(openCommandAgentAtom);
                   }}
                 >
-                  <LightningBoltIcon /> Quickfire
+                  <LightningBoltIcon />
+                  <span>Quickfire</span>
                 </Button>
               </div>
             </aside>
@@ -762,7 +876,6 @@ export function WorkspaceDesktop({
                         <WorkspaceNavigationHostContext.Provider
                           value={{
                             scrollElement,
-                            titleBarHost,
                             notificationHost,
                             setNotificationHost,
                             element:

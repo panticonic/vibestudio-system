@@ -37,10 +37,12 @@ export function WorkspaceStack({
   onAddWorkspace,
   scrollRef,
   hidden,
+  compact = false,
 }: {
   sections: readonly WorkspaceSection[];
   scrollRef(element: HTMLElement | null): void;
   hidden?: boolean;
+  compact?: boolean;
   onToggleExpanded(workspaceId: string): void;
   onOpenWorkspace(workspaceId: string): void;
   onCreatePanel(workspaceId: string): void;
@@ -56,7 +58,13 @@ export function WorkspaceStack({
         : 1;
   const ordered = [...sections].sort((a, b) => rank(a) - rank(b));
   return (
-    <nav ref={scrollRef} className="workspace-stack" aria-label="Workspaces" hidden={hidden}>
+    <nav
+      ref={scrollRef}
+      className="workspace-stack"
+      data-compact={compact}
+      aria-label="Workspaces"
+      hidden={hidden}
+    >
       <div className="workspace-stack-heading">
         <span>Your workspaces</span>
         <button
@@ -102,6 +110,7 @@ export function WorkspaceStack({
                   type="button"
                   className="workspace-section-select"
                   aria-label={`Open ${workspaceLabel(workspace)}`}
+                  title={workspaceLabel(workspace)}
                   aria-current={focused ? "location" : undefined}
                   disabled={unavailable}
                   onClick={() => onOpenWorkspace(workspace.workspaceId)}
@@ -140,6 +149,8 @@ export function WorkspaceStack({
                 <button
                   type="button"
                   className="workspace-section-attention"
+                  aria-label={`${approvalCount} requests need review in ${workspaceLabel(workspace)}`}
+                  title={`${approvalCount} requests need review in ${workspaceLabel(workspace)}`}
                   onClick={() => onReviewApprovals(workspace.workspaceId)}
                 >
                   <span className="workspace-attention-dot" />
@@ -150,7 +161,7 @@ export function WorkspaceStack({
                   </span>
                 </button>
               ) : null}
-              {expanded ? (
+              {expanded || compact ? (
                 <div className="workspace-section-tree">
                   {state === "ready" ? (
                     tree

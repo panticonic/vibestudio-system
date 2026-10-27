@@ -7,11 +7,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import type {
-  NavigationMode,
-  LazyTitleNavigationData,
-  LazyStatusNavigationData,
-} from "./navigationTypes";
+import type { NavigationMode } from "./navigationTypes";
 
 /** Focus an open panel in place; otherwise navigate the focused pane. */
 export type NavigateToPanelId = (panelId: string) => void;
@@ -21,31 +17,29 @@ export interface NavigationLayoutValue {
   addressBarVisible: boolean;
 }
 
-export interface NavigationLazyValue {
-  lazyTitleNavigation: LazyTitleNavigationData | null;
-  lazyStatusNavigation: LazyStatusNavigationData | null;
-}
-
 export interface NavigationActionsValue {
   setMode: (mode: NavigationMode) => void;
   setAddressBarVisible: (visible: boolean) => void;
-  setLazyTitleNavigation: (data: LazyTitleNavigationData | null) => void;
-  setLazyStatusNavigation: (data: LazyStatusNavigationData | null) => void;
   navigateToId: NavigateToPanelId;
   registerNavigateToId: (fn: NavigateToPanelId) => void;
 }
 
 export type NavigationContextValue = NavigationLayoutValue &
-  NavigationLazyValue &
   NavigationActionsValue;
 
-const NavigationLayoutContext = createContext<NavigationLayoutValue | null>(null);
-const NavigationLazyContext = createContext<NavigationLazyValue | null>(null);
-const NavigationActionsContext = createContext<NavigationActionsValue | null>(null);
+const NavigationLayoutContext = createContext<NavigationLayoutValue | null>(
+  null,
+);
+const NavigationActionsContext = createContext<NavigationActionsValue | null>(
+  null,
+);
 const SMALL_WINDOW_QUERY = "(max-width: 767px)";
 
 export function getDefaultNavigationMode(): NavigationMode {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+  if (
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function"
+  ) {
     return "tree";
   }
 
@@ -55,15 +49,9 @@ export function getDefaultNavigationMode(): NavigationMode {
 export function useNavigationLayout(): NavigationLayoutValue {
   const context = useContext(NavigationLayoutContext);
   if (!context) {
-    throw new Error("useNavigationLayout must be used within a NavigationProvider");
-  }
-  return context;
-}
-
-export function useNavigationLazy(): NavigationLazyValue {
-  const context = useContext(NavigationLazyContext);
-  if (!context) {
-    throw new Error("useNavigationLazy must be used within a NavigationProvider");
+    throw new Error(
+      "useNavigationLayout must be used within a NavigationProvider",
+    );
   }
   return context;
 }
@@ -71,7 +59,9 @@ export function useNavigationLazy(): NavigationLazyValue {
 export function useNavigationActions(): NavigationActionsValue {
   const context = useContext(NavigationActionsContext);
   if (!context) {
-    throw new Error("useNavigationActions must be used within a NavigationProvider");
+    throw new Error(
+      "useNavigationActions must be used within a NavigationProvider",
+    );
   }
   return context;
 }
@@ -79,7 +69,6 @@ export function useNavigationActions(): NavigationActionsValue {
 export function useNavigation(): NavigationContextValue {
   return {
     ...useNavigationLayout(),
-    ...useNavigationLazy(),
     ...useNavigationActions(),
   };
 }
@@ -89,7 +78,9 @@ interface NavigationProviderProps {
 }
 
 export function NavigationProvider({ children }: NavigationProviderProps) {
-  const [mode, setMode] = useState<NavigationMode>(() => getDefaultNavigationMode());
+  const [mode, setMode] = useState<NavigationMode>(() =>
+    getDefaultNavigationMode(),
+  );
   const [addressBarVisible, setAddressBarVisible] = useState(() => {
     try {
       return localStorage.getItem("address-bar-visible") === "true";
@@ -98,14 +89,6 @@ export function NavigationProvider({ children }: NavigationProviderProps) {
     }
   });
 
-  // ID-based lazy navigation state
-  const [lazyTitleNavigation, setLazyTitleNavigation] = useState<LazyTitleNavigationData | null>(
-    null
-  );
-  const [lazyStatusNavigation, setLazyStatusNavigation] = useState<LazyStatusNavigationData | null>(
-    null
-  );
-
   // Use ref for stable navigateToId callback (prevents listener cycling)
   const navigateToIdFnRef = useRef<NavigateToPanelId>(() => {});
 
@@ -113,7 +96,7 @@ export function NavigationProvider({ children }: NavigationProviderProps) {
     (panelId: string) => {
       navigateToIdFnRef.current(panelId);
     },
-    [] // Stable forever - no dependencies
+    [], // Stable forever - no dependencies
   );
 
   const registerNavigateToId = useCallback((fn: NavigateToPanelId) => {
@@ -134,33 +117,22 @@ export function NavigationProvider({ children }: NavigationProviderProps) {
       mode,
       addressBarVisible,
     }),
-    [mode, addressBarVisible]
-  );
-  const lazyValue = useMemo<NavigationLazyValue>(
-    () => ({
-      lazyTitleNavigation,
-      lazyStatusNavigation,
-    }),
-    [lazyTitleNavigation, lazyStatusNavigation]
+    [mode, addressBarVisible],
   );
   const actionsValue = useMemo<NavigationActionsValue>(
     () => ({
       setMode,
       setAddressBarVisible: setPersistedAddressBarVisible,
-      setLazyTitleNavigation,
-      setLazyStatusNavigation,
       navigateToId,
       registerNavigateToId,
     }),
-    [setPersistedAddressBarVisible, navigateToId, registerNavigateToId]
+    [setPersistedAddressBarVisible, navigateToId, registerNavigateToId],
   );
 
   return (
     <NavigationActionsContext.Provider value={actionsValue}>
       <NavigationLayoutContext.Provider value={layoutValue}>
-        <NavigationLazyContext.Provider value={lazyValue}>
-          {children}
-        </NavigationLazyContext.Provider>
+        {children}
       </NavigationLayoutContext.Provider>
     </NavigationActionsContext.Provider>
   );

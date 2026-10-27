@@ -1,4 +1,8 @@
-import type { PanelSummary, PanelAncestor, DescendantSiblingGroup } from "@vibestudio/shared/types";
+import type {
+  PanelSummary,
+  PanelAncestor,
+  DescendantSiblingGroup,
+} from "@vibestudio/shared/types";
 
 export type NavigationMode = "stack" | "tree";
 
@@ -7,14 +11,11 @@ export type { PanelSummary, PanelAncestor, DescendantSiblingGroup };
 
 /**
  * Lazy title navigation data using PanelSummary.
- * Used for breadcrumbs and sibling tabs.
+ * Ancestors and the current panel for one pane.
  */
 export interface LazyTitleNavigationData {
   ancestors: PanelAncestor[];
-  currentSiblings: PanelSummary[];
-  currentId: string;
-  currentTitle: string;
-  currentChildCount: number;
+  current: PanelSummary;
 }
 
 /**

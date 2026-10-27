@@ -58,19 +58,11 @@ export const MIN_COLUMN_WIDTH = 575;
 export const PREFERRED_COLUMN_WIDTH = MIN_COLUMN_WIDTH;
 export const MIN_PANE_HEIGHT = 160;
 export const COLUMN_DIVIDER_WIDTH = 7;
-/**
- * Resting thickness of a pane's top rail: a seam, not a bar. It carries the
- * focus mark and nothing else, and it is the only shell DOM a pointer can reach
- * above a natively composited panel view — so it cannot go to zero.
- */
-export const PANE_RAIL_REST_HEIGHT = 4;
-/** Thickness the rail takes while it is showing the pane header. */
-export const PANE_RAIL_EXPANDED_HEIGHT = 22;
-/** A horizontal pane divider uses the same hit-target thickness as column dividers. */
+/** Permanent pane titlebar, including breadcrumbs and pane actions. */
+export const PANE_TITLEBAR_HEIGHT = 36;
 export const PANE_DIVIDER_HEIGHT = COLUMN_DIVIDER_WIDTH;
-/** Per-pane vertical overhead used by the placement engine's fit calculation. */
 export const PANE_VERTICAL_CHROME_HEIGHT =
-  PANE_RAIL_REST_HEIGHT + PANE_DIVIDER_HEIGHT;
+  PANE_TITLEBAR_HEIGHT + PANE_DIVIDER_HEIGHT;
 
 function mintId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;

@@ -21,10 +21,6 @@ import {
 import { VibestudioLogo } from "@workspace/ui/brand";
 import { useIsMobile } from "@workspace/react/responsive";
 
-import type {
-  LazyTitleNavigationData,
-  LazyStatusNavigationData,
-} from "./navigationTypes";
 import type { PanelContextMenuAction } from "@vibestudio/shared/types";
 import {
   DEFAULT_SEARCH_TEMPLATE,
@@ -46,8 +42,6 @@ import {
   useFullPanel,
   usePanelTree,
   useAncestors,
-  useSiblings,
-  useDescendantSiblingGroups,
 } from "../shell/hooks/PanelTreeContext";
 
 import {
@@ -77,30 +71,21 @@ import {
 import {
   openInNewColumnAction,
   panelCreatedLayoutAction,
+  panelNavigationAction,
 } from "../layout/panelPresentation";
 import {
   PANE_VERTICAL_CHROME_HEIGHT,
   type LayoutDropTarget,
   type PanelPlacementHint,
 } from "../layout/types";
-import type { FocusedPaneChromeState, PaneChromeCommand } from "./paneChrome";
+import { PaneTitleBar } from "./PaneTitleBar";
+import { TitleBar } from "./TitleBar";
 
 interface PanelStackProps {
-  onChromeStateChange?: (state: PanelChromeState | null) => void;
   hostTheme: "light" | "dark";
   onRegisterDevToolsHandler?: (handler: () => void) => void;
   onRegisterNavigateToId?: (navigate: NavigateToPanelId) => void;
-  onRegisterPanelContextMenu?: (
-    handler: (
-      panelId: string,
-      position: { x: number; y: number },
-    ) => Promise<void>,
-  ) => void;
   onRegisterChromeCommand?: (handler: (command: ChromeCommand) => void) => void;
-  onPaneChromeStateChange?: (state: FocusedPaneChromeState | null) => void;
-  onRegisterPaneChromeCommand?: (
-    handler: (command: PaneChromeCommand) => void,
-  ) => void;
 }
 
 function reportPanelCommandError(
@@ -156,14 +141,10 @@ function captureHostThemeCss(): string {
 }
 
 export const PanelStack = memo(function PanelStack({
-  onChromeStateChange,
   hostTheme,
   onRegisterDevToolsHandler,
   onRegisterNavigateToId,
-  onRegisterPanelContextMenu,
   onRegisterChromeCommand,
-  onPaneChromeStateChange,
-  onRegisterPaneChromeCommand,
 }: PanelStackProps) {
   const {
     app,
@@ -174,29 +155,29 @@ export const PanelStack = memo(function PanelStack({
     view,
   } = useShellWorkspaceClient();
 
-  const performReload = useCallback(async (panelId: string) => {
-    await panelService.markBrowserNavigationIntent(
-      panelId,
-      assertPresent(getBrowserNavigationIntentForCommand("reload-panel")),
-    );
-    return panelService.reload(panelId);
-  }, [panelService]);
-  const { reload: reloadPanel, pending: reloadingPanels } = usePanelReload(performReload);
+  const performReload = useCallback(
+    async (panelId: string) => {
+      await panelService.markBrowserNavigationIntent(
+        panelId,
+        assertPresent(getBrowserNavigationIntentForCommand("reload-panel")),
+      );
+      return panelService.reload(panelId);
+    },
+    [panelService],
+  );
+  const { reload: reloadPanel, pending: reloadingPanels } =
+    usePanelReload(performReload);
 
   const navigationHost = useWorkspaceNavigationHost();
   const workspaceVisible = useWorkspaceVisible();
   const { mode: navigationMode } = useNavigationLayout();
-  const {
-    setMode,
-    setLazyTitleNavigation,
-    setLazyStatusNavigation,
-    registerNavigateToId,
-    setAddressBarVisible,
-  } = useNavigationActions();
+  const { setMode, registerNavigateToId, setAddressBarVisible } =
+    useNavigationActions();
 
   const setPinnedPanelIds = useSetAtom(pinnedPanelIdsAtom);
   const bumpPinMutationSeq = useSetAtom(pinMutationSeqAtom);
   const openWorkspaceChooser = useSetAtom(workspaceChooserDialogOpenAtom);
+  const [chromeState, setChromeState] = useState<PanelChromeState | null>(null);
   const openCommandAgent = useSetAtom(openCommandAgentAtom);
 
   // The layout content viewport (the area right of the sidebar) drives the
@@ -273,11 +254,8 @@ export const PanelStack = memo(function PanelStack({
   // Lazy data hooks — chrome, breadcrumbs, and commands follow the focused pane.
   const { panels: rootPanels, loading: rootLoading } = useRootPanels();
   const { panel: visiblePanel } = useFullPanel(focusedPanelId);
-  const { panelMap } = usePanelTree();
+  const { panelMap, parentMap } = usePanelTree();
   const { ancestors } = useAncestors(focusedPanelId);
-  const { siblings } = useSiblings(focusedPanelId);
-  const { groups: descendantGroups } =
-    useDescendantSiblingGroups(focusedPanelId);
 
   useShellEvent(
     "toggle-find-in-page",
@@ -360,55 +338,14 @@ export const PanelStack = memo(function PanelStack({
   // Startup restore, deleted-panel fallback, and tree reconcile all live in
   // usePanelLayout (§7, §4.5); the engine is the single writer of layout state.
 
-  // Build lazy title navigation data
-  const lazyTitleNavigationData =
-    useMemo<LazyTitleNavigationData | null>(() => {
-      if (!visiblePanel) {
-        return null;
-      }
-
-      return {
-        ancestors,
-        currentSiblings: siblings,
-        currentId: visiblePanel.id,
-        currentTitle: visiblePanel.title,
-        currentChildCount: panelMap.get(visiblePanel.id)?.childCount ?? 0,
-      };
-    }, [ancestors, panelMap, siblings, visiblePanel]);
-
-  // Build lazy status navigation data
-  const lazyStatusNavigationData =
-    useMemo<LazyStatusNavigationData | null>(() => {
-      if (!focusedPanelId) {
-        return null;
-      }
-
-      return {
-        descendantGroups,
-        visiblePanelId: focusedPanelId,
-      };
-    }, [descendantGroups, focusedPanelId]);
-
-  // Update navigation context with lazy data
-  useEffect(() => {
-    setLazyTitleNavigation(lazyTitleNavigationData);
-  }, [setLazyTitleNavigation, lazyTitleNavigationData]);
-
-  useEffect(() => {
-    setLazyStatusNavigation(lazyStatusNavigationData);
-  }, [setLazyStatusNavigation, lazyStatusNavigationData]);
-
   // Navigate to an existing panel by ID. Creation never enters this boundary;
   // panel-created is the sole source of creation placement.
   const navigateToPanelId = useCallback<NavigateToPanelId>(
     (panelId) => {
       if (!panelId) return;
-      dispatch({
-        type: "show-panel",
-        panelId,
-      });
+      dispatch(panelNavigationAction(layout, panelId, parentMap));
     },
-    [dispatch],
+    [dispatch, layout, parentMap],
   );
 
   // Register navigate function with context
@@ -672,10 +609,6 @@ export const PanelStack = memo(function PanelStack({
     [contentSize.height, handlePanelAction, layout],
   );
 
-  useEffect(() => {
-    onRegisterPanelContextMenu?.(showPanelContextMenu);
-  }, [onRegisterPanelContextMenu, showPanelContextMenu]);
-
   // Handle direct close button clicks (X button in tree sidebar)
   const handleArchive = useCallback(async (panelId: string) => {
     try {
@@ -729,10 +662,9 @@ export const PanelStack = memo(function PanelStack({
           return;
         case "reload-panel":
         case "reload-view":
-          void reloadPanel(panelId)
-            .catch((error) =>
-              reportPanelCommandError(notification, "Reload", error),
-            );
+          void reloadPanel(panelId).catch((error) =>
+            reportPanelCommandError(notification, "Reload", error),
+          );
           return;
         case "force-reload-view":
           void panelService.markBrowserNavigationIntent(
@@ -1173,7 +1105,7 @@ export const PanelStack = memo(function PanelStack({
 
   useEffect(() => {
     if (!visiblePanel) {
-      onChromeStateChange?.(null);
+      setChromeState(null);
       return;
     }
 
@@ -1187,13 +1119,13 @@ export const PanelStack = memo(function PanelStack({
         navigation: visiblePanel.navigation,
       },
     });
-    onChromeStateChange?.(fallback);
+    setChromeState(fallback);
 
     let cancelled = false;
     void panelService
       .getChromeState(visiblePanel.id)
       .then((state) => {
-        if (!cancelled) onChromeStateChange?.(state);
+        if (!cancelled) setChromeState(state);
       })
       .catch(() => {
         // Fallback above is enough when git/server metadata is unavailable.
@@ -1201,7 +1133,7 @@ export const PanelStack = memo(function PanelStack({
     return () => {
       cancelled = true;
     };
-  }, [onChromeStateChange, visiblePanel]);
+  }, [visiblePanel]);
 
   // Navigation mode changes the native panel slot's available width without
   // changing the panel layout model itself. Force a presentation commit so
@@ -1219,8 +1151,8 @@ export const PanelStack = memo(function PanelStack({
       setMode("stack");
     }
   }, [isMobile, navigationHost, setMode]);
-  // Plain tree click retargets the focused pane; Cmd/Ctrl-click force-opens
-  // beside it. This makes the tree the canonical picker for a chosen slot.
+  // Descendants open beside their focused ancestor when they fit; modifiers
+  // explicitly request a new logical column regardless of available width.
   const navigateFromTree = useCallback(
     (panelId: string, options?: { openBeside?: boolean }) => {
       if (options?.openBeside && layout.focusedPaneId) {
@@ -1230,11 +1162,11 @@ export const PanelStack = memo(function PanelStack({
           anchorPaneId: layout.focusedPaneId,
         });
       } else {
-        dispatch({ type: "show-panel", panelId });
+        navigateToPanelId(panelId);
       }
       closeMobileTree();
     },
-    [closeMobileTree, dispatch, layout.focusedPaneId],
+    [closeMobileTree, dispatch, layout.focusedPaneId, navigateToPanelId],
   );
   useEffect(() => {
     return navigationHost?.registerNavigateToPanel?.(navigateFromTree);
@@ -1258,62 +1190,6 @@ export const PanelStack = memo(function PanelStack({
     (paneId: string) => dispatch({ type: "close-pane", paneId }),
     [dispatch],
   );
-  const createChildInPane = useCallback(
-    (paneId: string) => {
-      const panelId = findPane(layout, paneId)?.pane.panelId;
-      if (!panelId) return;
-      void createChildForPanel(panelId, "side").catch((error) =>
-        reportPanelCommandError(notification, "Create child panel", error),
-      );
-    },
-    [createChildForPanel, layout],
-  );
-  const runPaneChromeCommand = useCallback(
-    (command: PaneChromeCommand) => {
-      const paneId = layout.focusedPaneId;
-      if (!paneId) return;
-      switch (command.type) {
-        case "new-child":
-          createChildInPane(paneId);
-          break;
-        case "open-child-beside":
-          dispatch(openInNewColumnAction(layout, command.panelId));
-          break;
-        case "close-pane":
-          closePane(paneId);
-          break;
-      }
-    },
-    [closePane, createChildInPane, dispatch, layout.focusedPaneId],
-  );
-  const layoutPaneCount = useMemo(
-    () =>
-      layout.columns.reduce((total, column) => total + column.panes.length, 0),
-    [layout.columns],
-  );
-  const paneChromeState = useMemo<FocusedPaneChromeState | null>(() => {
-    const paneId = layout.focusedPaneId;
-    const location = paneId ? findPane(layout, paneId) : null;
-    if (!location) return null;
-    const focusedTreePanel = panelMap.get(location.pane.panelId);
-    return {
-      paneId: location.pane.id,
-      panelId: location.pane.panelId,
-      children:
-        focusedTreePanel?.children.map((child) => ({
-          panelId: child.id,
-          title: child.title,
-        })) ?? [],
-      selectedChildPanelId: focusedTreePanel?.selectedChildId ?? null,
-      layoutPaneCount,
-    };
-  }, [layout, layoutPaneCount, panelMap]);
-  useEffect(() => {
-    onPaneChromeStateChange?.(paneChromeState);
-  }, [onPaneChromeStateChange, paneChromeState]);
-  useEffect(() => {
-    onRegisterPaneChromeCommand?.(runPaneChromeCommand);
-  }, [onRegisterPaneChromeCommand, runPaneChromeCommand]);
   const dismissUnresponsive = useCallback((panelId: string) => {
     setUnresponsivePanels((current) => {
       const next = new Set(current);
@@ -1496,10 +1372,9 @@ export const PanelStack = memo(function PanelStack({
         {navigationHost?.element &&
           createPortal(
             <LazyPanelTreeSidebar
+              compact={!navigationHost.sidebarVisible}
               scrollElement={navigationHost.scrollElement}
-              revealSelection={
-                workspaceVisible && navigationHost.sidebarVisible
-              }
+              revealSelection={workspaceVisible}
               selectedId={focusedPanelId}
               visibleIds={visibleIdSet}
               ancestorIds={ancestorIds}
@@ -1519,12 +1394,18 @@ export const PanelStack = memo(function PanelStack({
           gap="0"
           style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}
         >
+          {layoutEmpty && <TitleBar onChromeCommand={runChromeCommand} />}
           <SavePasswordBar visiblePanelId={focusedPanelId} />
           {reloadingPanels.size > 0 && (
             <Flex role="status" align="center" gap="2" px="3" py="2">
               <Spinner size="1" />
               <Text size="2">
-                Reloading {Array.from(reloadingPanels, (id) => panelMap.get(id)?.title ?? "panel").join(", ")}…
+                Reloading{" "}
+                {Array.from(
+                  reloadingPanels,
+                  (id) => panelMap.get(id)?.title ?? "panel",
+                ).join(", ")}
+                …
               </Text>
             </Flex>
           )}
@@ -1638,6 +1519,36 @@ export const PanelStack = memo(function PanelStack({
                 </Flex>
               ) : (
                 <ColumnRow
+                  renderTitleBar={(paneId, panelId) => {
+                    const focused = layout.focusedPaneId === paneId;
+                    return (
+                      <PaneTitleBar
+                        key={panelId}
+                        panelId={panelId}
+                        title={panelMap.get(panelId)?.title ?? "Panel"}
+                        focused={focused}
+                        reserveWindowControls={false}
+                        chromeState={
+                          focused && chromeState?.panelId === panelId
+                            ? chromeState
+                            : null
+                        }
+                        onChromeCommand={runChromeCommand}
+                        onNavigateToId={(id) => {
+                          focusPane(paneId);
+                          dispatch(
+                            panelNavigationAction(
+                              layout,
+                              id,
+                              parentMap,
+                              panelId,
+                            ),
+                          );
+                        }}
+                        onPanelContextMenu={showPanelContextMenu}
+                      />
+                    );
+                  }}
                   layout={layout}
                   residentColumnIds={residentColumnIds}
                   layoutEpoch={layoutEpoch}

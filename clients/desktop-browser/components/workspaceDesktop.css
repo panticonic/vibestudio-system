@@ -1,4 +1,3 @@
-.workspace-desktop-titlebar { flex: none; min-width: 0; }
 .workspace-connection-notice { display: flex; flex: none; align-items: center; gap: 12px; min-width: 0; padding: 8px 12px; border-block: 1px solid var(--amber-a6); background: var(--amber-a3); color: var(--gray-12); }
 .workspace-connection-notice[data-terminal="true"] { border-color: var(--red-a6); background: var(--red-a3); }
 .workspace-connection-notice-copy { display: flex; flex: 1 1 auto; align-items: baseline; gap: 8px; min-width: 0; }
@@ -7,10 +6,9 @@
 .workspace-connection-notice-error { color: var(--red-11); }
 .workspace-desktop-body { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; }
 .workspace-desktop { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; background: var(--app-chrome-bg); height: 100dvh; overflow: hidden; }
-/* The navigation is frame, not content: it takes the same chrome fill as the
-   titlebar (`--app-chrome-bg`) rather than Radix's panel colour, which in light
-   mode is near-white and reads as lighter than the panels it lists. */
-.workspace-desktop-navigation { display: flex; flex-direction: column; min-height: 0; flex-shrink: 0; background: var(--app-chrome-bg); }
+/* Give navigation its own surface, including sticky workspace headings, so
+   both the expanded tree and collapsed rail read apart from panel content. */
+.workspace-desktop-navigation { --app-chrome-bg: var(--app-navigation-bg); display: flex; flex-direction: column; min-height: 0; flex-shrink: 0; background: var(--app-chrome-bg); border-inline-end: 1px solid var(--gray-7); }
 .workspace-desktop-navigation > .workspace-stack { flex: 1; min-height: 0; overflow-y: auto; }
 .panel-finder-field { display: flex; align-items: center; gap: 7px; flex: none; height: 32px; margin: 8px 8px 3px; padding: 0 8px; border: 1px solid var(--gray-a6); border-radius: var(--radius-2); background: var(--surface-raised); color: var(--gray-9); }
 .panel-finder-field:focus-within { border-color: var(--accent-8); }
@@ -38,6 +36,16 @@
 .workspace-desktop-starting { margin: auto; }
 @media(max-width: 720px) { .workspace-connection-notice { align-items: flex-start; flex-wrap: wrap; } .workspace-connection-notice-copy { align-items: flex-start; flex-direction: column; gap: 2px; } .workspace-connection-notice-message { white-space: normal; } }
 
-.workspace-desktop-navigation[hidden] { display: none; }
+.workspace-desktop-toolbar { display: flex; align-items: center; gap: 4px; flex: none; height: 36px; padding: 2px 6px; border-bottom: 1px solid var(--app-chrome-border); -webkit-app-region: drag; }
+.workspace-desktop-toolbar button { display: grid; place-items: center; width: 32px; height: 30px; padding: 0; flex: none; border: 0; border-radius: var(--radius-2); background: transparent; color: var(--gray-11); cursor: pointer; -webkit-app-region: no-drag; }
+.workspace-desktop-toolbar button:hover { background: var(--app-chrome-hover); color: var(--gray-12); }
+.workspace-desktop-toolbar button:focus-visible { outline: 2px solid var(--accent-9); outline-offset: -2px; }
+.workspace-desktop-toolbar button:disabled { opacity: 0.45; cursor: default; }
+.workspace-desktop-navigation[data-collapsed="true"] .workspace-desktop-toolbar { height: auto; flex-direction: column; padding: 4px 0; }
+.workspace-desktop-navigation[data-collapsed="true"] .workspace-desktop-controls { flex-direction: column; padding: 6px 0; gap: 4px; }
+.workspace-desktop-navigation[data-collapsed="true"] .workspace-desktop-controls > button { flex: none; width: 32px; min-width: 0; height: 32px; padding: 0; }
+.workspace-desktop-navigation[data-collapsed="true"] .workspace-desktop-controls > button span { display: none; }
 
 .workspace-desktop-notifications { flex: none; min-width: 0; }
+
+.workspace-desktop-macos-controls { height: 36px; flex-shrink: 0; -webkit-app-region: drag; }

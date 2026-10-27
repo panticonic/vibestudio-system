@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { WINDOW_CONTROL_RESERVE_PX } from "./windowChrome";
+import type { ReactNode, CSSProperties } from "react";
 import { Cross2Icon, DragHandleDots2Icon } from "@radix-ui/react-icons";
 import { Box, Flex, IconButton, Tooltip } from "@radix-ui/themes";
-import { useTouchDevice } from "@workspace/react/responsive";
 
 import { useLayoutDrag } from "../shell/hooks/LayoutDragContext";
 import { PaneContent } from "./PaneContent";
-import { PANE_RAIL_EXPANDED_HEIGHT, PANE_RAIL_REST_HEIGHT, type LayoutPane } from "../layout/types";
+import { PANE_TITLEBAR_HEIGHT, type LayoutPane } from "../layout/types";
 
 /** The grip is a move handle once focused, so plain arrows place the pane. */
-const ARROW_DIRECTIONS: Record<string, "left" | "right" | "up" | "down" | undefined> = {
+const ARROW_DIRECTIONS: Record<
+  string,
+  "left" | "right" | "up" | "down" | undefined
+> = {
   ArrowLeft: "left",
   ArrowRight: "right",
   ArrowUp: "up",
@@ -16,14 +19,10 @@ const ARROW_DIRECTIONS: Record<string, "left" | "right" | "up" | "down" | undefi
 };
 
 interface PaneViewProps {
+  titleBar: ReactNode;
+  reserveWindowControls?: boolean;
   pane: LayoutPane;
   focused: boolean;
-  /**
-   * Whether focus is worth drawing at all — false when this is the only pane on
-   * screen. Separate from `focused`, which stays true regardless because it also
-   * drives native slot binding.
-   */
-  showPaneFocus: boolean;
   /** The panel's title, shown on the chip while this pane is being dragged. */
   title: string;
   resident: boolean;
@@ -33,30 +32,18 @@ interface PaneViewProps {
   onFocusPane: (paneId: string) => void;
   onClosePane?: (paneId: string) => void;
   /** Arrow-key placement while the grip has keyboard focus. */
-  onMovePane: (paneId: string, direction: "left" | "right" | "up" | "down") => void;
+  onMovePane: (
+    paneId: string,
+    direction: "left" | "right" | "up" | "down",
+  ) => void;
 }
 
-/**
- * One pane: a native-view content state machine under a rail that is a seam at
- * rest and a header while the pointer is on it.
- *
- * Native panel views composite above ordinary shell DOM, so pane-local controls
- * cannot float over the panel and the rail cannot collapse to nothing: whatever
- * the shell reserves is the only surface a pointer can reach. A true notch —
- * chrome that costs no layout at rest — is therefore impossible, so the rail
- * commits in the other direction instead of splitting the difference. At rest
- * it is a 4px seam that carries only the focus mark; on hover, keyboard focus,
- * or touch it becomes a real pane header, and the panel below shifts down by
- * that difference exactly once per hover (one native geometry update, the same
- * path a divider drag uses every frame).
- *
- * The header is deliberately styled as a header — full-bleed, seated on the
- * pane, with its own bottom edge — rather than a capsule hovering in dead space.
- */
+/** One pane owns its permanent titlebar and native content surface. */
 export function PaneView({
+  titleBar,
+  reserveWindowControls,
   pane,
   focused,
-  showPaneFocus,
   title,
   resident,
   layoutEpoch,
@@ -66,24 +53,15 @@ export function PaneView({
   onClosePane,
   onMovePane,
 }: PaneViewProps) {
-  const isTouch = useTouchDevice();
-  const { beginPaneDrag, source: dragSource } = useLayoutDrag();
-  const [railHovered, setRailHovered] = useState(false);
-  const [railFocusWithin, setRailFocusWithin] = useState(false);
-  const markFocused = focused && showPaneFocus;
-  // With a single pane there is nothing to focus away from and nothing to
-  // close, so the rail stays a seam and never steals a pixel from the panel.
-  const railInteractive = Boolean(onClosePane);
-  const dragging = dragSource?.fromPaneId === pane.id;
-  // The header is the pane's handle: while a drag is live it must stay up, or
-  // the grip would vanish from under the pointer that grabbed it.
-  const expanded = railInteractive && (railHovered || railFocusWithin || isTouch || dragging);
+  const { beginPaneDrag } = useLayoutDrag();
+  const movable = Boolean(onClosePane);
 
   return (
     <Flex
       direction="column"
       data-pane-id={pane.id}
       data-pane-panel-id={pane.panelId}
+      data-pane-focused={focused ? "true" : "false"}
       style={{
         flex: `${pane.heightFr} 1 0`,
         minHeight: 0,
@@ -100,45 +78,15 @@ export function PaneView({
       }}
     >
       <Box
-        data-pane-rail={pane.id}
-        data-pane-rail-expanded={expanded ? "true" : "false"}
-        onPointerEnter={() => setRailHovered(true)}
-        onPointerLeave={() => setRailHovered(false)}
-        onFocusCapture={() => setRailFocusWithin(true)}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-            setRailFocusWithin(false);
-          }
-        }}
-        style={{
-          // Snapped, not animated: each intermediate height would be another
-          // native view resize, and the panel underneath would reflow through
-          // every frame of the transition for no legibility gained.
-          height: expanded ? PANE_RAIL_EXPANDED_HEIGHT : PANE_RAIL_REST_HEIGHT,
-          flexShrink: 0,
-          position: "relative",
-          // The seam is the focus mark. Unfocused panes leave it empty so the
-          // rail reads as the edge of the pane rather than a strip of chrome.
-          // While the header is up it owns the whole rail, so the mark steps
-          // aside — the header is opaque and would otherwise tint accent.
-          backgroundColor: markFocused && !expanded ? "var(--accent-9)" : "transparent",
-          overflow: "hidden",
-        }}
+        data-pane-titlebar={pane.id}
+        style={{ height: PANE_TITLEBAR_HEIGHT, flexShrink: 0 }}
       >
         <Flex
           align="center"
           style={{
-            position: "absolute",
-            inset: 0,
-            height: PANE_RAIL_EXPANDED_HEIGHT,
-            // Opaque, not an alpha wash: the rail underneath carries the
-            // accent focus mark, and a translucent header would read as a
-            // bright accent bar rather than chrome.
-            backgroundColor: "var(--gray-2)",
-            borderBottom: "1px solid var(--gray-a6)",
-            opacity: expanded ? 1 : 0,
-            pointerEvents: expanded ? "auto" : "none",
-            transition: "opacity 90ms ease-out",
+            height: "100%",
+            background: "var(--app-chrome-bg)",
+            borderBottom: "1px solid var(--gray-a5)",
           }}
         >
           <button
@@ -146,12 +94,12 @@ export function PaneView({
             aria-label={`Move ${title}`}
             title="Drag to move this pane, or use the arrow keys"
             aria-keyshortcuts={
-              railInteractive ? "ArrowLeft ArrowRight ArrowUp ArrowDown" : undefined
+              movable ? "ArrowLeft ArrowRight ArrowUp ArrowDown" : undefined
             }
-            tabIndex={railInteractive ? 0 : -1}
+            tabIndex={movable ? 0 : -1}
             data-pane-drag-handle={pane.id}
             onPointerDown={(event) => {
-              if (!railInteractive) return;
+              if (!movable) return;
               beginPaneDrag(event, {
                 panelId: pane.panelId,
                 title,
@@ -159,83 +107,79 @@ export function PaneView({
               });
             }}
             onKeyDown={(event) => {
-              if (!railInteractive) return;
+              if (!movable) return;
               const direction = ARROW_DIRECTIONS[event.key];
-              if (!direction || event.ctrlKey || event.metaKey || event.altKey) return;
+              if (!direction || event.ctrlKey || event.metaKey || event.altKey)
+                return;
               event.preventDefault();
               onMovePane(pane.id, direction);
             }}
-            style={{
-              flex: "0 0 24px",
-              height: "100%",
-              minWidth: 0,
-              padding: 0,
-              border: 0,
-              background: "transparent",
-              cursor: railInteractive ? "grab" : "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+            style={
+              {
+                flex: "0 0 24px",
+                height: "100%",
+                minWidth: 0,
+                padding: 0,
+                border: 0,
+                background: "transparent",
+                cursor: movable ? "grab" : "pointer",
+                appRegion: "no-drag",
+                WebkitAppRegion: "no-drag",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              } as CSSProperties
+            }
           >
             <DragHandleDots2Icon width={12} height={12} />
           </button>
-          <button
-            type="button"
-            aria-label={`Focus ${title}`}
-            aria-pressed={focused}
-            title={title}
-            tabIndex={railInteractive ? 0 : -1}
-            onClick={() => onFocusPane(pane.id)}
-            style={{
-              flex: "1 1 0",
-              minWidth: 0,
-              height: "100%",
-              padding: "0 4px",
-              border: 0,
-              background: "transparent",
-              color: markFocused ? "var(--accent-11)" : "var(--gray-11)",
-              font: "inherit",
-              fontSize: 11,
-              textAlign: "left",
-              cursor: "pointer",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
+          <Box
+            style={{ flex: "1 1 0", minWidth: 0 }}
+            onPointerDown={() => onFocusPane(pane.id)}
+            onFocusCapture={() => onFocusPane(pane.id)}
           >
-            {title}
-          </button>
+            {titleBar}
+          </Box>
           {onClosePane && (
             <Tooltip content="Close pane — panel stays in the tree">
               <IconButton
                 size="1"
-                variant="ghost"
+                variant="soft"
                 color="gray"
                 radius="small"
                 aria-label="Close pane"
                 data-pane-close={pane.id}
-                tabIndex={expanded ? 0 : -1}
+                tabIndex={0}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
                   onClosePane(pane.id);
                 }}
-                style={{
-                  width: PANE_RAIL_EXPANDED_HEIGHT - 5,
-                  height: PANE_RAIL_EXPANDED_HEIGHT - 5,
-                  flexShrink: 0,
-                  margin: "0 2px",
-                  padding: 0,
-                }}
+                style={
+                  {
+                    appRegion: "no-drag",
+                    WebkitAppRegion: "no-drag",
+                    width: PANE_TITLEBAR_HEIGHT - 5,
+                    height: PANE_TITLEBAR_HEIGHT - 5,
+                    flexShrink: 0,
+                    margin: "0 2px",
+                    padding: 0,
+                  } as CSSProperties
+                }
               >
                 <Cross2Icon width={12} height={12} />
               </IconButton>
             </Tooltip>
           )}
+          {reserveWindowControls && (
+            <Box style={{ width: WINDOW_CONTROL_RESERVE_PX, flexShrink: 0 }} />
+          )}
         </Flex>
       </Box>
-      <Flex direction="column" style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}>
+      <Flex
+        direction="column"
+        style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}
+      >
         <PaneContent
           paneId={pane.id}
           panelId={pane.panelId}

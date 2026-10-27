@@ -3,18 +3,13 @@ import { usePanelTrust } from "./usePanelTrust";
 import { confirmAction, confirmClosePanel } from "./ConfirmDialog";
 import {
   useShellWorkspaceClient,
-  useWorkspaceNavigationHost,
   useWorkspaceVisible,
 } from "../shell/workspaceContext";
 import {
   Cross2Icon,
   DotsHorizontalIcon,
-  HamburgerMenuIcon,
-  BoxIcon,
-  ViewVerticalIcon,
   ChevronRightIcon,
   DividerVerticalIcon,
-  PlusIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
   ReloadIcon,
@@ -34,7 +29,6 @@ import {
   TextField,
   Tooltip,
 } from "@radix-ui/themes";
-import { VibestudioLogo } from "@workspace/ui/brand";
 import {
   useCallback,
   useEffect,
@@ -50,7 +44,6 @@ import { useIsMobile, useTouchDevice } from "@workspace/react/responsive";
 import { useNavigation } from "./NavigationContext";
 import type { ChromeCommand } from "./PanelStack";
 import type {
-  NavigationMode,
   LazyTitleNavigationData,
   LazyStatusNavigationData,
   PanelSummary,
@@ -80,21 +73,14 @@ import {
 import { useNativeShellOverlay } from "../shell/useNativeShellOverlay";
 import { BrowserFavicon } from "./BrowserFavicon";
 import { PanelIcon } from "./PanelIcon";
-import type { FocusedPaneChromeState, PaneChromeCommand } from "./paneChrome";
 
-const isMac = /Mac|iPhone|iPad|iPod/i.test(
-  (
-    globalThis.navigator as
-      | { userAgentData?: { platform?: string } }
-      | undefined
-  )?.userAgentData?.platform ??
-    globalThis.navigator?.platform ??
-    globalThis.navigator?.userAgent ??
-    "",
-);
-const MACOS_TITLEBAR_CONTROL_RESERVE_PX = 68;
+import { isMac, WINDOW_CONTROL_RESERVE_PX } from "./windowChrome";
 
 interface TitleBarProps {
+  navigationData?: LazyTitleNavigationData | null;
+  statusNavigation?: LazyStatusNavigationData;
+  reserveWindowControls?: boolean;
+  focused?: boolean;
   chromeState?: PanelChromeState | null;
   onChromeCommand?: (command: ChromeCommand) => void;
   onNavigateToId?: (panelId: string) => void;
@@ -102,52 +88,23 @@ interface TitleBarProps {
     panelId: string,
     position: { x: number; y: number },
   ) => Promise<void>;
-  paneChromeState?: FocusedPaneChromeState | null;
-  onPaneChromeCommand?: (command: PaneChromeCommand) => void;
 }
 
 export function TitleBar({
+  navigationData,
+  statusNavigation,
+  reserveWindowControls = true,
+  focused = true,
   chromeState,
   onChromeCommand,
   onNavigateToId,
   onPanelContextMenu,
-  paneChromeState,
-  onPaneChromeCommand,
 }: TitleBarProps) {
-  const { menu, notification, panel } = useShellWorkspaceClient();
-  const navigationHost = useWorkspaceNavigationHost();
-
   const {
-    mode: navigationMode,
-    setMode,
-    addressBarVisible,
+    addressBarVisible: workspaceAddressBarVisible,
     setAddressBarVisible,
-    lazyTitleNavigation: navigationData,
-    lazyStatusNavigation: statusNavigation,
   } = useNavigation();
-  const isMobile = useIsMobile();
-
-  const handleNavigationToggle = () => {
-    if (navigationHost) {
-      navigationHost.toggleSidebar();
-      return;
-    }
-    const nextMode: NavigationMode =
-      navigationMode === "stack" ? "tree" : "stack";
-    setMode(nextMode);
-  };
-
-  const treeVisible = navigationHost
-    ? navigationHost.sidebarVisible
-    : navigationMode === "tree";
-
-  const handleMobileAddressToggleKeyDown = (
-    event: KeyboardEvent<HTMLDivElement>,
-  ) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    setAddressBarVisible(true);
-  };
+  const addressBarVisible = focused && workspaceAddressBarVisible;
 
   // Address-bar commands: after a navigate (Enter or picking a suggestion),
   // return to breadcrumb view. Browser controls (back/forward/reload) stay put.
@@ -158,180 +115,6 @@ export function TitleBar({
     }
   };
 
-  const handleHamburgerClick = (e: MouseEvent<HTMLButtonElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    void menu.showHamburger(getWindowPositionFromRect(rect));
-  };
-
-  const handleNewPanel = async () => {
-    try {
-      await panel.createAboutPanel("new");
-    } catch (error) {
-      void notification.show({
-        type: "error",
-        title: "Couldn't create panel",
-        message: userFacingError(error),
-      });
-    }
-  };
-
-  // The focused pane is closable only when another logical pane survives.
-  // Parked panes count: resizing the window must not change layout semantics.
-  const closablePanePanelId =
-    paneChromeState && paneChromeState.layoutPaneCount > 1
-      ? paneChromeState.panelId
-      : null;
-  const handleClosePane = useCallback(
-    () => onPaneChromeCommand?.({ type: "close-pane" }),
-    [onPaneChromeCommand],
-  );
-
-  if (isMobile) {
-    return (
-      <Box
-        data-shell-top-chrome="titlebar"
-        style={
-          {
-            appRegion: "drag",
-            WebkitAppRegion: "drag",
-            userSelect: "none",
-            // Same tone as the panel tree: titlebar and tree are one grey shelf
-            // wrapped around the panels, not two surfaces at different heights.
-            backgroundColor: "var(--app-chrome-bg)",
-          } as CSSProperties
-        }
-      >
-        <Flex align="center" justify="between" height="44px" px="2" gap="2">
-          <Flex
-            align="center"
-            gap="1"
-            style={
-              {
-                appRegion: "no-drag",
-                WebkitAppRegion: "no-drag",
-              } as CSSProperties
-            }
-          >
-            <IconButton
-              variant="ghost"
-              size="2"
-              className="app-touch-target"
-              onClick={handleHamburgerClick}
-              aria-label="Menu"
-            >
-              <HamburgerMenuIcon />
-            </IconButton>
-
-            <VibestudioLogo
-              size={26}
-              variant="symbol"
-              className="app-titlebar-brand"
-            />
-
-            <Tooltip
-              content={treeVisible ? "Close panel tree" : "Open panel tree"}
-            >
-              <IconButton
-                variant="ghost"
-                size="2"
-                className="app-touch-target"
-                onClick={handleNavigationToggle}
-                aria-label={
-                  treeVisible ? "Close panel tree" : "Open panel tree"
-                }
-              >
-                {treeVisible ? <BoxIcon /> : <ViewVerticalIcon />}
-              </IconButton>
-            </Tooltip>
-          </Flex>
-
-          <Box
-            onClick={() => setAddressBarVisible(true)}
-            onKeyDown={handleMobileAddressToggleKeyDown}
-            role="button"
-            tabIndex={0}
-            aria-label="Show address bar"
-            title="Edit address"
-            style={
-              {
-                flex: 1,
-                minWidth: 0,
-                appRegion: "no-drag",
-                WebkitAppRegion: "no-drag",
-                cursor: "text",
-              } as CSSProperties
-            }
-          >
-            <Text
-              size="2"
-              weight="medium"
-              truncate
-              style={{ width: "100%", textAlign: "center" }}
-            >
-              {navigationData?.currentTitle ?? "Vibestudio"}
-            </Text>
-          </Box>
-
-          <Flex
-            align="center"
-            gap="1"
-            style={
-              {
-                appRegion: "no-drag",
-                WebkitAppRegion: "no-drag",
-              } as CSSProperties
-            }
-          >
-            <Tooltip content="New panel">
-              <IconButton
-                variant="ghost"
-                size="2"
-                className="app-touch-target"
-                onClick={handleNewPanel}
-                aria-label="New panel"
-              >
-                <PlusIcon />
-              </IconButton>
-            </Tooltip>
-          </Flex>
-        </Flex>
-
-        {addressBarVisible && (
-          <Box
-            px="2"
-            pb="2"
-            style={
-              {
-                appRegion: "no-drag",
-                WebkitAppRegion: "no-drag",
-              } as CSSProperties
-            }
-          >
-            <Flex align="center" gap="1">
-              <Box style={{ flex: 1, minWidth: 0 }}>
-                <AddressBar
-                  chromeState={chromeState}
-                  onChromeCommand={handleAddressChromeCommand}
-                />
-              </Box>
-              <Tooltip content="Hide address bar">
-                <IconButton
-                  variant="ghost"
-                  size="2"
-                  className="app-touch-target"
-                  onClick={() => setAddressBarVisible(false)}
-                  aria-label="Hide address bar"
-                >
-                  <Cross2Icon />
-                </IconButton>
-              </Tooltip>
-            </Flex>
-          </Box>
-        )}
-      </Box>
-    );
-  }
-
   return (
     <Box
       data-shell-top-chrome="titlebar"
@@ -341,6 +124,8 @@ export function TitleBar({
           WebkitAppRegion: "drag",
           userSelect: "none",
           height: "36px",
+          flexShrink: 0,
+          minWidth: 0,
           // Same tone as the panel tree so the chrome reads as one calm grey
           // shelf. No border of its own: the cards sit flush beneath and carry
           // their own top border, so a titlebar border would double it into a
@@ -350,83 +135,6 @@ export function TitleBar({
       }
     >
       <Flex align="center" justify="between" height="100%" px="2" gap="1">
-        {/* Left side: Hamburger menu */}
-        <Flex
-          align="center"
-          gap="2"
-          style={
-            {
-              appRegion: "no-drag",
-              WebkitAppRegion: "no-drag",
-            } as CSSProperties
-          }
-        >
-          {/* macOS: reserve the native traffic-light cluster and hover target. */}
-          {isMac && (
-            <Box
-              data-macos-titlebar-control-reserve="true"
-              style={{
-                width: MACOS_TITLEBAR_CONTROL_RESERVE_PX,
-                flexShrink: 0,
-              }}
-            />
-          )}
-
-          <VibestudioLogo
-            size={20}
-            variant="symbol"
-            className="app-titlebar-brand"
-          />
-
-          <IconButton variant="ghost" size="1" onClick={handleHamburgerClick}>
-            <HamburgerMenuIcon />
-          </IconButton>
-
-          <Tooltip
-            content={treeVisible ? "Hide workspaces" : "Show workspaces"}
-          >
-            <IconButton
-              variant="ghost"
-              size="1"
-              onClick={handleNavigationToggle}
-              aria-label={treeVisible ? "Hide workspaces" : "Show workspaces"}
-            >
-              {treeVisible ? <BoxIcon /> : <ViewVerticalIcon />}
-            </IconButton>
-          </Tooltip>
-
-          {navigationHost && (
-            <span
-              title={navigationHost.workspaceLabel}
-              style={{
-                maxWidth: 140,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--accent-11)",
-                padding: "3px 7px",
-                borderRadius: 5,
-                background: "var(--accent-3)",
-              }}
-            >
-              {navigationHost.workspaceLabel}
-            </span>
-          )}
-
-          <Tooltip content="New panel (⌘/Ctrl+T)">
-            <IconButton
-              variant="ghost"
-              size="1"
-              onClick={handleNewPanel}
-              aria-label="New panel"
-            >
-              <PlusIcon />
-            </IconButton>
-          </Tooltip>
-        </Flex>
-
         {/* Center: Navigation + title */}
         <Box
           style={
@@ -466,27 +174,33 @@ export function TitleBar({
                 </IconButton>
               </Tooltip>
             </Flex>
-          ) : navigationData && (
-            <BreadcrumbBar
-              navigationData={navigationData}
-              statusNavigation={statusNavigation}
-              onNavigateToId={onNavigateToId}
-              onPanelContextMenu={onPanelContextMenu}
-              onEditAddress={() => setAddressBarVisible(true)}
-              closablePanePanelId={closablePanePanelId}
-              onClosePane={handleClosePane}
-            />
+          ) : (
+            navigationData && (
+              <BreadcrumbBar
+                active={focused}
+                navigationData={navigationData}
+                statusNavigation={statusNavigation}
+                onNavigateToId={onNavigateToId}
+                onPanelContextMenu={onPanelContextMenu}
+                onEditAddress={
+                  focused ? () => setAddressBarVisible(true) : undefined
+                }
+              />
+            )
           )}
         </Box>
 
         {/* Right side: spacer for the native window controls */}
-        {!isMac && <Box style={{ width: "138px", flexShrink: 0 }} />}
+        {reserveWindowControls && !isMac && (
+          <Box style={{ width: WINDOW_CONTROL_RESERVE_PX, flexShrink: 0 }} />
+        )}
       </Flex>
     </Box>
   );
 }
 
 interface BreadcrumbBarProps {
+  active: boolean;
   navigationData: LazyTitleNavigationData;
   statusNavigation?: LazyStatusNavigationData | null;
   onNavigateToId?: (panelId: string) => void;
@@ -496,13 +210,6 @@ interface BreadcrumbBarProps {
   ) => Promise<void>;
   /** Clicking the already-active breadcrumb switches to the address/controls view. */
   onEditAddress?: () => void;
-  /**
-   * Panel occupying the focused pane, when closing that pane would still leave
-   * another pane on screen. Its breadcrumb item carries the close-pane action;
-   * every other item's close means "archive".
-   */
-  closablePanePanelId?: string | null;
-  onClosePane?: () => void;
 }
 
 const MAX_VISIBLE_ANCESTORS = 2;
@@ -1340,7 +1047,6 @@ interface HoverableBreadcrumbItemProps {
    * would survive closing it, so its X closes the pane instead of archiving the
    * panel. Archiving stays on middle-click and the context menu.
    */
-  onClosePane?: () => void;
 }
 
 function HoverableBreadcrumbItem({
@@ -1357,7 +1063,6 @@ function HoverableBreadcrumbItem({
   onNavigate,
   onContextMenu,
   onEditAddress,
-  onClosePane,
 }: HoverableBreadcrumbItemProps) {
   const { notification, panel } = useShellWorkspaceClient();
 
@@ -1378,7 +1083,8 @@ function HoverableBreadcrumbItem({
 
   const archivePanel = () => {
     void (async () => {
-      if (childCount > 0 && !(await confirmClosePanel(title, childCount))) return;
+      if (childCount > 0 && !(await confirmClosePanel(title, childCount)))
+        return;
       await panel.archive(panelId);
     })().catch((error) => {
       console.error("Failed to close panel from title bar", error);
@@ -1394,8 +1100,7 @@ function HoverableBreadcrumbItem({
   const handleClose = (e: MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (onClosePane) onClosePane();
-    else archivePanel();
+    archivePanel();
   };
 
   const handleAuxClick = (e: MouseEvent<HTMLSpanElement>) => {
@@ -1439,10 +1144,9 @@ function HoverableBreadcrumbItem({
             : isHovered
               ? "var(--app-chrome-hover)"
               : trust.backgroundColor,
-          color: isCurrentActive ? "var(--app-chrome-selected-text)" : undefined,
-          // A persistent close-pane ✕ needs its own room; the hover-only archive
-          // ✕ may overlap the title's tail, since it only appears under a cursor.
-          ...(onClosePane ? { paddingRight: 20 } : {}),
+          color: isCurrentActive
+            ? "var(--app-chrome-selected-text)"
+            : undefined,
         }}
         onClick={handleActivate}
         onMouseDown={handleMouseDown}
@@ -1474,26 +1178,17 @@ function HoverableBreadcrumbItem({
         >
           {title}
         </Text>
-        {/* Archiving is destructive, so it stays behind a hover. Closing a pane
-            is cheap and only offered in multi-pane layouts, so it stays put. */}
-        {(isHovered || isTouch || Boolean(onClosePane)) && (
+        {/* Archiving remains a secondary action on the panel itself. */}
+        {!isCurrent && (isHovered || isTouch) && (
           <IconButton
             size="1"
             variant="ghost"
             color="gray"
             radius="small"
-            aria-label={onClosePane ? "Close pane" : "Close panel"}
-            title={
-              onClosePane
-                ? "Close pane — the panel stays in the tree"
-                : "Close panel"
-            }
+            aria-label="Close panel"
+            title="Archive panel"
             onClick={handleClose}
-            className={
-              onClosePane
-                ? "breadcrumb-close-pane-btn"
-                : "breadcrumb-archive-btn"
-            }
+            className="breadcrumb-archive-btn"
             style={
               {
                 appRegion: "no-drag",
@@ -1621,18 +1316,16 @@ function partitionBreadcrumbSiblings(
 }
 
 function BreadcrumbBar({
+  active,
   navigationData,
   statusNavigation,
   onNavigateToId,
   onPanelContextMenu,
   onEditAddress,
-  closablePanePanelId,
-  onClosePane,
 }: BreadcrumbBarProps) {
   const { menu } = useShellWorkspaceClient();
 
   const ancestors = navigationData.ancestors;
-  const currentSiblings = navigationData.currentSiblings;
   const descendantGroups = statusNavigation?.descendantGroups ?? [];
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [maxVisibleSiblings, setMaxVisibleSiblings] = useState(
@@ -1683,15 +1376,14 @@ function BreadcrumbBar({
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      scrollBreadcrumbIdIntoView(scrollRef.current, navigationData.currentId);
+      scrollBreadcrumbIdIntoView(scrollRef.current, navigationData.current.id);
       refreshScrollState();
     });
     return () => window.cancelAnimationFrame(frame);
   }, [
-    currentSiblings.length,
     descendantGroups.length,
     maxVisibleSiblings,
-    navigationData.currentId,
+    navigationData.current.id,
     refreshScrollState,
   ]);
 
@@ -1706,7 +1398,7 @@ function BreadcrumbBar({
 
   const handleCurrentPanelContextMenu = (e: MouseEvent<HTMLSpanElement>) => {
     e.preventDefault();
-    const currentId = navigationData.currentId;
+    const currentId = navigationData.current.id;
     const rect = e.currentTarget.getBoundingClientRect();
     void onPanelContextMenu?.(currentId, getWindowPositionFromRect(rect));
   };
@@ -1771,9 +1463,6 @@ function BreadcrumbBar({
       onNavigate={() => onNavigateToId?.(panel.id)}
       onContextMenu={(e) => handlePanelContextMenu(e, panel)}
       onEditAddress={onEditAddress}
-      {...(closablePanePanelId === panel.id && onClosePane
-        ? { onClosePane }
-        : {})}
     />
   );
 
@@ -1794,84 +1483,6 @@ function BreadcrumbBar({
       onContextMenu={(e) => handlePanelContextMenu(e, ancestor)}
     />
   );
-
-  const renderSiblingGroup = (
-    siblings: PanelSummary[],
-    activeId: string | null,
-    isCurrent: boolean,
-  ) => {
-    if (siblings.length === 0) return null;
-    const effectiveActiveId = activeId || siblings[0]?.id || "";
-    const partition = partitionBreadcrumbSiblings(
-      siblings,
-      effectiveActiveId,
-      maxVisibleSiblings,
-    );
-
-    return (
-      <span style={groupStyle}>
-        {partition.visible.map(({ sibling, originalIndex }, visibleIndex) => {
-          const previousEntry = partition.visible[visibleIndex - 1];
-          const gapSiblings =
-            partition.hidden.length > 0 &&
-            visibleIndex > 0 &&
-            previousEntry !== undefined &&
-            originalIndex - previousEntry.originalIndex > 1
-              ? siblings.slice(previousEntry.originalIndex + 1, originalIndex)
-              : [];
-
-          return (
-            <span
-              key={sibling.id}
-              style={{ display: "inline-flex", alignItems: "center" }}
-            >
-              {visibleIndex > 0 && (
-                <DividerVerticalIcon
-                  style={{
-                    color: "var(--gray-7)",
-                    width: 12,
-                    height: 12,
-                    flexShrink: 0,
-                  }}
-                />
-              )}
-              {gapSiblings.length > 0 && (
-                <>
-                  <IconButton
-                    size="1"
-                    variant="ghost"
-                    aria-label="More sibling panels"
-                    onClick={(e) => showSiblingMenu(e, gapSiblings)}
-                    style={
-                      {
-                        appRegion: "no-drag",
-                        WebkitAppRegion: "no-drag",
-                      } as CSSProperties
-                    }
-                  >
-                    <DotsHorizontalIcon />
-                  </IconButton>
-                  <DividerVerticalIcon
-                    style={{
-                      color: "var(--gray-7)",
-                      width: 12,
-                      height: 12,
-                      flexShrink: 0,
-                    }}
-                  />
-                </>
-              )}
-              {renderBreadcrumbItem(
-                sibling,
-                sibling.id === effectiveActiveId,
-                isCurrent,
-              )}
-            </span>
-          );
-        })}
-      </span>
-    );
-  };
 
   const handleHiddenAncestorsClick = async (
     e: MouseEvent<HTMLButtonElement>,
@@ -2053,33 +1664,24 @@ function BreadcrumbBar({
           </Flex>
         ))}
 
-        {/* Current (with siblings) */}
-        {currentSiblings.length > 0 ? (
-          renderSiblingGroup(
-            currentSiblings,
-            navigationData.currentId,
-            true,
-          )
-        ) : (
-          <span style={groupStyle}>
-            <HoverableBreadcrumbItem
-              panelId={navigationData.currentId}
-              title={navigationData.currentTitle}
-              childCount={navigationData.currentChildCount}
-              isActive={true}
-              isCurrent={true}
-              onNavigate={() => onNavigateToId?.(navigationData.currentId)}
-              onContextMenu={handleCurrentPanelContextMenu}
-              onEditAddress={onEditAddress}
-              {...(closablePanePanelId &&
-              closablePanePanelId === navigationData.currentId &&
-              onClosePane
-                ? { onClosePane }
-                : {})}
-            />
-          </span>
-        )}
-
+        {/* Current panel; peers live in the panel tree. */}
+        <span style={groupStyle}>
+          <HoverableBreadcrumbItem
+            panelId={navigationData.current.id}
+            title={navigationData.current.title}
+            childCount={navigationData.current.childCount}
+            icon={navigationData.current.icon}
+            iconVersion={navigationData.current.iconVersion}
+            iconState={navigationData.current.iconState}
+            source={navigationData.current.source}
+            favicon={navigationData.current.favicon}
+            isActive={active}
+            isCurrent={true}
+            onNavigate={() => onNavigateToId?.(navigationData.current.id)}
+            onContextMenu={handleCurrentPanelContextMenu}
+            onEditAddress={onEditAddress}
+          />
+        </span>
         {/* Descendants (sibling groups) */}
         {visibleDescendantGroups.map((group) => (
           <Flex

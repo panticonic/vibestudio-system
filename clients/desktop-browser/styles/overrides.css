@@ -26,6 +26,7 @@ body,
    deepest rung in light mode (content sits on it as white sheets) and the
    darkest in dark mode (content lifts off it as lighter sheets). */
 .radix-themes:where(.light, .light-theme) {
+  --app-navigation-bg: var(--gray-4);
   --surface-chrome: var(--gray-3);
   --surface-card: var(--gray-2);
   --surface-raised: var(--color-panel-solid);
@@ -34,6 +35,7 @@ body,
 }
 
 .radix-themes:where(.dark, .dark-theme) {
+  --app-navigation-bg: var(--gray-3);
   --surface-chrome: var(--gray-1);
   --surface-card: var(--gray-3);
   --surface-raised: var(--gray-2);
@@ -205,14 +207,9 @@ body,
   transform: rotate(-90deg);
 }
 
-/* Breadcrumb close buttons. Archiving a panel is destructive, so it warms to
-   red on hover; closing a pane only stops showing it, so it stays neutral. */
+/* Archiving a panel warms to red on hover. */
 .breadcrumb-archive-btn:hover {
   background-color: var(--red-a4);
-}
-
-.breadcrumb-close-pane-btn:hover {
-  background-color: var(--gray-a5);
 }
 
 .titlebar-breadcrumb-scroll::-webkit-scrollbar {

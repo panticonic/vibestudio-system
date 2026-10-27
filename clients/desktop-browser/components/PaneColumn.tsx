@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Fragment, useRef, useState } from "react";
 import { Flex } from "@radix-ui/themes";
 
@@ -6,11 +7,11 @@ import { PaneView } from "./PaneView";
 import { ResizableDivider } from "./ResizableDivider";
 
 interface PaneColumnProps {
+  reserveWindowControls: boolean;
+  renderTitleBar: (paneId: string, panelId: string) => ReactNode;
   column: LayoutColumn;
   minWidth: number;
   focusedPaneId: string | null;
-  /** False when only one pane is on screen: nothing to distinguish focus from. */
-  showPaneFocus: boolean;
   /** Panel titles by panel id, for the drag chip a pane hands to the drag. */
   paneTitles: Map<string, string>;
   resident: boolean;
@@ -19,16 +20,20 @@ interface PaneColumnProps {
   onDismissUnresponsive: (panelId: string) => void;
   onFocusPane: (paneId: string) => void;
   onClosePane?: (paneId: string) => void;
-  onMovePane: (paneId: string, direction: "left" | "right" | "up" | "down") => void;
+  onMovePane: (
+    paneId: string,
+    direction: "left" | "right" | "up" | "down",
+  ) => void;
   onResizePanes: (columnId: string, paneFrs: number[]) => void;
 }
 
 /** One column: a vertical stack of panes with draggable height dividers. */
 export function PaneColumn({
+  reserveWindowControls,
+  renderTitleBar,
   column,
   minWidth,
   focusedPaneId,
-  showPaneFocus,
   paneTitles,
   resident,
   layoutEpoch,
@@ -56,7 +61,8 @@ export function PaneColumn({
   const dragBetween = (index: number, deltaPx: number) => {
     const height = dragHeightRef.current;
     if (!height) return;
-    const current = liveFrsRef.current ?? column.panes.map((pane) => pane.heightFr);
+    const current =
+      liveFrsRef.current ?? column.panes.map((pane) => pane.heightFr);
     const total = current.reduce((sum, fr) => sum + fr, 0);
     const deltaFr = (deltaPx / height) * total;
     const minFr = (MIN_PANE_HEIGHT / height) * total;
@@ -64,7 +70,10 @@ export function PaneColumn({
     const before = next[index];
     const after = next[index + 1];
     if (before === undefined || after === undefined) return;
-    const applied = Math.max(Math.min(deltaFr, after - minFr), -(before - minFr));
+    const applied = Math.max(
+      Math.min(deltaFr, after - minFr),
+      -(before - minFr),
+    );
     next[index] = before + applied;
     next[index + 1] = after - applied;
     liveFrsRef.current = next;
@@ -99,7 +108,11 @@ export function PaneColumn({
             <ResizableDivider
               orientation="horizontal"
               label={`Resize panes ${index} and ${index + 1}`}
-              valueNow={(frs.slice(0, index).reduce((sum, fr) => sum + fr, 0) / totalFr) * 100}
+              valueNow={
+                (frs.slice(0, index).reduce((sum, fr) => sum + fr, 0) /
+                  totalFr) *
+                100
+              }
               onDragStart={prepareDrag}
               onDrag={(deltaPx) => dragBetween(index - 1, deltaPx)}
               onDragEnd={commit}
@@ -111,15 +124,16 @@ export function PaneColumn({
               onReset={() =>
                 onResizePanes(
                   column.id,
-                  column.panes.map(() => 1)
+                  column.panes.map(() => 1),
                 )
               }
             />
           )}
           <PaneView
+            reserveWindowControls={reserveWindowControls && index === 0}
+            titleBar={renderTitleBar(pane.id, pane.panelId)}
             pane={{ ...pane, heightFr: frs[index] ?? pane.heightFr }}
             focused={focusedPaneId === pane.id}
-            showPaneFocus={showPaneFocus}
             title={paneTitles.get(pane.panelId) ?? "Panel"}
             resident={resident}
             layoutEpoch={layoutEpoch}

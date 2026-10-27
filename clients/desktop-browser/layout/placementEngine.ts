@@ -44,7 +44,7 @@ export type LayoutAction =
 export interface LayoutEnv {
   viewportWidth: number;
   viewportHeight: number; // vertical fit tests (rule 2c/3) need it
-  paneChromeHeight: number; // thin drop handle + divider per pane
+  paneChromeHeight: number; // permanent titlebar + divider per pane
   firstRootPanelId(): string | null; // seed after closing the last pane; null = empty workspace
   minWidthOf(panelId: string): number; // from placement hints / defaults
 }
