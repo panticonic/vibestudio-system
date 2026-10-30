@@ -6,7 +6,7 @@ import type {
   ModelRecord,
   ModelRuntimeConfig,
 } from "@workspace/model-catalog/localModels";
-import { DEFAULT_MODEL, FALLBACK_MODEL } from "./constants.js";
+import { DEFAULT_MODEL, FALLBACK_MODEL, LFM3_MODEL } from "./constants.js";
 
 interface TestDownloadJob {
   id: string;
@@ -139,7 +139,7 @@ const engineMock = vi.hoisted(() => {
     ensureInstalled: vi.fn(async () => {
       if (state.fail) throw new Error("engine install failed");
       return {
-        pin: { buildTag: "test", checksums: {} },
+        pin: { buildTag: "test", manifestSha256: "" },
         cpu: null,
         gpu: null,
         degradedReason: null,
@@ -450,6 +450,65 @@ describe("local-models extension", () => {
     );
   });
 
+  it("offers LFM3 1.7B as a one-click library model with both pinned quants", async () => {
+    hardwareMock.tier = "cpu-min";
+    const { activate } = await import("./index.js");
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+    });
+
+    await expect(api.searchCatalog("LFM3")).resolves.toEqual([
+      expect.objectContaining({
+        slug: "lfm3-1.7b",
+        hfRepo: "LiquidAI/LFM3-1.7B-GGUF",
+        quantByTier: expect.objectContaining({ "cpu-min": "Q4_K_M", "cpu-strong": "Q8_0" }),
+        sha256ByQuant: {
+          Q8_0: LFM3_MODEL.quants.Q8_0.sha256,
+          Q4_K_M: LFM3_MODEL.quants.Q4_K_M.sha256,
+        },
+      }),
+    ]);
+    await expect(listEntries(api, "lfm3-1.7b")).resolves.toEqual([
+      expect.objectContaining({
+        slug: "lfm3-1.7b",
+        state: "not-installed",
+        server: "main",
+        contextWindow: LFM3_MODEL.contextLength,
+        toolsCapable: true,
+        reasoningCapable: true,
+      }),
+    ]);
+  });
+
+  it.each([
+    ["cpu-min", "Q4_K_M"],
+    ["gpu-large", "Q8_0"],
+  ] as const)("installs LFM3 1.7B on %s with its pinned %s artifact", async (tier, quant) => {
+    hardwareMock.tier = tier;
+    const { activate } = await import("./index.js");
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+    });
+
+    const installation = api.installModel(LFM3_MODEL.ref);
+    await vi.waitFor(() =>
+      expect(modelLibraryMock.library.startDownload).toHaveBeenCalledOnce(),
+    );
+    expect(modelLibraryMock.library.startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slug: LFM3_MODEL.slug,
+        hfRepo: LFM3_MODEL.hfRepo,
+        file: LFM3_MODEL.quants[quant].file,
+        expectedSha256: LFM3_MODEL.quants[quant].sha256,
+      }),
+    );
+    const finalJob = { ...modelLibraryMock.downloads[0]!, receivedBytes: 100 };
+    modelLibraryMock.resolveDownload(finalJob);
+    await expect(installation).resolves.toMatchObject(finalJob);
+  });
+
   it("describes its navigation surfaces as capabilities", async () => {
     const { activate } = await import("./index.js");
     const api = await activate({
@@ -568,7 +627,7 @@ describe("local-models extension", () => {
       async () =>
         (await api.status()).fallback.reason === "engine install failed",
     );
-    await expect(api.listModels()).resolves.toEqual([
+    await expect(listEntries(api, FALLBACK_MODEL.slug)).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
         contextWindow: FALLBACK_MODEL.contextLength,
@@ -591,7 +650,7 @@ describe("local-models extension", () => {
     expect(engineMock.ensureInstalled.mock.calls.length).toBeGreaterThanOrEqual(
       3,
     );
-    await expect(api.listModels()).resolves.toEqual([
+    await expect(listEntries(api, FALLBACK_MODEL.slug)).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
         state: "not-installed",
@@ -680,7 +739,7 @@ describe("local-models extension", () => {
       emit: vi.fn(),
     });
 
-    await expect(api.listModels()).resolves.toEqual([
+    await expect(listEntries(api, FALLBACK_MODEL.slug)).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
         state: "not-installed",
@@ -696,7 +755,7 @@ describe("local-models extension", () => {
       expect(modelLibraryMock.library.startDownload).toHaveBeenCalledOnce(),
     );
     expect(completed).toBe(false);
-    await expect(api.listModels()).resolves.toEqual([
+    await expect(listEntries(api, FALLBACK_MODEL.slug)).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
         state: "downloading",
@@ -869,7 +928,7 @@ describe("local-models extension", () => {
       emit: vi.fn(),
     });
 
-    await expect(api.listModels()).resolves.toEqual([
+    await expect(listEntries(api, FALLBACK_MODEL.slug)).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
         state: "not-installed",
@@ -1007,7 +1066,7 @@ describe("local-models extension", () => {
       emit: vi.fn(),
     });
 
-    await expect(api.listModels()).resolves.toEqual([
+    await expect(listEntries(api, FALLBACK_MODEL.slug)).resolves.toEqual([
       expect.objectContaining({
         slug: FALLBACK_MODEL.slug,
         state: "error",
@@ -1130,4 +1189,12 @@ async function waitUntil(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("Timed out waiting for condition");
+}
+
+/** The `listModels` rows of one slug; other one-click models are listed beside it. */
+async function listEntries(
+  api: { listModels(): Promise<Array<{ slug: string }>> },
+  slug: string,
+): Promise<Array<{ slug: string }>> {
+  return (await api.listModels()).filter((entry) => entry.slug === slug);
 }

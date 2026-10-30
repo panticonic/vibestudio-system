@@ -11,31 +11,43 @@ server directly.
 
 ## Check availability
 
-From agent eval, read the model catalog:
+From agent eval, load the typed readiness report. Code reads the catalog and
+applies the usability rules; a small model only names the kind of failure
+behind each `error` row.
 
 ```ts
-const { localModelsExtensionMethods } =
-  await import("@workspace/model-catalog/localModels");
-const extension = "@workspace-extensions/local-models";
-const modelsValue = await services.extensions.invoke(
-  extension,
-  localModelsExtensionMethods.listModels.method,
-  [],
-);
-const models = localModelsExtensionMethods.listModels.result.parse(modelsValue);
-return models;
+const readiness = await natlang.load("skills/local-models/localModelReadiness.nl");
+const report: Readiness = await readiness();
+return report;
 ```
 
-`listModels` is the read-only discovery operation and is safe in a connected
-website's causal chain. Lifecycle methods remain closed there because they
-start profile-scoped processes or change persistent machine state. Extension
-invocation rejects when the owning operation fails. Successful results are
-decoded with the shared method descriptor above, so malformed wire data
-remains an error instead of being treated as partial availability.
+- `models`: one row per local model with its `ref` (`local:<slug>`), `state`,
+  whether it is `usable`, a one-line `detail`, and for an `error` row the
+  `failure` kind: `download`, `storage`, `memory`, `engine`, or `unknown`.
+- `executor`: `local:lfm3-1.7b`, the model natlang programs run on. When it
+  is not usable, natlang programs run on the hosted low-tier model, which is
+  billed; say so before running many calls.
+- `preferred`: the best usable model for agent tasks, or `null`.
+- `advice`: what to tell the user, one line each. Installing is only offered;
+  it needs the user's request (see below).
+
+The report is built from `listModels`, the read-only discovery operation, which
+is safe in a connected website's causal chain. Lifecycle methods remain closed
+there because they start profile-scoped processes or change persistent machine
+state. Extension invocation rejects when the owning operation fails, and
+successful results are decoded with the shared method descriptor
+(`@workspace/model-catalog/localModels`), so malformed wire data remains an
+error instead of being treated as partial availability. To see the raw rows,
+call `services.extensions.invoke("@workspace-extensions/local-models",
+"listModels", [])` and decode them the same way.
 
 The preferred local model is `local:qwen3.8-27b`, on hardware where
-`listModels` offers it. The small LFM2.5 model is an emergency fallback, not
-the recommended default. A model row is usable when its `state`
+`listModels` offers it. `local:lfm3-1.7b` is the small LFM3 model that natlang
+programs run on; it is offered on every machine. The small LFM2.5 model is an
+emergency fallback, not the recommended default. All of them are served by
+natlang's llama.cpp fork, a pinned release of
+`werg/llama.cpp-neuralese` whose archives the extension verifies by size and
+SHA-256 before use. It never installs upstream llama.cpp binaries. A model row is usable when its `state`
 is `startable` (downloaded and healthy, but not running) or `ready` (running).
 Report `downloading`, `starting`, and `error` as they are; don't lump them
 together as a generic failure. Call `getHardwareProfile` only from a trusted

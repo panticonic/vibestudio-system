@@ -49,50 +49,26 @@ import {
   validatedRuntimeConfig,
 } from "./runtime-profiles.js";
 import { runModelBenchmark } from "./benchmark.js";
-import { DEFAULT_MODEL, FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
+import {
+  DEFAULT_MODEL,
+  FALLBACK_MODEL,
+  LFM3_MODEL,
+  ROOT_LAYOUT,
+  lfm3ForTier,
+  type OneClickModel,
+} from "./constants.js";
 
 /**
- * Pinned llama.cpp build (design §4.2, risk #3): bumped with extension
- * updates, validated by the e2e suite on every bump. Every installable release
- * asset must have a pinned checksum; missing checksums fail closed before
- * extraction/execution.
+ * Pinned release of natlang's llama.cpp fork (design §4.2, risk #3): bumped with extension updates, validated by the
+ * e2e suite on every bump. The release's `natlang-runtime.json` manifest lists every archive's platform, backends,
+ * size and SHA-256; the pin holds the manifest's digest, so each archive is verified against a pinned chain before
+ * extraction/execution. Publish a release with the fork's `natlang-runtime` workflow, then pin it by
+ * `sha256sum natlang-runtime.json`.
  */
 const ENGINE_PIN: EnginePin = {
-  buildTag: "b10621", // llama.cpp v0.3.0, published 2026-08-25
-  checksums: {
-    "cudart-llama-bin-win-cuda-12.4-x64.zip":
-      "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
-    "cudart-llama-bin-win-cuda-13.3-x64.zip":
-      "1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e",
-    "llama-b10621-bin-macos-arm64.tar.gz":
-      "429c8270608600188035e5e92f7d78dffb7900904fe7dd7e6a84f48068cd13cf",
-    "llama-b10621-bin-macos-x64.tar.gz":
-      "33c44e036e0e223f71a29fc74a0ab3e130ca9eadeb032ecc1c7af25985b8b91b",
-    "llama-b10621-bin-ubuntu-arm64.tar.gz":
-      "95940151be63492f70f659da420b268244cc83a6ee70e310d2600ccdb7ea4deb",
-    "llama-b10621-bin-ubuntu-rocm-7.14-x64.tar.gz":
-      "aa0b3b566f8e61d3a0c00b41ad6ca5aac4fb0e31d23bc4dc249f7040901d3794",
-    "llama-b10621-bin-ubuntu-vulkan-arm64.tar.gz":
-      "1267a0e918c37be5ef568b37f9a5de377e47cbe1ea77d4d42e38a20dfff1b358",
-    "llama-b10621-bin-ubuntu-vulkan-x64.tar.gz":
-      "3db8e4411033ef4531072be43377e859bcdbf9640c7bb36f9656e538eabd0978",
-    "llama-b10621-bin-ubuntu-x64.tar.gz":
-      "91d7b03ddae498a39f28fdb85d84d2b4a0fd3838d10b4f897e0ef8975bb9b583",
-    "llama-b10621-bin-win-cpu-arm64.zip":
-      "c072e8bb057751587243c1e0ed28d82e23c7e0544a426e0d476f1e77792bf3ce",
-    "llama-b10621-bin-win-cpu-x64.zip":
-      "0e8b65e650e369f70f8307d890508886f171ef4fb00facccddd4a1b7ffdaca51",
-    "llama-b10621-bin-win-cuda-12.4-x64.zip":
-      "81c2ff62e14b549cd5c766ccdd5c61f09e821a171655c3047bdccfddc2d1a1e2",
-    "llama-b10621-bin-win-cuda-13.3-x64.zip":
-      "23549ccc00b6a18d74348e95d4789f7e96c9efb11cf6e3f1b185baef34d7449f",
-    "llama-b10621-bin-win-opencl-adreno-arm64.zip":
-      "46e551fc6a4b1074cda5e0fcff20712e83ece24194d431d677bf99db20e487e0",
-    "llama-b10621-bin-win-rocm-7.14-x64.zip":
-      "4d9549449ae0d1c3d81446e440623b8fcaf117cff4f0a8ade991f428d9b086e9",
-    "llama-b10621-bin-win-vulkan-x64.zip":
-      "2672d85bf87c8280d94dee01eb6a86280046878f70a07d786a93637fa9081163",
-  },
+  buildTag: "natlang-b12068",
+  manifestSha256:
+    "dbf5a75389aad0adef968cf074202a6c20c8cc31ab6a7c01db822c97af99849b",
 };
 
 const BENCHMARK_RECENT_MS = 7 * 24 * 60 * 60 * 1000;
@@ -131,6 +107,25 @@ const CURATED_CATALOG: CuratedModel[] = [
     toolsCapable: true,
     blurb:
       "The preferred local agent model for long-horizon coding and tool use.",
+  },
+  {
+    slug: LFM3_MODEL.slug,
+    displayName: LFM3_MODEL.displayName,
+    hfRepo: LFM3_MODEL.hfRepo,
+    quantByTier: {
+      "gpu-large": "Q8_0",
+      "gpu-mid": "Q8_0",
+      "gpu-small": "Q8_0",
+      "cpu-strong": "Q8_0",
+      "cpu-min": "Q4_K_M",
+    },
+    sha256ByQuant: {
+      Q8_0: LFM3_MODEL.quants.Q8_0.sha256,
+      Q4_K_M: LFM3_MODEL.quants.Q4_K_M.sha256,
+    },
+    toolsCapable: true,
+    blurb:
+      "Small LFM3 instruction model: the local executor for natlang programs, fast on any CPU.",
   },
   {
     slug: "qwen3.5-4b",
@@ -965,25 +960,27 @@ export async function activate(ctx: Ctx) {
 
   function oneClickModel(
     slug: string,
-  ): typeof DEFAULT_MODEL | typeof FALLBACK_MODEL | null {
+    hw: HardwareProfile | null,
+  ): OneClickModel | null {
     if (slug === DEFAULT_MODEL.slug) return DEFAULT_MODEL;
     if (slug === FALLBACK_MODEL.slug) return FALLBACK_MODEL;
+    if (slug === LFM3_MODEL.slug) return lfm3ForTier(hw?.tier ?? null);
     return null;
   }
 
   function shouldOfferOneClickModel(
-    model: typeof DEFAULT_MODEL | typeof FALLBACK_MODEL,
+    model: OneClickModel,
     hw: HardwareProfile | null,
   ): boolean {
     return (
-      model.slug === FALLBACK_MODEL.slug ||
+      model.slug !== DEFAULT_MODEL.slug ||
       hw === null ||
       DEFAULT_MODEL.supportedTiers.some((tier) => tier === hw.tier)
     );
   }
 
   function missingOneClickEntry(
-    model: typeof DEFAULT_MODEL | typeof FALLBACK_MODEL,
+    model: OneClickModel,
     hw: HardwareProfile | null,
     servers: Record<ServerKind, ServerState>,
     downloads: DownloadJob[],
@@ -1018,7 +1015,8 @@ export async function activate(ctx: Ctx) {
       contextWindow: model.contextLength,
       maxTokens: model.contextLength,
       toolsCapable: true,
-      reasoningCapable: model.slug === DEFAULT_MODEL.slug,
+      reasoningCapable:
+        model.slug === DEFAULT_MODEL.slug || model.slug === LFM3_MODEL.slug,
       fit,
       measuredTokensPerSec: null,
       state: download
@@ -1081,8 +1079,10 @@ export async function activate(ctx: Ctx) {
 
     // One-click models stay visible before download. The small fallback is
     // universal; the preferred 27B model is offered only where its quant fits.
-    for (const model of [FALLBACK_MODEL, DEFAULT_MODEL] as const) {
+    for (const slug of [FALLBACK_MODEL.slug, LFM3_MODEL.slug, DEFAULT_MODEL.slug]) {
+      const model = oneClickModel(slug, hw);
       if (
+        model &&
         !entries.some((entry) => entry.slug === model.slug) &&
         shouldOfferOneClickModel(model, hw)
       ) {
@@ -1183,7 +1183,10 @@ export async function activate(ctx: Ctx) {
     ): Promise<DownloadJob | null> {
       if (runtimeConfig) runtimeConfig = validatedRuntimeConfig(runtimeConfig);
       const slug = bareSlug(modelId);
-      const model = oneClickModel(slug);
+      const model = oneClickModel(
+        slug,
+        await probeHardware(false).catch(() => null),
+      );
       if (!model) {
         throw new Error(
           `Model ${modelId} is not available for one-click installation`,

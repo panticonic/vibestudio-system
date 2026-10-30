@@ -119,9 +119,9 @@ describe("HardwareProfiler", () => {
     expect(profile.cpu.features).toEqual(["arm64"]);
   });
 
-  it("pins CUDA 12.4 below driver 580 and selects CUDA 13.3 at driver 580", async () => {
+  it("pins CUDA 12.4 below driver 580 and selects CUDA 13.4 at driver 580", async () => {
     await expect(probeNvidiaDriver("579.99.01")).resolves.toBe("cuda-12.4");
-    await expect(probeNvidiaDriver("580.00.01")).resolves.toBe("cuda-13.3");
+    await expect(probeNvidiaDriver("580.00.01")).resolves.toBe("cuda-13.4");
   });
 
   it("classifies tier boundaries", () => {
@@ -138,7 +138,7 @@ describe("HardwareProfiler", () => {
         [
           gpu({ vendor: "intel", backend: "vulkan", discrete: false, vramMB: 0 }),
           gpu({ vendor: "amd", backend: "vulkan", discrete: true, vramMB: 16_000 }),
-          gpu({ vendor: "nvidia", backend: "cuda-13.3", discrete: true, vramMB: 12_000 }),
+          gpu({ vendor: "nvidia", backend: "cuda-13.4", discrete: true, vramMB: 12_000 }),
         ],
         "linux",
         "x64"

@@ -24,7 +24,7 @@ describe("local model runtime profiles", () => {
       serverBinPath: "/gpu/server",
     };
     const recipe = effectiveModelRuntime(model, {
-      pin: { buildTag: "b1", checksums: {} },
+      pin: { buildTag: "b1", manifestSha256: "" },
       cpu,
       gpu,
       degradedReason: null,
@@ -45,7 +45,7 @@ describe("local model runtime profiles", () => {
     model.config.gpuLayers = 7;
     expect(
       effectiveModelRuntime(model, {
-        pin: { buildTag: "b1", checksums: {} },
+        pin: { buildTag: "b1", manifestSha256: "" },
         cpu,
         gpu,
         degradedReason: null,
@@ -53,7 +53,7 @@ describe("local model runtime profiles", () => {
     ).toMatchObject({ bin: "/gpu/server", gpuLayers: 7 });
     expect(
       effectiveModelRuntime(model, {
-        pin: { buildTag: "b1", checksums: {} },
+        pin: { buildTag: "b1", manifestSha256: "" },
         cpu,
         gpu: null,
         degradedReason: null,

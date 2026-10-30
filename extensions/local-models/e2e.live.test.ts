@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import { activate } from "./index.js";
-import { FALLBACK_MODEL } from "./constants.js";
+import { FALLBACK_MODEL, LFM3_MODEL } from "./constants.js";
 
 const RUN = process.env["RUN_LOCAL_MODELS_E2E"] === "1";
 // Sized for a slow (~500 KB/s) connection downloading the fallback
@@ -77,7 +77,7 @@ describe.runIf(RUN)("local-models live e2e", () => {
         body: JSON.stringify({
           model: FALLBACK_MODEL.slug,
           messages: [{ role: "user", content: "Reply with a single short greeting." }],
-          max_tokens: 32,
+          max_tokens: 512,
         }),
       });
       expect(chatRes.ok, `chat completion HTTP ${chatRes.status}`).toBe(true);
@@ -88,6 +88,11 @@ describe.runIf(RUN)("local-models live e2e", () => {
       expect(text.trim().length, `empty completion: ${JSON.stringify(chatBody)}`).toBeGreaterThan(
         0
       );
+
+      // Decode throughput on the installed engine (benchmark.ts); logged so engine pins can be compared.
+      const benchmark = await api.benchmarkModel(FALLBACK_MODEL.slug, { force: true });
+      console.log("benchmark", JSON.stringify(benchmark));
+      expect(benchmark?.tokensPerSec ?? 0, "benchmark produced no throughput").toBeGreaterThan(0);
 
       // Rejecting an unauthenticated caller proves the api-key gate is live.
       const unauthenticated = await fetch(`${baseUrl}/chat/completions`, {
@@ -132,7 +137,7 @@ describe.runIf(RUN)("local-models live e2e", () => {
             },
           ],
           tool_choice: "auto",
-          max_tokens: 128,
+          max_tokens: 512,
         }),
       });
       expect(toolRes.ok, `tool completion HTTP ${toolRes.status}`).toBe(true);
@@ -207,6 +212,44 @@ describe.runIf(RUN)("local-models live e2e", () => {
         "<|tool_call_start|>[get_time(timezone='Europe/Berlin')]<|tool_call_end|>"
       );
       expect(prompt).toContain('<|im_start|>tool\n{"time":"10:30"}<|im_end|>');
+    },
+    BOOTSTRAP_TIMEOUT_MS
+  );
+
+  it(
+    "installs LFM3 1.7B as a library model and answers from the main router",
+    async () => {
+      const api = await activate(stubCtx());
+
+      const listed = (await api.listModels()).find((m) => m.slug === LFM3_MODEL.slug);
+      expect(listed, "LFM3 missing from listModels").toBeTruthy();
+
+      await api.installModel(LFM3_MODEL.ref);
+      await api.ensureLoaded(LFM3_MODEL.ref);
+      const { baseUrl, apiKey } = await api.attestRuntime(LFM3_MODEL.ref);
+      expect((await api.status()).servers.main.state).toBe("running");
+
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: LFM3_MODEL.slug,
+          messages: [{ role: "user", content: "What is 17 plus 25? Answer with the number only." }],
+          max_tokens: 1024,
+        }),
+      });
+      expect(response.ok, `LFM3 completion HTTP ${response.status}`).toBe(true);
+      const body = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      expect(body.choices?.[0]?.message?.content ?? "").toContain("42");
+
+      const benchmark = await api.benchmarkModel(LFM3_MODEL.slug, { force: true });
+      console.log("lfm3 benchmark", JSON.stringify(benchmark));
+      expect(benchmark?.tokensPerSec ?? 0).toBeGreaterThan(0);
     },
     BOOTSTRAP_TIMEOUT_MS
   );

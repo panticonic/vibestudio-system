@@ -400,7 +400,7 @@ function compareGpuPreference(left: GpuInfo, right: GpuInfo): number {
 
 function backendRank(backend: EngineBackend): number {
   switch (backend) {
-    case "cuda-13.3":
+    case "cuda-13.4":
       return 60;
     case "cuda-12.4":
       return 55;
@@ -443,7 +443,7 @@ async function runCommand(
 function pickCudaBackend(driverVersion: string, os: SupportedOs): EngineBackend {
   const major = driverMajor(driverVersion);
   if ((os === "linux" || os === "win32") && major !== null && major >= 580) {
-    return "cuda-13.3";
+    return "cuda-13.4";
   }
   return "cuda-12.4";
 }

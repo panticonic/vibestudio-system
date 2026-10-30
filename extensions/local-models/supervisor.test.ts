@@ -1313,7 +1313,7 @@ function tempRoot(): string {
 
 function engineState(): EngineState {
   return {
-    pin: { buildTag: "b1", checksums: {} },
+    pin: { buildTag: "b1", manifestSha256: "" },
     cpu: {
       buildTag: "b1",
       backend: "cpu",

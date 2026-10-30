@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { chmod, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 
 import type {
   EngineBackend,
@@ -22,48 +26,55 @@ export interface EngineInstallerDeps {
   log(msg: string, data?: unknown): void;
 }
 
-const RELEASE_BASE_URL = "https://github.com/ggml-org/llama.cpp/releases/download";
+/** The engine is natlang's llama.cpp fork. Its releases are published by the fork's `natlang-runtime` workflow, whose
+ * `natlang-runtime.json` manifest describes every archive: the pin holds the release tag and the manifest's digest. */
+const RELEASE_BASE_URL = "https://github.com/werg/llama.cpp-neuralese/releases/download";
+const MANIFEST_FILE = "natlang-runtime.json";
+const MANIFEST_SCHEMA = "natlang.llama-runtime-release/2";
 const SMOKE_TIMEOUT_MS = 30_000;
 const EXTRACT_TIMEOUT_MS = 120_000;
 
-export function resolveAssetNames(
-  profile: HardwareProfile,
-  buildTag: string
-): { cpu: string; gpu: string | null; extra: string[] } {
-  switch (profile.os) {
-    case "win32": {
-      const cpu = `llama-${buildTag}-bin-win-cpu-${profile.arch}.zip`;
-      const gpu =
-        profile.chosenBackend === "cpu"
-          ? null
-          : `llama-${buildTag}-bin-win-${windowsBackendSegment(profile.chosenBackend)}.zip`;
-      const extra = isCuda(profile.chosenBackend)
-        ? [`cudart-llama-bin-win-cuda-${cudaVersion(profile.chosenBackend)}-x64.zip`]
-        : [];
-      return { cpu, gpu, extra };
-    }
-    case "darwin": {
-      const asset = `llama-${buildTag}-bin-macos-${profile.arch}.tar.gz`;
-      return { cpu: asset, gpu: profile.chosenBackend === "cpu" ? null : asset, extra: [] };
-    }
-    case "linux": {
-      // Verified against current llama.cpp releases: the CPU build is the PLAIN
-      // arch asset (no "-cpu" segment), and GPU variants put the backend
-      // BEFORE the arch (e.g. llama-b10621-bin-ubuntu-vulkan-x64.tar.gz).
-      const cpu = `llama-${buildTag}-bin-ubuntu-${profile.arch}.tar.gz`;
-      const gpu =
-        profile.chosenBackend === "cpu"
-          ? null
-          : `llama-${buildTag}-bin-ubuntu-${linuxBackendSegment(profile.chosenBackend)}-${profile.arch}.tar.gz`;
-      return { cpu, gpu, extra: [] };
-    }
+/** One archive of a release, as its manifest lists it. `role` is `cudart` for the CUDA runtime DLLs that are extracted
+ * next to the `server` archive of the same backend. */
+export interface ReleaseArchive {
+  file: string;
+  os: HardwareProfile["os"];
+  arch: HardwareProfile["arch"];
+  backends: EngineBackend[];
+  role: "server" | "cudart";
+  bytes: number;
+  sha256: string;
+}
+
+export interface ReleaseManifest {
+  schema: typeof MANIFEST_SCHEMA;
+  tag: string;
+  archives: ReleaseArchive[];
+}
+
+/** The archives to extract, in order, for `backend` on `profile`'s platform: its server archive, then its companions. */
+export function resolveArchives(
+  manifest: ReleaseManifest,
+  profile: Pick<HardwareProfile, "os" | "arch">,
+  backend: EngineBackend
+): ReleaseArchive[] {
+  const matching = manifest.archives.filter(
+    (archive) =>
+      archive.os === profile.os && archive.arch === profile.arch && archive.backends.includes(backend)
+  );
+  const server = matching.find((archive) => archive.role === "server");
+  if (!server) {
+    throw new Error(
+      `Release ${manifest.tag} publishes no ${backend} llama.cpp archive for ${profile.os}-${profile.arch}`
+    );
   }
+  return [server, ...matching.filter((archive) => archive.role === "cudart")];
 }
 
 export function backendDegradationLadder(backend: EngineBackend): EngineBackend[] {
   switch (backend) {
     case "cuda-12.4":
-    case "cuda-13.3":
+    case "cuda-13.4":
       return [backend, "vulkan", "cpu"];
     case "rocm":
       return ["rocm", "vulkan", "cpu"];
@@ -82,22 +93,24 @@ export function createEngineInstaller(deps: EngineInstallerDeps): {
   async function ensureInstalled(profile: HardwareProfile, pin: EnginePin): Promise<EngineState> {
     await mkdir(join(deps.rootDir, ROOT_LAYOUT.enginesDir), { recursive: true });
 
-    const cpu = await installBackend(deps, profile, pin, "cpu");
+    // Fetched only when an archive has to be installed, so an installed engine starts without the network.
+    let manifest: Promise<ReleaseManifest> | null = null;
+    const loadManifest = () => (manifest ??= fetchManifest(deps, pin));
+
+    const cpu = await installBackend(deps, profile, pin, "cpu", loadManifest);
     let gpu: InstalledEngine | null = null;
     let degradedReason: string | null = null;
 
     if (profile.chosenBackend !== "cpu") {
       const attempts = backendDegradationLadder(profile.chosenBackend);
-      const firstEffectiveBackend = effectiveBackendForInstall(profile, profile.chosenBackend);
-      if (firstEffectiveBackend !== profile.chosenBackend) {
-        degradedReason = `${profile.chosenBackend} is not published for ${profile.os}; using ${firstEffectiveBackend}`;
-      }
 
-      for (const requestedBackend of attempts) {
-        const backend = effectiveBackendForInstall(profile, requestedBackend);
+      for (const backend of attempts) {
         try {
-          gpu = backend === "cpu" ? cpu : await installBackend(deps, profile, pin, backend);
-          if (requestedBackend !== profile.chosenBackend && degradedReason === null) {
+          gpu =
+            backend === "cpu"
+              ? cpu
+              : await installBackend(deps, profile, pin, backend, loadManifest);
+          if (backend !== profile.chosenBackend && degradedReason === null) {
             degradedReason = `degraded from ${profile.chosenBackend} to ${backend}`;
           }
           break;
@@ -106,8 +119,7 @@ export function createEngineInstaller(deps: EngineInstallerDeps): {
             throw error;
           }
           degradedReason = `degraded from ${profile.chosenBackend}: ${errorMessage(error)}`;
-          deps.log("local-models engine GPU smoke test failed; trying fallback backend", {
-            requestedBackend,
+          deps.log("local-models engine GPU install failed; trying fallback backend", {
             backend,
             error: errorMessage(error),
           });
@@ -122,52 +134,34 @@ export function createEngineInstaller(deps: EngineInstallerDeps): {
   return { ensureInstalled };
 }
 
-function windowsBackendSegment(backend: EngineBackend): string {
-  switch (backend) {
-    case "cuda-12.4":
-    case "cuda-13.3":
-      return `${backend}-x64`;
-    case "vulkan":
-      return "vulkan-x64";
-    case "rocm":
-      return "rocm-7.14-x64";
-    case "cpu":
-      return "cpu-x64";
-    case "metal":
-      throw new Error("Metal llama.cpp assets are not published for Windows");
+async function fetchManifest(
+  deps: EngineInstallerDeps,
+  pin: EnginePin
+): Promise<ReleaseManifest> {
+  const response = await deps.fetch(`${RELEASE_BASE_URL}/${pin.buildTag}/${MANIFEST_FILE}`);
+  if (!response.ok) {
+    throw new Error(`Failed to download ${pin.buildTag} ${MANIFEST_FILE}: HTTP ${response.status}`);
   }
-}
-
-function linuxBackendSegment(backend: EngineBackend): string {
-  switch (backend) {
-    case "cuda-12.4":
-    case "cuda-13.3":
-      // ggml-org/llama.cpp does not publish Linux CUDA release archives in the documented scheme;
-      // use the Linux Vulkan build for NVIDIA GPUs until a CUDA asset name is pinned.
-      return "vulkan";
-    case "vulkan":
-      return "vulkan";
-    case "rocm":
-      return "rocm-7.14";
-    case "cpu":
-      return "cpu";
-    case "metal":
-      throw new Error("Metal llama.cpp assets are not published for Linux");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const digest = sha256(bytes);
+  if (digest !== pin.manifestSha256.toLowerCase()) {
+    throw new Error(
+      `Checksum mismatch for ${pin.buildTag} ${MANIFEST_FILE}: expected ${pin.manifestSha256}, got ${digest}`
+    );
   }
-}
-
-function effectiveBackendForInstall(
-  profile: HardwareProfile,
-  backend: EngineBackend
-): EngineBackend {
-  return profile.os === "linux" && isCuda(backend) ? "vulkan" : backend;
+  const manifest = JSON.parse(new TextDecoder().decode(bytes)) as ReleaseManifest;
+  if (manifest.schema !== MANIFEST_SCHEMA || manifest.tag !== pin.buildTag) {
+    throw new Error(`${MANIFEST_FILE} is not the ${MANIFEST_SCHEMA} manifest of ${pin.buildTag}`);
+  }
+  return manifest;
 }
 
 async function installBackend(
   deps: EngineInstallerDeps,
   profile: HardwareProfile,
   pin: EnginePin,
-  backend: EngineBackend
+  backend: EngineBackend,
+  loadManifest: () => Promise<ReleaseManifest>
 ): Promise<InstalledEngine> {
   const targetDir = engineDir(deps.rootDir, pin.buildTag, backend);
   const existing = await smokeExistingInstall(deps, targetDir, pin.buildTag, backend);
@@ -175,14 +169,14 @@ async function installBackend(
     return existing;
   }
 
-  const assets = assetsForBackend(profile, pin.buildTag, backend);
+  const archives = resolveArchives(await loadManifest(), profile, backend);
   const tmpDir = `${targetDir}.tmp`;
   await rm(tmpDir, { recursive: true, force: true });
   await mkdir(tmpDir, { recursive: true });
 
   try {
-    for (const asset of assets) {
-      const archivePath = await downloadAsset(deps, pin, asset);
+    for (const archive of archives) {
+      const archivePath = await downloadArchive(deps, pin, archive);
       try {
         await extractArchive(deps, archivePath, tmpDir);
       } finally {
@@ -211,20 +205,6 @@ async function installBackend(
   }
 }
 
-function assetsForBackend(
-  profile: HardwareProfile,
-  buildTag: string,
-  backend: EngineBackend
-): string[] {
-  const assetProfile: HardwareProfile = { ...profile, chosenBackend: backend };
-  const resolved = resolveAssetNames(assetProfile, buildTag);
-  const primary = backend === "cpu" ? resolved.cpu : resolved.gpu;
-  if (!primary) {
-    throw new Error(`No llama.cpp asset resolved for backend ${backend}`);
-  }
-  return [primary, ...resolved.extra];
-}
-
 async function smokeExistingInstall(
   deps: EngineInstallerDeps,
   dir: string,
@@ -247,36 +227,51 @@ async function smokeExistingInstall(
   }
 }
 
-async function downloadAsset(
+/** Streams the archive to disk and accepts it only if its byte length and SHA-256 are the manifest's. */
+async function downloadArchive(
   deps: EngineInstallerDeps,
   pin: EnginePin,
-  asset: string
+  archive: ReleaseArchive
 ): Promise<string> {
-  const expectedChecksum = pin.checksums[asset];
-  if (!expectedChecksum) {
-    throw new Error(`Missing pinned checksum for llama.cpp asset ${asset} (${pin.buildTag})`);
-  }
-
-  const url = `${RELEASE_BASE_URL}/${pin.buildTag}/${asset}`;
-  const response = await deps.fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to download ${asset}: HTTP ${response.status}`);
-  }
-
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const actualChecksum = sha256(bytes);
-  if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
-    throw new Error(
-      `Checksum mismatch for ${asset}: expected ${expectedChecksum}, got ${actualChecksum}`
-    );
+  const response = await deps.fetch(`${RELEASE_BASE_URL}/${pin.buildTag}/${archive.file}`);
+  if (!response.ok || !response.body) {
+    throw new Error(`Failed to download ${archive.file}: HTTP ${response.status}`);
   }
 
   const archivePath = join(
     deps.rootDir,
-    `.engine-${process.pid}-${Date.now()}-${safeFileName(asset)}`
+    `.engine-${process.pid}-${Date.now()}-${safeFileName(archive.file)}`
   );
-  await writeFile(archivePath, bytes);
-  return archivePath;
+  const hash = createHash("sha256");
+  let length = 0;
+  try {
+    await pipeline(
+      Readable.fromWeb(response.body as WebReadableStream<Uint8Array>),
+      async function* (chunks: AsyncIterable<Uint8Array>) {
+        for await (const chunk of chunks) {
+          hash.update(chunk);
+          length += chunk.byteLength;
+          yield chunk;
+        }
+      },
+      createWriteStream(archivePath, { flags: "wx" })
+    );
+    const digest = hash.digest("hex");
+    if (length !== archive.bytes) {
+      throw new Error(
+        `Size mismatch for ${archive.file}: expected ${archive.bytes} bytes, got ${length}`
+      );
+    }
+    if (digest !== archive.sha256.toLowerCase()) {
+      throw new Error(
+        `Checksum mismatch for ${archive.file}: expected ${archive.sha256}, got ${digest}`
+      );
+    }
+    return archivePath;
+  } catch (error) {
+    await rm(archivePath, { force: true });
+    throw error;
+  }
 }
 
 async function extractArchive(
@@ -359,17 +354,6 @@ function engineDir(rootDir: string, buildTag: string, backend: EngineBackend): s
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
-}
-
-function cudaVersion(backend: EngineBackend): string {
-  if (!isCuda(backend)) {
-    throw new Error(`${backend} is not a CUDA backend`);
-  }
-  return backend.slice("cuda-".length);
-}
-
-function isCuda(backend: EngineBackend): backend is "cuda-12.4" | "cuda-13.3" {
-  return backend === "cuda-12.4" || backend === "cuda-13.3";
 }
 
 function relativePath(parent: string, child: string): string {
