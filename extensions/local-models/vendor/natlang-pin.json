@@ -1,6 +1,6 @@
 {
   "schema": "natlang.vendor-pin/1",
-  "commit": "bb44ec9212bf1b0dee810529bc08d510293ac0f5",
+  "commit": "3388fb8a38fc194ba923b5153628b9d6914f362a",
   "dirty": false,
   "targets": [
     "llama"
@@ -12,7 +12,7 @@
   },
   "files": {
     "llama/natlang-llama.d.ts": "68ca219111b8f05cb743d20ac08200fbef47d8aea6db1a0134b09c90eaf97244",
-    "llama/natlang-llama.js": "79b5775151151ead89fb2a15f1e14fca87b13e96171df1e28174635e033e2c6c",
+    "llama/natlang-llama.js": "7ebe7dcb2c6dff80e3ed10f320a8419352f28feaa72509235755c9ac5e307a00",
     "llama/types/contracts.d.ts": "39bde953373aa789d01cece46a114ea385adc410a500c0b866ced3e35edb7402",
     "llama/types/llama-fork-source.d.ts": "9e7b099d3a2eac5c0c88a6250e2d3d3812dc9628f6df6f5feb7610fac5bbc39f",
     "llama/types/llama-runtime-release.d.ts": "211ea845a5fc5d2d065b1584383e1fba3e37d343957e317f1ff279c514b56ab7",
@@ -25,7 +25,7 @@
     "llama/types/llama/shared.d.ts": "4f13aab16d4d64c1a7470cf5b079780ce485ccbd422df317c77d9f623d8c5ae8",
     "llama/types/llama/slots.d.ts": "3777ed744fa8ad3fa024f2eb39049ce4e352bbdf80bccafe64089aec99542bfa",
     "llama/types/llama/warm.d.ts": "a93f5c76e272938a70d07a1ce47d04646d956af187817c87d4bd84ee357586e7",
-    "llama/types/model-catalog.d.ts": "fac5baed90881bb798ab17862166fb383ef8337bcc7a4bbd9a451d406218f732",
+    "llama/types/model-catalog.d.ts": "578c0e1559d66f82036fda478b1708f9dc5c51aac5df5d1ab6b1fc05c6ec74a1",
     "llama/types/package/warm.d.ts": "a2578ca9778b1188750516936d075195bd471f39330f4a2689a583944af2e3d0"
   }
 }
