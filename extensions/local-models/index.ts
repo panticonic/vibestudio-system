@@ -50,6 +50,7 @@ import {
 } from "./runtime-profiles.js";
 import type { WarmPrefix } from "./vendor/llama/natlang-llama.js";
 import { runModelBenchmark } from "./benchmark.js";
+import { executorResidency } from "./executor-residency.js";
 import {
   createNatlangServing,
   type OpeningRequest,
@@ -411,6 +412,7 @@ export async function activate(ctx: Ctx) {
       if (event.kind === "server.state") void reportHealth();
     },
     engines: () => engineState,
+    hardware: () => profile,
     fallbackModel: () => library.get(FALLBACK_MODEL.slug),
     libraryModel: (slug) => library.get(slug),
     libraryModels: () => library.list(),
@@ -1063,6 +1065,32 @@ export async function activate(ctx: Ctx) {
     };
   }
 
+  /**
+   * The executor model is only ready while it can stay loaded beside the main model; otherwise its entry is an error
+   * saying why, so the executor role resolves to the hosted model instead of the two models evicting each other.
+   */
+  function executorReadiness(
+    record: ModelRecord,
+    status: ReturnType<typeof recordState>,
+    main: ModelRecord | null,
+    hw: HardwareProfile | null,
+  ): ReturnType<typeof recordState> {
+    if (
+      record.slug !== LFM3_MODEL.slug ||
+      (status.state !== "ready" && status.state !== "startable")
+    )
+      return status;
+    const residency = executorResidency({
+      main,
+      executor: record,
+      hardware: hw,
+      engines: engineState,
+    });
+    return residency.resident
+      ? status
+      : { state: "error", download: null, error: residency.reason };
+  }
+
   async function listModels(): Promise<LocalModelEntry[]> {
     const [records, hw] = await Promise.all([
       library.list(),
@@ -1070,6 +1098,12 @@ export async function activate(ctx: Ctx) {
     ]);
     const servers = await awaitInvocation(supervisor.status());
     const downloads = library.listDownloads();
+    // The main model the executor has to stay loaded beside: the loaded one that is not the executor.
+    const mainSlug =
+      servers.main.state === "running"
+        ? servers.main.loadedModels.find((slug) => slug !== LFM3_MODEL.slug)
+        : undefined;
+    const mainBeside = records.find((record) => record.slug === mainSlug) ?? null;
     const entries = records
       .filter(
         (record) =>
@@ -1078,7 +1112,12 @@ export async function activate(ctx: Ctx) {
       )
       .map((record) => {
         const kind = serverForRecord(record);
-        const status = recordState(record, servers, downloads);
+        const status = executorReadiness(
+          record,
+          recordState(record, servers, downloads),
+          mainBeside,
+          hw,
+        );
         const contextWindow = runtimeContextLengthFor(record);
         return {
           slug: record.slug,

@@ -9,7 +9,8 @@
  * and the pinned release manifest against reality. A second test installs LFM3 and exercises scoring and warm openings.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { activate } from "./index.js";
 import { FALLBACK_MODEL, LFM3_MODEL } from "./constants.js";
 
@@ -292,6 +293,60 @@ describe.runIf(RUN)("local-models live e2e", () => {
       const benchmark = await api.benchmarkModel(LFM3_MODEL.slug, { force: true });
       console.log("lfm3 benchmark", JSON.stringify(benchmark));
       expect(benchmark?.tokensPerSec ?? 0).toBeGreaterThan(0);
+    },
+    BOOTSTRAP_TIMEOUT_MS
+  );
+
+  it(
+    "keeps the executor loaded while another library model is loaded and replaced",
+    async () => {
+      const api = await activate(stubCtx());
+      await api.installModel(LFM3_MODEL.ref);
+      await api.ensureLoaded(LFM3_MODEL.ref);
+      const { baseUrl, apiKey } = await api.attestRuntime(LFM3_MODEL.ref);
+      const routerModels = async (): Promise<Record<string, string>> => {
+        const response = await fetch(`${baseUrl}/models`, {
+          headers: { authorization: `Bearer ${apiKey}` },
+        });
+        const body = (await response.json()) as {
+          data: Array<{ id: string; status?: { value?: string } }>;
+        };
+        return Object.fromEntries(body.data.map((m) => [m.id, m.status?.value ?? "?"]));
+      };
+
+      // The 350M sibling, as the native agent-turn test requires: a second, different library model.
+      const admitted = await api.importDir(
+        path.join(process.env["VIBESTUDIO_LOCAL_MODELS_DIR"]!, "models/LiquidAI/LFM2.5-350M-GGUF"),
+        { contextLength: null, gpuLayers: 0 },
+      );
+      const other = admitted.find(
+        (record) => record.sha256 === "7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4",
+      );
+      if (!other) throw new Error("the verified 350M artifact was not admitted");
+
+      await api.ensureLoaded(other.slug);
+      // The router loads asynchronously; both models end up loaded, neither evicting the other.
+      await vi.waitFor(
+        async () =>
+          expect(await routerModels(), "the executor stays loaded beside the main model").toEqual({
+            [LFM3_MODEL.slug]: "loaded",
+            [other.slug]: "loaded",
+          }),
+        { timeout: 120_000, interval: 2_000 },
+      );
+      expect((await api.status()).servers.main).toMatchObject({
+        loadedModels: expect.arrayContaining([LFM3_MODEL.slug, other.slug]),
+      });
+
+      // A natlang call on the executor needs no reload: its answer arrives while the other model stays loaded.
+      const [scored] = await api.scoreContinuations(LFM3_MODEL.ref, [
+        { messages: [{ role: "user", content: "Is 2+2=4? yes or no" }], continuations: ["yes", "no"] },
+      ]);
+      if (!scored || "error" in scored) throw new Error(`scoring failed: ${JSON.stringify(scored)}`);
+      expect(await routerModels()).toMatchObject({
+        [LFM3_MODEL.slug]: "loaded",
+        [other.slug]: "loaded",
+      });
     },
     BOOTSTRAP_TIMEOUT_MS
   );

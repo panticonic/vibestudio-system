@@ -53,6 +53,7 @@ import {
 } from "./supervisor.js";
 import type {
   EngineState,
+  HardwareProfile,
   ModelRecord,
   ServerKind,
 } from "@workspace/model-catalog/localModels";
@@ -1016,6 +1017,103 @@ describe("createServerSupervisor", () => {
     await harness.supervisor.dispose();
   });
 
+  describe("the executor model beside the main model", () => {
+    const GIB = 1024 ** 3;
+    const lfm3 = (): ModelRecord => ({
+      ...modelRecord(LFM3_MODEL.slug),
+      sha256: LFM3_MODEL.quants.Q8_0.sha256,
+      sizeBytes: LFM3_MODEL.quants.Q8_0.downloadSizeBytes,
+    });
+    const memory = (usableRamMB: number): HardwareProfile => ({
+      os: "linux",
+      arch: "x64",
+      gpus: [],
+      cpu: { cores: 8, features: [] },
+      ramMB: usableRamMB,
+      usableRamMB,
+      chosenBackend: "cpu",
+      chosenGpu: null,
+      tier: "cpu-strong",
+      probedAt: 1,
+      notes: [],
+    });
+    const mainOf = (slug: string, sizeBytes: number): ModelRecord => ({
+      ...modelRecord(slug),
+      sizeBytes,
+    });
+    /** The router calls the harness makes, in order: "load lfm3-1.7b", "unload qwen". */
+    function routerCalls(harness: Harness, run: () => Promise<unknown>) {
+      const calls: string[] = [];
+      const inner = harness.deps.fetch;
+      harness.deps.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const match = /\/models\/(load|unload)$/u.exec(String(input));
+        if (match) {
+          calls.push(
+            `${match[1]} ${(JSON.parse(String(init?.body)) as { model: string }).model}`,
+          );
+          return Response.json({ success: true });
+        }
+        return inner(input, init);
+      }) as typeof fetch;
+      return { calls, run };
+    }
+
+    it("keeps the executor loaded when the main model changes, and loads the new main model without evicting it", async () => {
+      const harness = makeHarness();
+      harness.deps.hardware = () => memory(64 * 1024);
+      harness.models.set(LFM3_MODEL.slug, lfm3());
+      harness.models.set("agent-a", mainOf("agent-a", 4 * GIB));
+      harness.models.set("agent-b", mainOf("agent-b", 5 * GIB));
+      const { calls } = routerCalls(harness, async () => undefined);
+
+      await harness.supervisor.ensureLoaded("agent-a");
+      await harness.supervisor.ensureLoaded(LFM3_MODEL.slug);
+      await harness.supervisor.ensureLoaded("agent-b");
+
+      expect(calls).toEqual([
+        "load agent-a",
+        "load lfm3-1.7b",
+        "unload agent-a",
+        "load agent-b",
+      ]);
+      const mainArgs = lastSpawn(harness, "main").args;
+      expect(mainArgs[mainArgs.indexOf("--models-max") + 1]).toBe("2");
+      expect((await harness.supervisor.status()).main).toMatchObject({
+        loadedModels: [LFM3_MODEL.slug, "agent-b"],
+      });
+      await harness.supervisor.dispose();
+    });
+
+    it("unloads the executor for a main model it cannot stay loaded beside, and refuses to load it there", async () => {
+      const harness = makeHarness();
+      // 8 GiB: the executor with its slots (about 4 GiB) beside a 5 GiB model exceeds the 80% weight budget.
+      harness.deps.hardware = () => memory(8 * 1024);
+      harness.models.set(LFM3_MODEL.slug, lfm3());
+      harness.models.set("small", mainOf("small", 1 * GIB));
+      harness.models.set("big", mainOf("big", 5 * GIB));
+      const { calls } = routerCalls(harness, async () => undefined);
+
+      await harness.supervisor.ensureLoaded(LFM3_MODEL.slug);
+      await harness.supervisor.ensureLoaded("small");
+      await harness.supervisor.ensureLoaded("big");
+      await expect(harness.supervisor.ensureLoaded(LFM3_MODEL.slug)).rejects.toThrow(
+        /cannot stay loaded beside big: big \(5120 MiB\) and the executor model/u,
+      );
+
+      expect(calls).toEqual([
+        "load lfm3-1.7b",
+        "load small",
+        "unload small",
+        "unload lfm3-1.7b",
+        "load big",
+      ]);
+      expect((await harness.supervisor.status()).main).toMatchObject({
+        loadedModels: ["big"],
+      });
+      await harness.supervisor.dispose();
+    });
+  });
+
   it("persists ports across restart", async () => {
     const harness = makeHarness();
     await harness.supervisor.activate();
@@ -1305,6 +1403,7 @@ function makeHarness(
       events.push(event);
     }),
     engines: vi.fn(() => engineState()),
+    hardware: vi.fn(() => null),
     fallbackModel: vi.fn(async () => modelRecord(FALLBACK_MODEL.slug)),
     libraryModel: vi.fn(async (slug: string) => models.get(slug) ?? null),
     libraryModels: vi.fn(async () => [...models.values()]),

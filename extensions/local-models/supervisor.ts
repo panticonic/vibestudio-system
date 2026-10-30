@@ -20,6 +20,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import type {
   EngineState,
+  HardwareProfile,
   ModelRecord,
   ModelRuntimeConfig,
   ModelRuntimeValidationRecipe,
@@ -36,7 +37,8 @@ import {
   totalContextLength,
   validatedRuntimeConfig,
 } from "./runtime-profiles.js";
-import { FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
+import { FALLBACK_MODEL, LFM3_MODEL, ROOT_LAYOUT } from "./constants.js";
+import { executorResidency, type ExecutorResidency } from "./executor-residency.js";
 
 export interface SupervisorDeps {
   rootDir: string;
@@ -59,6 +61,8 @@ export interface SupervisorDeps {
       | { kind: "models.changed" },
   ): void;
   engines(): EngineState | null;
+  /** The probed hardware: whether the executor model can stay loaded beside the main model depends on its memory. */
+  hardware(): HardwareProfile | null;
   fallbackModel(): Promise<ModelRecord | null>;
   libraryModel(slug: string): Promise<ModelRecord | null>;
   /** Full library — feeds the router preset INI (design §4.4). */
@@ -688,7 +692,7 @@ class ServerSupervisor {
     if (!source) throw new Error(`local model not found: ${slug}`);
     const model = { ...source, config: validatedRuntimeConfig(source.config) };
 
-    this.mainModelSlug = slug;
+    if (slug !== LFM3_MODEL.slug) this.mainModelSlug = slug;
     await this.reconcileRecipe("main", model);
     const active = await this.ensureOwnerServer("main", model);
     await this.assertHealthy("main", active);
@@ -765,6 +769,24 @@ class ServerSupervisor {
     }
 
     if (this.loadedMainModels.has(slug)) return;
+    for (const resident of await this.residentsToUnload(model)) {
+      const unload = await this.deps.fetch(`${endpoint}/models/unload`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ model: resident }),
+      });
+      if (!unload.ok) {
+        const detail = await unload.text().catch(() => "");
+        throw new Error(
+          `local model ${resident} failed to unload with HTTP ${unload.status}${detail ? `: ${detail}` : ""}`,
+        );
+      }
+      this.loadedMainModels.delete(resident);
+      this.loadedRecipes.delete(resident);
+    }
     const load = await this.deps.fetch(`${endpoint}/models/load`, {
       method: "POST",
       headers: {
@@ -779,12 +801,52 @@ class ServerSupervisor {
         `local model ${slug} failed to load with HTTP ${load.status}${detail ? `: ${detail}` : ""}`,
       );
     }
-    // --models-max 1 makes this the only resident main model.
-    this.loadedMainModels.clear();
     this.loadedMainModels.add(slug);
-    this.loadedRecipes.clear();
     this.loadedRecipes.set(slug, recipe);
     this.routerLoads.set(slug, (this.routerLoads.get(slug) ?? 0) + 1);
+  }
+
+  /**
+   * The router holds at most two models: one main model and natlang's executor model, which stays loaded beside
+   * whichever main model is current. The supervisor, not the router's own eviction, decides who leaves: loading a
+   * main model unloads the previous one (and the executor when the two cannot be resident together, §4.6), and the
+   * executor is not loaded at all beside a main model it cannot stay resident with.
+   */
+  private async residentsToUnload(model: ModelRecord): Promise<string[]> {
+    const resident = [...this.loadedMainModels];
+    if (model.slug === LFM3_MODEL.slug) {
+      const mainSlug = resident.find((slug) => slug !== LFM3_MODEL.slug);
+      const main = mainSlug ? await this.deps.libraryModel(mainSlug) : null;
+      const beside = await this.executorBeside(main, model);
+      if (!beside.resident) {
+        throw new Error(
+          `local model ${model.slug} cannot stay loaded beside ${main?.slug ?? "the main model"}: ${beside.reason}`,
+        );
+      }
+      return [];
+    }
+    const leaving = resident.filter(
+      (slug) => slug !== LFM3_MODEL.slug && slug !== model.slug,
+    );
+    if (resident.includes(LFM3_MODEL.slug)) {
+      const executor = await this.deps.libraryModel(LFM3_MODEL.slug);
+      if (!executor || !(await this.executorBeside(model, executor)).resident) {
+        leaving.push(LFM3_MODEL.slug);
+      }
+    }
+    return leaving;
+  }
+
+  private async executorBeside(
+    main: ModelRecord | null,
+    executor: ModelRecord,
+  ): Promise<ExecutorResidency> {
+    return executorResidency({
+      main,
+      executor,
+      hardware: this.deps.hardware(),
+      engines: this.deps.engines(),
+    });
   }
 
   private async validateModel(
@@ -1400,8 +1462,9 @@ class ServerSupervisor {
       args: [
         "--models-preset",
         presetPath,
+        // One main model and the executor; `residentsToUnload` keeps the supervisor, not LRU eviction, in charge.
         "--models-max",
-        "1",
+        "2",
         // Every model instance inherits it: warm prompt openings are saved here and restored into its slots.
         "--slot-save-path",
         this.paths.warmPrefixes,

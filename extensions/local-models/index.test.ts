@@ -481,6 +481,65 @@ describe("local-models extension", () => {
     ]);
   });
 
+  it("reports the executor model as an error while it cannot stay loaded beside the main model", async () => {
+    const { estimateFit } = await import("./library.js");
+    const GIB = 1024 ** 3;
+    const executor: ModelRecord = {
+      ...fallbackRecord(),
+      slug: LFM3_MODEL.slug,
+      displayName: LFM3_MODEL.displayName,
+      file: "/models/LFM3-1.7B-Q8_0.gguf",
+      sha256: LFM3_MODEL.quants.Q8_0.sha256,
+      sizeBytes: LFM3_MODEL.quants.Q8_0.downloadSizeBytes,
+    };
+    const agent: ModelRecord = {
+      ...fallbackRecord(),
+      slug: "big-agent",
+      displayName: "Big agent",
+      file: "/models/big-agent.gguf",
+      sha256: "b".repeat(64),
+      sizeBytes: 20 * GIB,
+    };
+    modelLibraryMock.library.list.mockResolvedValue([executor, agent]);
+    // Memory for the agent model alone, not for the agent model and the executor with its slots.
+    vi.mocked(estimateFit).mockImplementation((record) => ({
+      fit: record.sizeBytes > 22 * GIB ? "too-big" : "cpu-only",
+      estTokensPerSec: null,
+      contextLength: 8192,
+      gpuLayers: 0,
+      notes: [],
+    }));
+    const loaded = (models: string[]) =>
+      supervisorMock.status.mockReturnValue({
+        utility: { state: "stopped", port: 8080 },
+        main: { state: "running", port: 8081, loadedModels: models, uptimeMs: 1 },
+      });
+    const { activate } = await import("./index.js");
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+    });
+
+    loaded(["big-agent"]);
+    // Entries read "starting" until the activation bootstrap has finished.
+    await vi.waitFor(async () =>
+      expect(await listEntries(api, LFM3_MODEL.slug)).toEqual([
+        expect.objectContaining({
+          state: "error",
+          errorMessage: expect.stringMatching(
+            /Big agent \(20480 MiB\) and the executor model \(\d+ MiB with its slots\) do not fit in memory together/u,
+          ),
+        }),
+      ]),
+    );
+
+    // Without that main model loaded, the executor is startable again.
+    loaded([LFM3_MODEL.slug]);
+    await expect(listEntries(api, LFM3_MODEL.slug)).resolves.toEqual([
+      expect.objectContaining({ state: "ready", errorMessage: null }),
+    ]);
+  });
+
   it.each([
     ["cpu-min", "Q4_K_M"],
     ["gpu-large", "Q8_0"],
