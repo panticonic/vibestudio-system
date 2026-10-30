@@ -1,6 +1,6 @@
 {
   "schema": "natlang.vendor-pin/1",
-  "commit": "3388fb8a38fc194ba923b5153628b9d6914f362a",
+  "commit": "c5740cf93405e368d1fd4b59cf17b97f0a9d7872",
   "dirty": false,
   "targets": [
     "llama"
@@ -12,7 +12,7 @@
   },
   "files": {
     "llama/natlang-llama.d.ts": "68ca219111b8f05cb743d20ac08200fbef47d8aea6db1a0134b09c90eaf97244",
-    "llama/natlang-llama.js": "7ebe7dcb2c6dff80e3ed10f320a8419352f28feaa72509235755c9ac5e307a00",
+    "llama/natlang-llama.js": "f20f04fd6fe50a4b19a8f12121741f8b1a47e10a618146c1ba2986b4948f0ff3",
     "llama/types/contracts.d.ts": "39bde953373aa789d01cece46a114ea385adc410a500c0b866ced3e35edb7402",
     "llama/types/llama-fork-source.d.ts": "9e7b099d3a2eac5c0c88a6250e2d3d3812dc9628f6df6f5feb7610fac5bbc39f",
     "llama/types/llama-runtime-release.d.ts": "211ea845a5fc5d2d065b1584383e1fba3e37d343957e317f1ff279c514b56ab7",
@@ -21,7 +21,7 @@
     "llama/types/llama/models.d.ts": "231b73d1f0feebee38c8c9384966c6762397f607cac7b53c203fdb6ff2c20249",
     "llama/types/llama/node.d.ts": "c463978db183a66cdad467775241985ebffcd0bcbc9c780bd3526074e864bc8e",
     "llama/types/llama/runtime.d.ts": "47c34efc7cc58a91593ccd9fdfa3d66c4b193bc952f5186cd8ee7d4c896adda5",
-    "llama/types/llama/server.d.ts": "1870f19fb8efa8f43c6047302816bc599b791baa77f0be4f5739e232ab8a125b",
+    "llama/types/llama/server.d.ts": "a1203f17c7b3f92037944a864ce4946dcc182b12ec8d88a2733c99f879818351",
     "llama/types/llama/shared.d.ts": "4f13aab16d4d64c1a7470cf5b079780ce485ccbd422df317c77d9f623d8c5ae8",
     "llama/types/llama/slots.d.ts": "3777ed744fa8ad3fa024f2eb39049ce4e352bbdf80bccafe64089aec99542bfa",
     "llama/types/llama/warm.d.ts": "a93f5c76e272938a70d07a1ce47d04646d956af187817c87d4bd84ee357586e7",

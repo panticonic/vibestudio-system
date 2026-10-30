@@ -29,7 +29,7 @@ export type LlamaLaunched = {
 };
 /** Start a llama-server. `signal` aborts when the server is closed while starting; honor it by stopping what was started. */
 export type LlamaLauncher = (launch: LlamaLaunch, signal: AbortSignal) => Promise<LlamaLaunched>;
-/** A server the host already runs, to plan around without starting it. */
+/** A server the host already runs, to plan around without starting it. It is serving: attach only once its load has completed. */
 export type LlamaAttachment = {
     endpoint: string;
     slots: number;

@@ -866,7 +866,7 @@ async function findSharedServer(host, modelSha256, runtime) {
   const server = readSharedServer(host);
   if (!server || server.pid === process.pid || server.modelSha256 !== modelSha256 || server.runtime !== runtime || !alive(server.pid)) return void 0;
   try {
-    const response = await host.fetch(server.endpoint + "/health", { signal: AbortSignal.timeout(2e3) });
+    const response = await host.fetch(server.endpoint + "/health");
     return response.ok ? server : void 0;
   } catch {
     return void 0;
@@ -898,13 +898,11 @@ async function stopProcess(child) {
   if (!child.hasExited()) child.kill("SIGKILL");
 }
 async function serverIdle(host, endpoint, headers) {
-  try {
-    const response = await host.fetch(endpoint + "/slots", { signal: AbortSignal.timeout(2e3), ...headers ? { headers } : {} });
-    const slots = await response.json();
-    return response.ok && Array.isArray(slots) && slots.every((slot) => !slot.is_processing);
-  } catch {
-    return false;
-  }
+  const response = await host.fetch(endpoint + "/slots", headers ? { headers } : {});
+  if (!response.ok) throw new Error(`the server's /slots listing answered HTTP ${response.status}`);
+  const slots = await response.json();
+  if (!Array.isArray(slots)) throw new Error("the server's /slots listing is not a list");
+  return slots.every((slot) => !slot.is_processing);
 }
 function spawnLauncher(host) {
   return async (launch, signal) => {
@@ -978,6 +976,7 @@ function createLlamaServer(host, options = {}) {
         if (!warming) return void 0;
         if (contended && !await serverIdle(host, base, headers)) {
           openings.delete(opening.key);
+          log.write("natlang: prompt warming skipped: the server is serving other requests; a later idle moment retries\n");
           return void 0;
         }
         const sha = modelSha256 ?? await managedModelSha256(host, release);
