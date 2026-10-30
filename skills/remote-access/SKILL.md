@@ -53,6 +53,20 @@ see [phone setup](../phone-setup/SKILL.md).
    secret is lost or compromised. Clients pinned to the old Endpoint ID will
    need to re-pair.
 
+The layer that failed says the next check. `remote doctor` names the failing
+check; status and registration logs name the rest.
+
+| Layer               | It failed when                                                                  | Next check                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `client-runtime`    | the Iroh native binding does not load, or a retired transport remains            | Fix the named dependency or environment variable on this client; do not work around the binding.     |
+| `host-sandbox`      | the host refuses sandbox user namespaces, or bubblewrap is missing               | Follow `docs/linux-sandbox-setup.md`. No workspace starts until the host grants it.                  |
+| `server-deployment` | the server's endpoint secret or systemd unit is missing, malformed, or too open  | `remote status` and the unit's logs on the server; restore the secret at mode 0600 or redeploy.     |
+| `device-credential` | the paired credential lacks its endpoint secret, or its control reach is malformed | Pair again with a complete server-minted link. Never build a reach by hand.                          |
+| `relay-config`      | the relay set is not canonical HTTPS                                             | Correct the relay URLs (command line, paired reach, or environment). Do not enable public lookup.    |
+| `hub-control`       | the Iroh probe to the hub fails                                                  | Deployment status and endpoint registration logs on the server; record whether the path is direct or relayed. |
+| `workspace-routing` | the hub answers but a workspace's reach is stale, missing, or mismatched         | Refresh that workspace's reach through the hub by workspace ID, not by display name.                 |
+| `child-endpoint`    | a workspace child fails to start or register with the hub                        | The child's endpoint registration logs; `rotate-endpoint --workspace` only when its secret is lost or compromised. |
+
 Falling back to a relay is normal and is not a security downgrade. Record
 whether the active path is direct or relayed, and which configured relay was
 used. Don't enable public lookup, bring back a retired transport, replace an
