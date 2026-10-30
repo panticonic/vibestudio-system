@@ -129,23 +129,33 @@ import { pipeline } from "node:stream/promises";
 // src/llama-runtime-release.ts
 var LLAMA_RUNTIME_RELEASE = Object.freeze({
   "version": "0.8.0",
-  "build": 12067,
-  "commit": "a6401bbd3",
+  "build": 12068,
+  "commit": "089699831",
   "compatible": {
     "minimumVersion": "0.8.0",
     "maximumVersionExclusive": "0.9.0",
-    "minimumBuild": 12067
+    "minimumBuild": 12068
   },
   "artifacts": [
     {
-      "key": "linux-x64-cpu",
-      "platform": "linux",
+      "key": "darwin-arm64-metal",
+      "platform": "darwin",
+      "arch": "arm64",
+      "backend": "metal",
+      "archive": "tar.gz",
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12068/llama-natlang-bin-macos-arm64.tar.gz",
+      "bytes": 11188173,
+      "sha256": "a0519fa3e82464da347e6f6b96f93782c55045381aa5045188de46782ddf7354"
+    },
+    {
+      "key": "darwin-x64-cpu",
+      "platform": "darwin",
       "arch": "x64",
       "backend": "cpu",
       "archive": "tar.gz",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12067/llama-natlang-bin-ubuntu-x64.tar.gz",
-      "bytes": 18925224,
-      "sha256": "4dc55a1ce2e1d5d50f0b2255abbdeef37ddd48787532ae0374210ee47ca007e2"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12068/llama-natlang-bin-macos-x64.tar.gz",
+      "bytes": 10610906,
+      "sha256": "74471c936ed85148d5dd4751ef6784a86f011e6a9b5d319d10986a8bb7e55e77"
     },
     {
       "key": "linux-arm64-cpu",
@@ -153,39 +163,19 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
       "arch": "arm64",
       "backend": "cpu",
       "archive": "tar.gz",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12067/llama-natlang-bin-ubuntu-arm64.tar.gz",
-      "bytes": 14923226,
-      "sha256": "d22fb9090a44dce90b697cb47ce363d33bde3813fe4d6d05660eb5789333cb2e"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12068/llama-natlang-bin-ubuntu-arm64.tar.gz",
+      "bytes": 14923712,
+      "sha256": "43c05781a59179457613fefc1749584ceab52feee7fde8c39956ee74ba83c288"
     },
     {
-      "key": "darwin-arm64-metal",
-      "platform": "darwin",
-      "arch": "arm64",
-      "backend": "metal",
-      "archive": "tar.gz",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12067/llama-natlang-bin-macos-arm64.tar.gz",
-      "bytes": 11185651,
-      "sha256": "22c256a954b78332880b9bfd980ef32a23f4633544981802c2ee0f324e58df19"
-    },
-    {
-      "key": "darwin-x64-metal",
-      "platform": "darwin",
-      "arch": "x64",
-      "backend": "metal",
-      "archive": "tar.gz",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12067/llama-natlang-bin-macos-x64.tar.gz",
-      "bytes": 10610559,
-      "sha256": "cfa5ae0569d05f372410d760ea174cc5f36135726d8740c3d85abcd265b5e6ea"
-    },
-    {
-      "key": "win32-x64-cpu",
-      "platform": "win32",
+      "key": "linux-x64-cpu",
+      "platform": "linux",
       "arch": "x64",
       "backend": "cpu",
-      "archive": "zip",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12067/llama-natlang-bin-win-cpu-x64.zip",
-      "bytes": 17924567,
-      "sha256": "f9f8f1ad71c4efd3cdc47f1a2dc85e628e67c0b69f02dc225f21655e5503c298"
+      "archive": "tar.gz",
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12068/llama-natlang-bin-ubuntu-x64.tar.gz",
+      "bytes": 18924921,
+      "sha256": "7a9c21270469692f066b5ce44dfda5df88f43e9fdedeb74e82f01da5b1ccf821"
     },
     {
       "key": "win32-arm64-cpu",
@@ -193,9 +183,19 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
       "arch": "arm64",
       "backend": "cpu",
       "archive": "zip",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12067/llama-natlang-bin-win-cpu-arm64.zip",
-      "bytes": 10891946,
-      "sha256": "1847fed629448f360ec5c5bd4e475568fc129714ade6c5637955ec85eae25d4b"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12068/llama-natlang-bin-win-cpu-arm64.zip",
+      "bytes": 10893299,
+      "sha256": "82eae429b2bbd9a22190d1392dc381906578236f1af67505bd7cbbccd37cd467"
+    },
+    {
+      "key": "win32-x64-cpu",
+      "platform": "win32",
+      "arch": "x64",
+      "backend": "cpu",
+      "archive": "zip",
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12068/llama-natlang-bin-win-cpu-x64.zip",
+      "bytes": 17925469,
+      "sha256": "910f2d48335f18d89b567e184b9a6e2f5ed42b50d35db77ebd9c41612dc59a14"
     }
   ]
 });
