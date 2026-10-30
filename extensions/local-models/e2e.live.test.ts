@@ -1,15 +1,15 @@
 /**
  * LIVE e2e for the local-models extension (design §11.2 scenarios 1–3):
- * real llama.cpp release download, real LFM2.5 GGUF download, real
+ * real natlang-runtime release download (the pinned engine), real LFM2.5 GGUF download, real
  * llama-server, real OpenAI-compatible + tool-calling round-trips.
  *
  * Gated behind RUN_LOCAL_MODELS_E2E=1 — it downloads ~1.6 GB on first run
  * (cached machine-globally afterwards) and starts local servers. Locks
  * design risks #1 (loopback fetch), #2 (embedded tool template under --jinja),
- * and the pinned-build asset naming against reality.
+ * and the pinned release manifest against reality. A second test installs LFM3 and exercises scoring and warm openings.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { activate } from "./index.js";
 import { FALLBACK_MODEL, LFM3_MODEL } from "./constants.js";
 
@@ -18,8 +18,19 @@ const RUN = process.env["RUN_LOCAL_MODELS_E2E"] === "1";
 // GGUF; interrupted runs resume via HTTP Range, so re-runs only pay the rest.
 const BOOTSTRAP_TIMEOUT_MS = 40 * 60_000;
 
+// What the extension registers for its own disposal: servers started by a test stop with it.
+const disposables: Array<{ dispose(): void | Promise<void> }> = [];
+afterEach(async () => {
+  const results = await Promise.allSettled(
+    disposables.splice(0).map((disposable) => disposable.dispose())
+  );
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+});
+
 function stubCtx() {
   return {
+    subscriptions: { push: (disposable: { dispose(): void | Promise<void> }) => void disposables.push(disposable) },
     log: {
       info: (msg: string, data?: unknown) =>
         console.log(msg, data !== undefined ? JSON.stringify(data) : ""),
@@ -246,6 +257,37 @@ describe.runIf(RUN)("local-models live e2e", () => {
         choices?: Array<{ message?: { content?: string } }>;
       };
       expect(body.choices?.[0]?.message?.content ?? "").toContain("42");
+
+      // The fork's decision readout, through the router's entry for the model.
+      const [scored] = await api.scoreContinuations(LFM3_MODEL.ref, [
+        {
+          messages: [{ role: "user", content: "What is 17 plus 25? Answer with the number only." }],
+          continuations: ["42", "43"],
+        },
+      ]);
+      if (!scored || "error" in scored) throw new Error(`scoring failed: ${JSON.stringify(scored)}`);
+      expect(scored.log_probs[0], "42 must be likelier than 43").toBeGreaterThan(scored.log_probs[1]!);
+
+      // A prompt opening is prefilled once, saved, and restored into every slot; a request that starts with it
+      // then reuses the restored tokens instead of evaluating them.
+      const system = `You are a careful assistant. ${"Follow the rules exactly. ".repeat(60)}`;
+      const warm = await api.warmOpening(LFM3_MODEL.ref, {
+        messages: [{ role: "system", content: system }, { role: "user", content: "hello" }],
+      });
+      expect(warm, "the opening was not warmed").not.toBeNull();
+      expect(warm?.restoredSlots).toBeGreaterThan(1);
+      const warmed = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: LFM3_MODEL.slug,
+          messages: [{ role: "system", content: system }, { role: "user", content: "What is 2 plus 2?" }],
+          max_tokens: 8,
+        }),
+      });
+      const reuse = (await warmed.json()) as { timings?: { cache_n?: number } };
+      console.log("lfm3 warm", JSON.stringify({ warm, cache_n: reuse.timings?.cache_n }));
+      expect(reuse.timings?.cache_n ?? 0, "the restored opening was not reused").toBeGreaterThan(0);
 
       const benchmark = await api.benchmarkModel(LFM3_MODEL.slug, { force: true });
       console.log("lfm3 benchmark", JSON.stringify(benchmark));

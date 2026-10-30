@@ -218,6 +218,24 @@
             "kind": "closed",
             "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
+        },
+        "warmOpening": {
+          "effect": {
+            "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
+          }
+        },
+        "scoreContinuations": {
+          "effect": {
+            "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
+          }
         }
       }
     },

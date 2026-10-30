@@ -41,14 +41,21 @@ import {
   estimateFit,
   isCurrentFallbackRecord,
 } from "./library.js";
-import { createServerSupervisor } from "./supervisor.js";
+import { createServerSupervisor, type LoadedModel } from "./supervisor.js";
 import {
   runtimeContextLengthFor,
   sameRuntimeConfig,
   sameRuntimeRecipe,
   validatedRuntimeConfig,
 } from "./runtime-profiles.js";
+import type { WarmPrefix } from "./vendor/llama/natlang-llama.js";
 import { runModelBenchmark } from "./benchmark.js";
+import {
+  createNatlangServing,
+  type OpeningRequest,
+  type ScoreItem,
+  type ScoreResult,
+} from "./natlang-serving.js";
 import {
   DEFAULT_MODEL,
   FALLBACK_MODEL,
@@ -417,6 +424,16 @@ export async function activate(ctx: Ctx) {
     },
   });
 
+  const serving = createNatlangServing({
+    rootDir,
+    log,
+    fetch: globalThis.fetch,
+    apiKey: () => supervisor.apiKey(),
+    load: (slug) => loadModel(slug),
+    record: (slug) => library.get(slug),
+    runtime: ENGINE_PIN.buildTag,
+  });
+
   const lifetime = new AbortController();
   const stopped = new Error("Local-models extension disposed");
   const backgroundFlights = new Set<Promise<unknown>>();
@@ -436,6 +453,7 @@ export async function activate(ctx: Ctx) {
       const flight = (async () => {
         // Provider closure settles its actual readiness and serving requests.
         await supervisor.dispose(stopped);
+        await serving.close();
         const pending = [
           ...backgroundFlights,
           ...benchmarkRuns.values(),
@@ -637,6 +655,16 @@ export async function activate(ctx: Ctx) {
       onLoaded?: (config: ModelRuntimeConfig) => void;
     } = {},
   ): Promise<{ baseUrl: string }> {
+    return { baseUrl: (await loadModel(modelId, options)).baseUrl };
+  }
+
+  async function loadModel(
+    modelId: string,
+    options: {
+      scheduleFallbackBenchmark?: boolean;
+      onLoaded?: (config: ModelRuntimeConfig) => void;
+    } = {},
+  ): Promise<LoadedModel> {
     lifetime.signal.throwIfAborted();
     await awaitInvocation(ensureBootstrap());
     const slug = bareSlug(modelId);
@@ -647,7 +675,7 @@ export async function activate(ctx: Ctx) {
       scheduleBenchmark(slug);
     const loaded = await awaitInvocation(supervisor.ensureLoaded(slug));
     options.onLoaded?.(loaded.runtimeConfig);
-    return { baseUrl: loaded.baseUrl };
+    return loaded;
   }
 
   async function validateAddedModel(slug: string): Promise<void> {
@@ -1170,6 +1198,36 @@ export async function activate(ctx: Ctx) {
       // no-op once the GGUF is present, so warm calls stay cheap. A completed
       // lazy fallback download schedules a background benchmark.
       return ensureLoadedInternal(modelId, { scheduleFallbackBenchmark: true });
+    },
+
+    /**
+     * Make a prompt opening (a system prompt and tools of at least 256 characters) warm in every slot of a model:
+     * restore its saved state, or prefill it once and save it for later instances of the model. Null when the request
+     * has no such opening or the slots are busy, in which case the turn simply runs cold.
+     */
+    async warmOpening(
+      modelId: string,
+      request: OpeningRequest,
+    ): Promise<WarmPrefix | null> {
+      lifetime.signal.throwIfAborted();
+      return awaitInvocation(
+        serving.warmOpening(bareSlug(modelId), request, lifetime.signal),
+      );
+    },
+
+    /**
+     * natlang's decision readout: the log-probability of each candidate reply to a conversation, without generating
+     * (the llama.cpp fork's `/v1/natlang/score`). One entry per item, in order; an item that cannot be rendered has
+     * an `error` instead.
+     */
+    async scoreContinuations(
+      modelId: string,
+      items: ScoreItem[],
+    ): Promise<ScoreResult[]> {
+      lifetime.signal.throwIfAborted();
+      return awaitInvocation(
+        serving.scoreContinuations(bareSlug(modelId), items, lifetime.signal),
+      );
     },
 
     /**

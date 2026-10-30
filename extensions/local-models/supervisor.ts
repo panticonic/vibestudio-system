@@ -33,6 +33,7 @@ import {
   effectiveModelRuntime,
   observedRuntimeRecipe,
   modelRuntimeArgs,
+  totalContextLength,
   validatedRuntimeConfig,
 } from "./runtime-profiles.js";
 import { FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
@@ -71,13 +72,21 @@ export interface SupervisorDeps {
   adminTransport?: SupervisorAdminTransport;
 }
 
+/** A model the server answers for. `instance` names this load of it: it changes whenever the model's server process
+ * is replaced, so state kept in the server's memory (restored slots) is known to be gone. */
+export interface LoadedModel {
+  baseUrl: string;
+  runtimeConfig: ModelRuntimeConfig;
+  instance: string;
+}
+
 export type SupervisorAdminCommand =
   | { kind: "ensure-loaded"; slug: string }
   | { kind: "restart"; server: ServerKind }
   | { kind: "status" };
 
 export type SupervisorAdminResult =
-  | { baseUrl: string; runtimeConfig: ModelRuntimeConfig }
+  | LoadedModel
   | { ok: true }
   | { servers: Record<ServerKind, ServerState> };
 
@@ -146,7 +155,7 @@ export function createServerSupervisor(deps: SupervisorDeps): {
   status(): Promise<Record<ServerKind, ServerState>>;
   ensureLoaded(
     slug: string,
-  ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }>;
+  ): Promise<LoadedModel>;
   validateModel(
     slug: string,
     config?: ModelRuntimeConfig,
@@ -172,6 +181,7 @@ class ServerSupervisor {
     authKey: string;
     config: string;
     models: string;
+    warmPrefixes: string;
   };
   private readonly setTimeoutFn: typeof setTimeout;
   private readonly clearTimeoutFn: typeof clearTimeout;
@@ -179,6 +189,8 @@ class ServerSupervisor {
   private ownerInfoValue: OwnerInfo | null = null;
   private lockFd: number | null = null;
   private bootId = "";
+  /** Tells this supervisor's model instances from those of any earlier owner. */
+  private readonly identity = randomUUID();
   private keyCache: string | null = null;
   private ports: { utility: number; main: number } | null = null;
   private adminPort: number | null = null;
@@ -206,10 +218,12 @@ class ServerSupervisor {
   private routerCatalogModels = new Map<string, string>();
   private mainModelSlug: string | undefined;
   private readonly loadedRecipes = new Map<string, string>();
+  /** How many times the router has loaded each model: a model is only loaded again after its instance was lost. */
+  private readonly routerLoads = new Map<string, number>();
   private readonly loadFlights: Partial<
     Record<
       ServerKind,
-      Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }>
+      Promise<LoadedModel>
     >
   > = {};
   /** Models this supervisor has explicitly loaded through the live router. */
@@ -231,6 +245,7 @@ class ServerSupervisor {
       authKey: join(deps.rootDir, ROOT_LAYOUT.authKey),
       config: join(deps.rootDir, ROOT_LAYOUT.config),
       models: join(deps.rootDir, ROOT_LAYOUT.modelsDir),
+      warmPrefixes: join(deps.rootDir, ROOT_LAYOUT.warmPrefixesDir),
     };
     this.setTimeoutFn = deps.setTimeoutFn ?? setTimeout;
     this.clearTimeoutFn = deps.clearTimeoutFn ?? clearTimeout;
@@ -243,7 +258,7 @@ class ServerSupervisor {
     status(): Promise<Record<ServerKind, ServerState>>;
     ensureLoaded(
       slug: string,
-    ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }>;
+    ): Promise<LoadedModel>;
     validateModel(
       slug: string,
       config?: ModelRuntimeConfig,
@@ -295,6 +310,7 @@ class ServerSupervisor {
     return (this.activationFlight ??= (async () => {
       mkdirSync(this.rootDir, { recursive: true });
       mkdirSync(this.paths.models, { recursive: true });
+      mkdirSync(this.paths.warmPrefixes, { recursive: true });
       await this.acquireOrAttach(false);
       this.activated = true;
     })());
@@ -602,7 +618,7 @@ class ServerSupervisor {
 
   private async ensureLoaded(
     inputSlug: string,
-  ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }> {
+  ): Promise<LoadedModel> {
     await this.activate();
     const slug = normalizeSlug(inputSlug);
     if (this.roleValue === "attached") {
@@ -617,6 +633,7 @@ class ServerSupervisor {
         return {
           baseUrl: result.baseUrl,
           runtimeConfig: validatedRuntimeConfig(result.runtimeConfig),
+          instance: result.instance,
         };
       }
     }
@@ -625,7 +642,7 @@ class ServerSupervisor {
 
   private ensureLoadedAsOwner(
     slug: string,
-  ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }> {
+  ): Promise<LoadedModel> {
     const kind = slug === FALLBACK_MODEL.slug ? "utility" : "main";
     const previous = this.loadFlights[kind];
     const flight = (
@@ -645,7 +662,7 @@ class ServerSupervisor {
 
   private async loadAsOwner(
     slug: string,
-  ): Promise<{ baseUrl: string; runtimeConfig: ModelRuntimeConfig }> {
+  ): Promise<LoadedModel> {
     if (this.disposed) throw this.disposalReason;
     if (this.roleValue !== "owner")
       throw new Error("local-models supervisor is attached");
@@ -663,6 +680,7 @@ class ServerSupervisor {
       return {
         baseUrl: baseUrl(this.portFor("utility")),
         runtimeConfig: validatedRuntimeConfig(model.config),
+        instance: `${this.identity}:utility:${active.token}`,
       };
     }
 
@@ -680,6 +698,7 @@ class ServerSupervisor {
     return {
       baseUrl: baseUrl(this.portFor("main")),
       runtimeConfig: validatedRuntimeConfig(model.config),
+      instance: `${this.identity}:${slug}:${this.routerLoads.get(slug)}`,
     };
   }
 
@@ -765,6 +784,7 @@ class ServerSupervisor {
     this.loadedMainModels.add(slug);
     this.loadedRecipes.clear();
     this.loadedRecipes.set(slug, recipe);
+    this.routerLoads.set(slug, (this.routerLoads.get(slug) ?? 0) + 1);
   }
 
   private async validateModel(
@@ -805,7 +825,7 @@ class ServerSupervisor {
         "127.0.0.1",
         "--api-key-file",
         this.paths.authKey,
-        ...modelRuntimeArgs(recipe),
+        ...modelRuntimeArgs({ ...recipe, parallel: null }),
         "--jinja",
         "-np",
         "1",
@@ -1382,6 +1402,9 @@ class ServerSupervisor {
         presetPath,
         "--models-max",
         "1",
+        // Every model instance inherits it: warm prompt openings are saved here and restored into its slots.
+        "--slot-save-path",
+        this.paths.warmPrefixes,
         "--port",
         String(this.portFor("main")),
         "--host",
@@ -1416,8 +1439,11 @@ class ServerSupervisor {
       const lines = [
         `[${record.slug}]`,
         `model = ${record.file}`,
-        `ctx-size = ${recipe.contextLength}`,
+        `ctx-size = ${totalContextLength(recipe)}`,
       ];
+      if (recipe.parallel !== null) {
+        lines.push(`parallel = ${recipe.parallel}`, "swa-full = true");
+      }
       if (recipe.gpuLayers !== null) {
         lines.push(`n-gpu-layers = ${recipe.gpuLayers}`);
       }
@@ -1931,7 +1957,7 @@ function parseAdminCommand(value: unknown): SupervisorAdminCommand {
 function isAdminResult(value: unknown): value is SupervisorAdminResult {
   return (
     isRecord(value) &&
-    (typeof value["baseUrl"] === "string" ||
+    ((typeof value["baseUrl"] === "string" && typeof value["instance"] === "string") ||
       value["ok"] === true ||
       isServerStates(value["servers"]))
   );

@@ -56,7 +56,7 @@ import type {
   ModelRecord,
   ServerKind,
 } from "@workspace/model-catalog/localModels";
-import { FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
+import { FALLBACK_MODEL, LFM3_MODEL, ROOT_LAYOUT } from "./constants.js";
 
 interface SpawnCall {
   bin: string;
@@ -994,6 +994,26 @@ describe("createServerSupervisor", () => {
     expect(preset).not.toContain("temp =");
     expect(preset).not.toContain("top-k =");
     expect(preset).not.toContain("repeat-penalty =");
+  });
+
+  it("serves a stock-list model in natlang's slots and lets the router save warm prompt openings", async () => {
+    const harness = makeHarness();
+    const lfm3 = {
+      ...modelRecord(LFM3_MODEL.slug),
+      sha256: LFM3_MODEL.quants.Q8_0.sha256,
+      sizeBytes: LFM3_MODEL.quants.Q8_0.downloadSizeBytes,
+    };
+    harness.models.set(lfm3.slug, lfm3);
+
+    await harness.supervisor.ensureLoaded(lfm3.slug);
+
+    const mainArgs = lastSpawn(harness, "main").args;
+    expect(mainArgs[mainArgs.indexOf("--slot-save-path") + 1]).toBe(
+      join(harness.rootDir, "warm-prefixes"),
+    );
+    const preset = readFileSync(mainArgs[mainArgs.indexOf("--models-preset") + 1]!, "utf8");
+    expect(preset).toContain("ctx-size = 98304\nparallel = 3\nswa-full = true");
+    await harness.supervisor.dispose();
   });
 
   it("persists ports across restart", async () => {

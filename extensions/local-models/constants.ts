@@ -19,6 +19,7 @@ export const ROOT_LAYOUT = {
   serverLog: (kind: ServerKind) => `${kind}-server.log`,
   enginesDir: "engines",
   modelsDir: "models",
+  warmPrefixesDir: "warm-prefixes",
 } as const;
 
 export const FALLBACK_MODEL = {

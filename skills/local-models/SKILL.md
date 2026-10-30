@@ -105,3 +105,11 @@ poll the child. When it delivers its result, the task has completed or failed
 on the local model; keep inspection-only results without merging them. If the
 model fails to start, check its row in `listModels` and a bounded server-log
 tail, and report the specific failure.
+
+## Warm prompts and scoring
+
+`warmOpening` and `scoreContinuations` serve natlang programs that run on a
+local model: the first prefills a long system prompt once and restores it into
+the model's slots, the second reads the log-probability of candidate replies.
+The model gateway calls them. Don't call them from eval or ask for the key they
+use.
