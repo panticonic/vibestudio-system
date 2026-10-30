@@ -59,7 +59,7 @@ function fakeRouter(slotCount: number) {
     if (url.pathname.startsWith("/slots/")) return Response.json({});
     if (url.pathname === "/v1/natlang/score") {
       const items = body?.["items"] as unknown[];
-      return Response.json({ results: items.map(() => ({ log_probs: [-0.5, -2], tokens: [1, 1] })) });
+      return Response.json({ results: items.map(() => ({ log_probs: [-0.5, -2], tokens: [1, 1], prompt_tokens: 412 })) });
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
@@ -157,7 +157,7 @@ describe("natlang serving", () => {
     const api = serving(router.fetchFn, () => "i1");
     const items = [{ messages: [{ role: "user", content: "yes or no?" }], continuations: ["yes", "no"] }];
 
-    await expect(api.scoreContinuations(SLUG, items)).resolves.toEqual([{ log_probs: [-0.5, -2], tokens: [1, 1] }]);
+    await expect(api.scoreContinuations(SLUG, items)).resolves.toEqual([{ log_probs: [-0.5, -2], tokens: [1, 1], prompt_tokens: 412 }]);
     expect(router.seen.at(-1)).toMatchObject({
       method: "POST",
       path: "/v1/natlang/score",

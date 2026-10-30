@@ -30,7 +30,13 @@ export interface ScoreItem {
 }
 
 export type ScoreResult =
-  | { log_probs: number[]; tokens: number[]; native_state_imports?: unknown[] }
+  | {
+      log_probs: number[];
+      tokens: number[];
+      /** Tokens the continuations evaluate in full (the fork reports it); the decision's input for usage accounting. */
+      prompt_tokens?: number;
+      native_state_imports?: unknown[];
+    }
   | { error: string };
 
 export interface NatlangServingDeps {
