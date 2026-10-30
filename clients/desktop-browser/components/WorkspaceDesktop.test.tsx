@@ -746,7 +746,6 @@ describe("desktop workspace ownership", () => {
     try {
       const personal = await screen.findByLabelText("personal draft");
       fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-      await screen.findByLabelText("garden draft");
       expect(personal.getAttribute("data-visible")).toBe("true");
       expect(
         screen
@@ -779,6 +778,52 @@ describe("desktop workspace ownership", () => {
         screen.getByRole("searchbox", { name: "Find panels" }),
       ).toBeTruthy();
       expect(localStorage.getItem("workspace-sidebar-collapsed")).toBe("false");
+    } finally {
+      result.unmount();
+      if (previous === null)
+        localStorage.removeItem("workspace-sidebar-collapsed");
+      else localStorage.setItem("workspace-sidebar-collapsed", previous);
+    }
+  });
+  it("launches a collapsed rail from retained workspaces without connecting to closed ones", async () => {
+    const previous = localStorage.getItem("workspace-sidebar-collapsed");
+    localStorage.setItem("workspace-sidebar-collapsed", "true");
+    api.open.mockClear();
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      await screen.findByLabelText("system draft");
+      // Any opening the rail started would reach the client factory by now.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(api.open.mock.calls.map(([id]) => id).sort()).toEqual([
+        "personal",
+        "system",
+      ]);
+      for (const name of ["Personal workspace", "System workspace"])
+        expect(
+          screen
+            .getByRole("region", { name })
+            .querySelector(".workspace-tree-host"),
+        ).not.toBeNull();
+      const garden = screen.getByRole("region", { name: "Garden workspace" });
+      expect(garden.querySelector(".workspace-section-tree")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+      expect(
+        screen
+          .getByRole("button", { name: "Expand Garden" })
+          .getAttribute("aria-expanded"),
+      ).toBe("false");
+      fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Open Garden" }));
+      await waitFor(() =>
+        expect(
+          screen.getByLabelText("garden draft").getAttribute("data-visible"),
+        ).toBe("true"),
+      );
+      expect(garden.querySelector(".workspace-tree-host")).not.toBeNull();
     } finally {
       result.unmount();
       if (previous === null)

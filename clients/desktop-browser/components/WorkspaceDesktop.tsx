@@ -581,25 +581,6 @@ export function WorkspaceDesktop({
       setError(userFacingError(error));
     }
   };
-  useEffect(() => {
-    if (sidebarVisible) return;
-    let cancelled = false;
-    // The full rail uses the same retained workspace owners as the wide tree.
-    // Open them serially without changing the selected workspace.
-    void (async () => {
-      for (const workspace of catalog) {
-        if (cancelled) return;
-        try {
-          await open(workspace);
-        } catch (error) {
-          if (!cancelled) setError(userFacingError(error));
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sidebarVisible, catalog, open]);
   const selectSearchResult = (workspaceId: string, panelId: string) => {
     setPanelQuery("");
     const sequence = ++panelNavigationSequence.current;

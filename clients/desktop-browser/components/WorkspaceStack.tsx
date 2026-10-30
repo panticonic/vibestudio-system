@@ -161,7 +161,10 @@ export function WorkspaceStack({
                   </span>
                 </button>
               ) : null}
-              {expanded || compact ? (
+              {/* The rail shows every retained workspace's forest unfolded. A
+                  closed workspace is only its icon there, which opens it: the
+                  rail never connects to a workspace on its own. */}
+              {(compact ? state !== "closed" : expanded) ? (
                 <div className="workspace-section-tree">
                   {state === "ready" ? (
                     tree
