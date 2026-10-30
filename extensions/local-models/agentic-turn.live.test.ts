@@ -171,8 +171,38 @@ async function withLocalAgent(
           preparedModels.set(runtime.baseUrl, modelId);
           return { baseUrl: runtime.baseUrl };
         },
-        stream: () => {
-          throw new Error("Local host fixture has no RPC streams");
+        // Local requests are host-mediated fetches: the host attests the live
+        // runtime and injects its key, as the fixture does here.
+        stream: async (...invocation: Parameters<RpcWireCaller["stream"]>) => {
+          const [, method, args] = invocation;
+          expect(method).toBe("credentials.proxyFetch");
+          const [request] = args as [
+            {
+              url: string;
+              method?: string;
+              headers?: Record<string, string>;
+              body?: string;
+              bodyBase64?: string;
+            },
+          ];
+          const prepared = [...preparedModels.entries()].find(([baseUrl]) =>
+            request.url.startsWith(baseUrl),
+          );
+          if (!prepared)
+            throw new Error(`No prepared local runtime for ${request.url}`);
+          const runtime = await local.attestRuntime(prepared[1]);
+          if (!request.url.startsWith(runtime.baseUrl))
+            throw new Error("Prepared local runtime endpoint changed");
+          const headers = new Headers(request.headers);
+          headers.set("authorization", `Bearer ${runtime.apiKey}`);
+          return fetch(request.url, {
+            method: request.method ?? "GET",
+            headers,
+            body:
+              request.bodyBase64 !== undefined
+                ? Buffer.from(request.bodyBase64, "base64")
+                : request.body,
+          });
         },
       });
     const calls: Array<{ a: number; b: number; taskId: number }> = [];
@@ -216,23 +246,8 @@ async function withLocalAgent(
             const rpc = rpcForContext(nativeContext);
             return { rpc, cleanupRpc: rpc };
           },
-          egressFetch: async (input, init) => {
-            const url = new URL(
-              typeof input === "string" || input instanceof URL
-                ? input
-                : input.url,
-            );
-            const prepared = [...preparedModels.entries()].find(([baseUrl]) =>
-              url.href.startsWith(baseUrl),
-            );
-            if (!prepared)
-              throw new Error(`No prepared local runtime for ${url.href}`);
-            const runtime = await local.attestRuntime(prepared[1]);
-            if (!url.href.startsWith(runtime.baseUrl))
-              throw new Error("Prepared local runtime endpoint changed");
-            const headers = new Headers(init?.headers);
-            headers.set("authorization", `Bearer ${runtime.apiKey}`);
-            return fetch(input, { ...init, headers });
+          egressFetch: async () => {
+            throw new Error("Local requests do not use raw egress");
           },
           waitForAuthority: async () => {
             throw new Error(

@@ -104,11 +104,49 @@ describe("native local provider admission", () => {
           invoked.push(method);
           return { baseUrl: "http://127.0.0.1:32123/v1" };
         },
-        stream: () => {
-          throw new Error("Component has no RPC stream");
+        // Local requests are host-mediated fetches on the invocation's rpc.
+        stream: async (...invocation: Parameters<RpcWireCaller["stream"]>) => {
+          const [, method, args] = invocation;
+          expect(method).toBe("credentials.proxyFetch");
+          const [request] = args as [
+            { url: string; headers?: Record<string, string>; credentialId?: string },
+          ];
+          expect(request.url).toBe("http://127.0.0.1:32123/v1/chat/completions");
+          expect(request.credentialId).toBeUndefined();
+          expect(
+            new Headers(request.headers).get("authorization"),
+          ).toBeNull();
+          return localCompletion();
         },
       });
       let requests = 0;
+      const localCompletion = () => {
+        requests++;
+        const delta =
+          requests === 1
+            ? {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "add-original",
+                    type: "function",
+                    function: { name: "add", arguments: '{"a":17,"b":25}' },
+                  },
+                ],
+              }
+            : { role: "assistant", content: "42" };
+        const chunk = (delta: unknown, finish_reason: string | null) => ({
+          id: "original-model-response",
+          object: "chat.completion.chunk",
+          model: FALLBACK_MODEL.slug,
+          choices: [{ index: 0, delta, finish_reason }],
+        });
+        return new Response(
+          `data: ${JSON.stringify(chunk(delta, null))}\n\ndata: ${JSON.stringify(chunk({}, toolsCapable && requests === 1 ? "tool_calls" : "stop"))}\n\ndata: [DONE]\n\n`,
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      };
       const session = await openBoundAgentSession(
         new MemoryStorage(),
         {
@@ -127,41 +165,8 @@ describe("native local provider admission", () => {
             waitForAuthority: async () => {
               throw new Error("Unexpected component approval");
             },
-            egressFetch: async (input, init) => {
-              expect(String(input)).toBe(
-                "http://127.0.0.1:32123/v1/chat/completions",
-              );
-              expect(
-                new Headers(init?.headers).get("authorization"),
-              ).toBeNull();
-              requests++;
-              const delta =
-                requests === 1
-                  ? {
-                      role: "assistant",
-                      tool_calls: [
-                        {
-                          index: 0,
-                          id: "add-original",
-                          type: "function",
-                          function: {
-                            name: "add",
-                            arguments: '{"a":17,"b":25}',
-                          },
-                        },
-                      ],
-                    }
-                  : { role: "assistant", content: "42" };
-              const chunk = (delta: unknown, finish_reason: string | null) => ({
-                id: "original-model-response",
-                object: "chat.completion.chunk",
-                model: FALLBACK_MODEL.slug,
-                choices: [{ index: 0, delta, finish_reason }],
-              });
-              return new Response(
-                `data: ${JSON.stringify(chunk(delta, null))}\n\ndata: ${JSON.stringify(chunk({}, toolsCapable && requests === 1 ? "tool_calls" : "stop"))}\n\ndata: [DONE]\n\n`,
-                { headers: { "content-type": "text/event-stream" } },
-              );
+            egressFetch: async () => {
+              throw new Error("Local requests do not use raw egress");
             },
           }),
         },
