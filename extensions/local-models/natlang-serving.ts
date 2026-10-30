@@ -33,7 +33,8 @@ export type ScoreResult =
   | {
       log_probs: number[];
       tokens: number[];
-      /** Tokens the continuations evaluate in full (the fork reports it); the decision's input for usage accounting. */
+      /** What a stateless scorer would process for the item's continuations, prompt included, whatever the server reused
+       * (the fork reports it): the decision's input for usage accounting, not a measure of the server's work. */
       prompt_tokens?: number;
       native_state_imports?: unknown[];
     }
@@ -88,18 +89,27 @@ export function createNatlangServing(deps: NatlangServingDeps): {
     return { loaded: await deps.load(slug), record };
   }
 
+  async function warmOpening(slug: string, request: OpeningRequest, signal?: AbortSignal): Promise<WarmPrefix | null> {
+    const opening = openingOf(request as Parameters<typeof openingOf>[0]);
+    if (!opening) return null;
+    const { loaded, record } = await served(slug);
+    const server = await plannerFor(slug, loaded, record);
+    // The turn itself is the caller's: admission only warms the opening, so nothing stays in flight.
+    (await server.admit(request as never, signal)).release();
+    return server.status().warm.find((state) => state.sha256 === opening.key) ?? null;
+  }
+
   return {
-    async warmOpening(slug, request, signal) {
-      const opening = openingOf(request as Parameters<typeof openingOf>[0]);
-      if (!opening) return null;
-      const { loaded, record } = await served(slug);
-      const server = await plannerFor(slug, loaded, record);
-      // The turn itself is the caller's: admission only warms the opening, so nothing stays in flight.
-      (await server.admit(request as never, signal)).release();
-      return server.status().warm.find((state) => state.sha256 === opening.key) ?? null;
-    },
+    warmOpening,
 
     async scoreContinuations(slug, items, signal) {
+      // The fork continues a sliding-window or recurrent model's prompt from a context checkpoint, and an ordinary
+      // prefill makes none early enough to share with the next decision's prompt: a decision whose input differs after
+      // the opening would prefill the whole opening again (30 s for 1.2k tokens on a CPU, against 5 s warm). The warm
+      // opening puts the checkpoint in every slot, so the decisions that follow cost only their own tokens.
+      for (const item of items) {
+        if (Array.isArray(item.messages)) await warmOpening(slug, item, signal);
+      }
       const { loaded } = await served(slug);
       const response = await deps.fetch(`${loaded.baseUrl.replace(/\/v1$/u, "")}/v1/natlang/score`, {
         method: "POST",

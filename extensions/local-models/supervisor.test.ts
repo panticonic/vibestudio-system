@@ -1211,6 +1211,52 @@ describe("createServerSupervisor", () => {
     });
   });
 
+  it("does not advertise a router model as loaded until its instance is serving", async () => {
+    let serve!: () => void;
+    const serving = new Promise<void>((resolve) => (serve = resolve));
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("/props?model=toy")
+        ? serving.then(() => new Response("{}", { status: 200 }))
+        : new Response("ok", { status: 200 }),
+    );
+    const harness = makeHarness({ fetch });
+    harness.models.set("toy", modelRecord("toy"));
+
+    let loaded = false;
+    const first = harness.supervisor.ensureLoaded("toy").then(() => (loaded = true));
+    const second = harness.supervisor.ensureLoaded("toy");
+    await vi.waitFor(() =>
+      expect(fetch.mock.calls.map(([input]) => String(input))).toEqual(
+        expect.arrayContaining([expect.stringContaining("/props?model=toy")]),
+      ),
+    );
+    expect(loaded).toBe(false);
+
+    serve();
+    await Promise.all([first, second]);
+    expect(
+      fetch.mock.calls.filter(([input]) => String(input).includes("/models/load")),
+    ).toHaveLength(1);
+  });
+
+  it("loads a router model again after its instance failed to serve", async () => {
+    let failures = 1;
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("/props?model=toy") && failures-- > 0
+        ? new Response("load failed", { status: 500 })
+        : new Response("ok", { status: 200 }),
+    );
+    const harness = makeHarness({ fetch });
+    harness.models.set("toy", modelRecord("toy"));
+
+    await expect(harness.supervisor.ensureLoaded("toy")).rejects.toThrow(/did not start: HTTP 500: load failed/);
+    await harness.supervisor.ensureLoaded("toy");
+
+    expect(
+      fetch.mock.calls.filter(([input]) => String(input).includes("/models/load")),
+    ).toHaveLength(2);
+  });
+
   it("restarts utility forever but puts main in error after five failures in-window", async () => {
     const harness = makeHarness();
     harness.models.set("toy", modelRecord("toy"));

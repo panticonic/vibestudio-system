@@ -166,6 +166,24 @@ describe("natlang serving", () => {
     });
   });
 
+  it("warms the opening of the prompts it scores before scoring them", async () => {
+    const router = fakeRouter(3);
+    const api = serving(router.fetchFn, () => "i1");
+    await mkdir(join(rootDir, ROOT_LAYOUT.warmPrefixesDir), { recursive: true });
+    const items = [
+      { messages: [{ role: "system", content: OPENING }, { role: "user", content: "first" }], continuations: ["yes", "no"] },
+      { messages: [{ role: "system", content: OPENING }, { role: "user", content: "second" }], continuations: ["yes", "no"] },
+    ];
+
+    await api.scoreContinuations(SLUG, items);
+
+    const paths = router.seen.map((entry) => new URL(entry.path, "http://router").pathname);
+    expect(paths.lastIndexOf("/completion")).toBeLessThan(paths.indexOf("/v1/natlang/score"));
+    expect(paths.filter((path) => path === "/completion")).toHaveLength(1);
+    expect(paths.filter((path) => path === "/v1/natlang/score")).toHaveLength(1);
+    await api.close();
+  });
+
   it("rejects a scoring request the server refused", async () => {
     const api = serving((async () => new Response("bad items", { status: 400 })) as typeof fetch, () => "i1");
 

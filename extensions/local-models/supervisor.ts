@@ -232,6 +232,8 @@ class ServerSupervisor {
   > = {};
   /** Models this supervisor has explicitly loaded through the live router. */
   private readonly loadedMainModels = new Set<string>();
+  /** Settles when the router's instance of a loaded model is serving: the router accepts a load before it is. */
+  private readonly routerReady = new Map<string, Promise<void>>();
   private readonly logs: Record<ServerKind, string[]> = {
     utility: [],
     main: [],
@@ -768,7 +770,7 @@ class ServerSupervisor {
       }
     }
 
-    if (this.loadedMainModels.has(slug)) return;
+    if (this.loadedMainModels.has(slug)) return this.routerReady.get(slug);
     for (const resident of await this.residentsToUnload(model)) {
       const unload = await this.deps.fetch(`${endpoint}/models/unload`, {
         method: "POST",
@@ -785,6 +787,7 @@ class ServerSupervisor {
         );
       }
       this.loadedMainModels.delete(resident);
+      this.routerReady.delete(resident);
       this.loadedRecipes.delete(resident);
     }
     const load = await this.deps.fetch(`${endpoint}/models/load`, {
@@ -804,6 +807,31 @@ class ServerSupervisor {
     this.loadedMainModels.add(slug);
     this.loadedRecipes.set(slug, recipe);
     this.routerLoads.set(slug, (this.routerLoads.get(slug) ?? 0) + 1);
+    // The router answers a load as soon as it has spawned the model's instance. A request for the model waits there
+    // for the instance to be serving, so a read of the model's own state is the barrier; it fails with the instance.
+    const ready = this.deps
+      .fetch(`${endpoint}/props?model=${encodeURIComponent(slug)}`, {
+        headers: { Authorization: `Bearer ${key}` },
+      })
+      .then(async (props) => {
+        if (!props.ok) {
+          const detail = await props.text().catch(() => "");
+          throw new Error(
+            `local model ${slug} did not start: HTTP ${props.status}${detail ? `: ${detail}` : ""}`,
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        // A failed instance is loaded again by the next demand.
+        if (this.routerReady.get(slug) === ready) {
+          this.loadedMainModels.delete(slug);
+          this.loadedRecipes.delete(slug);
+          this.routerReady.delete(slug);
+        }
+        throw error;
+      });
+    this.routerReady.set(slug, ready);
+    await ready;
   }
 
   /**
@@ -1303,7 +1331,7 @@ class ServerSupervisor {
     this.clearRestartTimer(kind);
 
     const runtime = this.servers[kind];
-    if (kind === "main") this.loadedMainModels.clear();
+    if (kind === "main") this.clearLoadedMainModels();
 
     const launch = await this.launchSpec(kind, model);
     if (!launch || this.disposed) return;
@@ -1528,7 +1556,7 @@ class ServerSupervisor {
 
     runtime.process = null;
     runtime.startedAt = null;
-    if (kind === "main") this.loadedMainModels.clear();
+    if (kind === "main") this.clearLoadedMainModels();
 
     if (active.expectedExit || this.disposed) {
       this.setState(kind, { state: "stopped" });
@@ -1664,7 +1692,7 @@ class ServerSupervisor {
   private async stopIdleServer(kind: ServerKind): Promise<void> {
     this.clearRestartTimer(kind);
     await this.stopProcess(kind, "SIGTERM");
-    if (kind === "main") this.loadedMainModels.clear();
+    if (kind === "main") this.clearLoadedMainModels();
     this.setState(kind, { state: "stopped" });
   }
 
@@ -1703,9 +1731,14 @@ class ServerSupervisor {
     if (runtime.process === active) runtime.process = null;
     runtime.startedAt = null;
     if (kind === "main") {
-      this.loadedMainModels.clear();
+      this.clearLoadedMainModels();
       this.loadedRecipes.clear();
     }
+  }
+
+  private clearLoadedMainModels(): void {
+    this.loadedMainModels.clear();
+    this.routerReady.clear();
   }
 
   private clearRestartTimer(kind: ServerKind): void {

@@ -34,6 +34,19 @@ describe.runIf(process.env["RUN_LOCAL_MODELS_E2E"] === "1")("score timing", () =
       prompt_tokens = (result as { prompt_tokens?: unknown }).prompt_tokens;
       expect(result.log_probs).toHaveLength(choices.length);
     }
-    console.log("score-timing", JSON.stringify({ ms: runs, prompt_tokens, loadavg: os.loadavg().map((n) => Number(n.toFixed(2))), cpus: os.cpus().length }));
+    // A forced re-processing in the server log is a cold prefill of a prompt whose prefix should have been reused.
+    const log = await api.tailServerLogLines("main", 4000);
+    const count = (text: string) => log.filter((line) => line.includes(text)).length;
+    console.log(
+      "score-timing",
+      JSON.stringify({
+        ms: runs,
+        prompt_tokens,
+        reprocessed: count("forcing full prompt re-processing"),
+        loadavg: os.loadavg().map((n) => Number(n.toFixed(2))),
+        cpus: os.cpus().length,
+      }),
+    );
+    if (process.env["SCORE_TIMING_LOG"]) console.log(log.filter((line) => /slot|srv/u.test(line)).join("\n"));
   }, 600_000);
 });
