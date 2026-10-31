@@ -4,6 +4,7 @@ import {
   modelRuntimeArgs,
   validatedRuntimeConfig,
   runtimeContextLengthFor,
+  stockServingRequest,
   stockSlotPlan,
 } from "./runtime-profiles.js";
 import { LFM3_MODEL } from "./constants.js";
@@ -92,6 +93,16 @@ describe("local model runtime profiles", () => {
     expect(recipe).toMatchObject({ contextLength: 32_768, parallel: 3 });
     expect(modelRuntimeArgs(recipe)).toEqual(["-c", "98304", "-np", "3", "--swa-full", "--n-gpu-layers", "0"]);
     expect(stockSlotPlan(stockRecord(LFM3_MODEL.quants.Q4_K_M.sha256, 1_099_627_808))?.slots).toBe(4);
+  });
+
+  it("serves a stock model with the request natlang serves it with, and no other model with one", () => {
+    const stock = stockRecord(LFM3_MODEL.quants.Q8_0.sha256, 1_846_238_496);
+    // Greedy decoding with reasoning kept in the history: natlang's own stock settings, from its release record.
+    expect(stockServingRequest(stock)).toEqual({
+      temperature: 0,
+      chat_template_kwargs: { preserve_thinking: true },
+    });
+    expect(stockServingRequest(record("Acme/Model-GGUF"))).toBeUndefined();
   });
 
   it("takes an explicit context length of a stock model as its per-slot window", () => {

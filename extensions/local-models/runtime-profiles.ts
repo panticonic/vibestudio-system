@@ -99,6 +99,21 @@ export function stockSlotPlan(record: ModelRecord): SlotPlan | null {
 }
 
 /**
+ * The request fields natlang serves a stock model with (greedy decoding, template arguments such as
+ * `preserve_thinking`), from the same release record its own server reads. Another model has none: its sampler
+ * defaults stay in its GGUF. The model catalog carries them as the model's sampling parameters, so every request
+ * to the model, from the gateway or an agent, is made with the settings its suites were measured with.
+ */
+export function stockServingRequest(
+  record: ModelRecord,
+): Record<string, unknown> | undefined {
+  const request = STOCK_MODELS.find(
+    (stock) => stock.sha256 === record.sha256,
+  )?.request;
+  return request ? (JSON.parse(JSON.stringify(request)) as Record<string, unknown>) : undefined;
+}
+
+/**
  * Runtime context is model-owned unless the user explicitly overrides it.
  * Chat templates and sampler defaults remain in GGUF metadata and are applied
  * by llama.cpp; this layer must not silently replace either per model family.

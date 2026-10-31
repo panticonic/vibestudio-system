@@ -44,6 +44,7 @@ import {
 import { createServerSupervisor, type LoadedModel } from "./supervisor.js";
 import {
   runtimeContextLengthFor,
+  stockServingRequest,
   sameRuntimeConfig,
   sameRuntimeRecipe,
   validatedRuntimeConfig,
@@ -1119,6 +1120,7 @@ export async function activate(ctx: Ctx) {
           hw,
         );
         const contextWindow = runtimeContextLengthFor(record);
+        const servingRequest = stockServingRequest(record);
         return {
           slug: record.slug,
           displayName: record.displayName,
@@ -1128,6 +1130,7 @@ export async function activate(ctx: Ctx) {
           maxTokens: contextWindow,
           toolsCapable: record.toolsCapable,
           reasoningCapable: record.reasoningCapable === true,
+          ...(servingRequest ? { servingRequest } : {}),
           fit: hw
             ? estimateFit(record, hw)
             : {
