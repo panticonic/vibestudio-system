@@ -265,6 +265,15 @@ vi.mock("./benchmark.js", () => ({
 }));
 
 describe("local-models extension", () => {
+  // The Base natlang panel's authority test relies on this: a natlang program's `localModels.listModels` runs from a panel
+  // eval, and the panel requests no capability for it because the method's effect is open.
+  it("keeps listModels open, with no capability of its own", () => {
+    const manifest = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as {
+      vibestudio: { extension: { methodAuthority: Record<string, { effect: { kind: string } }> } };
+    };
+    expect(manifest.vibestudio.extension.methodAuthority["listModels"]?.effect).toEqual({ kind: "open" });
+  });
+
   it("exposes only read-only model discovery to website causal chains", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("./package.json", import.meta.url), "utf8"),
