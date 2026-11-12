@@ -54,11 +54,16 @@ window and every cited `seq` come from code.
 | | test (5) | 0.63 (earlier in-process run of the same cases): the same false alarms, one `status` wrong (a slow Durable Object start and a failed worker preparation read as `attention`, not `incident`) |
 | sharper routine definition ("a warn or error level never makes a normal line notable") | validation (4) | 0.50 (`pnpm natlang:eval`): no false alarm, but the `state=slow` lines and a `DeprecationWarning` read as routine |
 | final: the sandbox start-up notices are "always routine"; notable names what the message says ("state=slow", "has been active for 10s", exceeded a threshold, retried, a Node.js process warning) | validation (4) | **1.00**, 4 of 4, no false alarm and nothing missed |
-| | test (5) | see the port report: the locked split is run once, after the validation tuning above |
+| | test (5), run once after the tuning | **0.77** (`pnpm natlang:eval`): two cases wrong, a failed worker preparation read as `notable` (status `attention`, not `incident`) and a `Duplicate route registration` warning read as routine (status `normal`, not `attention`); the other three exact, `identity` and `cited` on all five. **Gate not met** (mean 0.8, at most one wrong status) |
 
 The final wording was written against the validation misses, so its validation score is a development score. One of
 its groups is still marginal: the `DeprecationWarning` group scores 0.61 routine / 0.39 notable when classified alone,
 and passed in the full run.
+
+Outcome: **the gates are not met, so the skill stays agent-executed.** `SKILL.md` leads with the bounded inspection the agent
+performs itself and offers the brief as a measured aid whose findings the agent checks against the raw lines. The suite,
+the cases and the records stay; the case set seeds adaptation or tuning, and a larger executor would be measured by
+changing the profile.
 
 Cost: a scored decision is about 25 s cold on this CPU (the ~3.5k-token opening is prefilled for each request), so a
 brief of 23-38 groups takes 7-20 minutes (mean 19.5 minutes a case on a loaded machine). That is the figure that decides

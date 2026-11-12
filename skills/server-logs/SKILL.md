@@ -14,41 +14,6 @@ The service is read-only and redacts known secrets when records are captured,
 but normal access checks still apply to callers. See the live docs for the
 current filters, fields, limits, and event schemas.
 
-## Brief the log
-
-To answer "is anything wrong with the server?", load the typed brief and call
-it. A small model judges each group of repeated lines as routine, notable, or
-a failure; code reads the log and copies the identity, so the boot and
-sequence numbers are exact.
-
-```ts
-const brief = await natlang.load("skills/server-logs/briefServerLog.nl");
-const report: LogBrief = await brief.collect({ level: "warn" });
-return report;
-```
-
-`since` (epoch milliseconds) and `level` (lowest level to read) are both
-optional; with neither, the brief reads the newest 300 lines. The result:
-
-- `serverBootId` and `latestSeq`: quote both so the evidence can be found
-  again, and reset any cursor when the boot changes.
-- `window`: the first and last sequence number read, and how many lines.
-- `status`: `incident` when any finding is a failure, `attention` when any is
-  notable, otherwise `normal`.
-- `findings`: the groups that are not routine, failures first. Each carries
-  the first line as captured, its `count`, and `firstSeq`..`lastSeq`.
-- `headline`: one line of counts (failures and notable groups in how many lines).
-
-Each distinct group of lines costs one small-model decision (about 25 seconds on a CPU
-laptop), so a brief of a whole boot takes minutes. Filter first when the question
-is "is anything wrong?": `brief.collect({ level: "warn" })` leaves a handful of
-groups. Use the unfiltered brief for a standing report.
-
-A `normal` brief with warn-level lines is expected: the sandbox runtime prints
-start-up notices at `warn`. Quote the findings, not the whole window. When a
-finding needs more context, fetch just that range with the bounded inspection
-below.
-
 ## Bounded inspection
 
 ```ts
@@ -80,6 +45,42 @@ Call `stats()` to see which subsystem tags are active before filtering. Combine
 level, time, sequence, tag, and text filters rather than fetching the whole
 buffer. Every response includes a boot ID and the latest sequence number; reset
 your cursor when the boot ID changes.
+
+## A typed brief, as an aid
+
+`briefServerLog.collect` reads one window, collapses repeated lines, and has a
+small model judge each distinct group as routine, notable, or a failure. Code
+reads the log and copies the identity, so the boot, the sequence numbers and the
+counts are exact. The judgments are not: on the locked test split the small model
+got 3 of 5 windows exactly right and read a failed worker preparation as merely
+notable and a duplicate-route warning as routine. Treat its findings as
+candidates, check them against the raw lines from the bounded inspection above,
+and decide the status yourself.
+
+```ts
+const brief = await natlang.load("skills/server-logs/briefServerLog.nl");
+const report: LogBrief = await brief.collect({ level: "warn" });
+return report;
+```
+
+`since` (epoch milliseconds) and `level` (lowest level to read) are both
+optional; with neither, the brief reads the newest 300 lines. The result:
+
+- `serverBootId` and `latestSeq`: quote both so the evidence can be found
+  again, and reset any cursor when the boot changes.
+- `window`: the first and last sequence number read, and how many lines.
+- `status`: `incident` when any finding is a failure, `attention` when any is
+  notable, otherwise `normal`.
+- `findings`: the groups the small model did not call routine, failures first.
+  Each carries the first line as captured, its `count`, and `firstSeq`..`lastSeq`.
+- `headline`: one line of counts (failures and notable groups in how many lines).
+
+Each distinct group of lines costs one small-model decision (about 25 seconds on a
+CPU laptop), so a brief of a whole boot takes minutes. Filter first when the
+question is "is anything wrong?": `level: "warn"` leaves a handful of groups.
+
+A `normal` brief with warn-level lines is expected: the sandbox runtime prints
+start-up notices at `warn`.
 
 ## Live following
 
