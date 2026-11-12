@@ -17,7 +17,7 @@ export { planServerSlots, DEFAULT_KV_BYTES_PER_TOKEN, DEFAULT_MEMORY_FRACTION, D
 export type { SlotPlan, LocalServerSettings } from './slots.js';
 export { openingOf, sharedPrefix, warmOpening, pruneWarmStates } from './warm.js';
 export type { Opening, WarmPrefix } from './warm.js';
-export { sharedServerPath, publishSharedServer, withdrawSharedServer, readSharedServer, findSharedServer } from './shared.js';
-export type { SharedServer } from './shared.js';
+export { listSharedServers, liveLeases, sharedServersDirectory, stopSharedServer } from './shared.js';
+export type { SharedServer, SupervisedServer } from './shared.js';
 export { createLlamaServer, spawnLauncher, supportsNativeStates } from './server.js';
 export type { LlamaServer, LlamaServerOptions, LlamaServerStatus, LlamaLaunch, LlamaLaunched, LlamaLauncher, LlamaAttachment } from './server.js';

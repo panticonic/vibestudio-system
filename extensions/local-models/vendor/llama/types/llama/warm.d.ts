@@ -19,6 +19,9 @@ export declare function openingOf(request: {
  * of any prompt tokenizes on from it.
  */
 export declare function sharedPrefix(first: string, second: string): string;
+/** The rendered opening up to its last tool line (the shared base of openings that differ only there), if it has two
+ * or more tools in a `<tools>` block. */
+export declare function baseOf(prefix: string): string | undefined;
 /**
  * Make every slot of a llama.cpp server (started with `--slot-save-path directory`, all slots idle) start from this
  * opening: restore its saved state, or prefill it on slot 0 and save it first. `tag` names the model file and build.

@@ -1,5 +1,6 @@
 // src/llama/node.ts
 import { spawn, spawnSync } from "node:child_process";
+import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir as homedir2, platform as platform2 } from "node:os";
 import { join as join2, resolve as resolve2 } from "node:path";
@@ -99,7 +100,27 @@ function nodeLlamaDirectories(environment = process.env) {
   };
 }
 function nodeLlamaHost(environment = process.env, log = process.stderr) {
-  return { environment, directories: nodeLlamaDirectories(environment), processes: nodeLlamaProcesses, fetch: (input, init) => fetch(input, init), log };
+  return {
+    environment,
+    directories: nodeLlamaDirectories(environment),
+    processes: nodeLlamaProcesses,
+    fetch: (input, init) => fetch(input, init),
+    log,
+    supervise(server) {
+      mkdirSync(server.directory, { recursive: true });
+      const specPath = join2(server.directory, `${server.key}.spec.${process.pid}.json`);
+      writeFileSync(specPath, JSON.stringify(server));
+      const output = openSync(join2(server.directory, `${server.key}.supervisor.log`), "a");
+      const child = spawn(
+        process.execPath,
+        [fileURLToPath(new URL("./supervisor.js", import.meta.url)), specPath],
+        { detached: true, stdio: ["ignore", output, output], env: environment }
+      );
+      closeSync(output);
+      child.unref();
+      return child.pid ?? 0;
+    }
+  };
 }
 
 // src/llama/runtime.ts
@@ -113,13 +134,13 @@ import {
   createWriteStream,
   existsSync,
   lstatSync,
-  mkdirSync,
+  mkdirSync as mkdirSync2,
   mkdtempSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
-  writeFileSync
+  writeFileSync as writeFileSync2
 } from "node:fs";
 import { cpus } from "node:os";
 import { basename, delimiter, dirname, join as join3, relative, resolve as resolve3, sep } from "node:path";
@@ -328,11 +349,11 @@ async function buildForkLlamaRuntime(host, options = {}) {
     const result = host.processes.run(command, args, { cwd, env: environment, output: "host" });
     if (result.status !== 0) throw new Error(`${command} ${args[0]} failed (${result.error?.message ?? `exit ${result.status}`})`);
   };
-  mkdirSync(root, { recursive: true });
+  mkdirSync2(root, { recursive: true });
   const work = mkdtempSync(join3(root, ".fork-build-"));
   try {
     const source = join3(work, "llama.cpp");
-    mkdirSync(source);
+    mkdirSync2(source);
     run("git", ["init", "-q"], source);
     run("git", ["fetch", "-q", "--depth", "1", `https://github.com/${LLAMA_FORK_SOURCE.repository}`, LLAMA_FORK_SOURCE.commit], source);
     run("git", ["checkout", "-q", "FETCH_HEAD"], source);
@@ -361,7 +382,7 @@ async function buildForkLlamaRuntime(host, options = {}) {
     if (!built) throw new Error("the fork build produced no llama-server");
     const staged = join3(work, "runtime");
     cpSync(built, join3(staged, "bin"), { recursive: true, verbatimSymlinks: true });
-    writeFileSync(join3(staged, "runtime.json"), JSON.stringify({
+    writeFileSync2(join3(staged, "runtime.json"), JSON.stringify({
       fork: true,
       repository: LLAMA_FORK_SOURCE.repository,
       commit: LLAMA_FORK_SOURCE.commit,
@@ -369,7 +390,7 @@ async function buildForkLlamaRuntime(host, options = {}) {
       builtAt: (/* @__PURE__ */ new Date()).toISOString()
     }, null, 2) + "\n");
     rmSync(destination, { recursive: true, force: true });
-    mkdirSync(dirname(destination), { recursive: true });
+    mkdirSync2(dirname(destination), { recursive: true });
     renameSync(staged, destination);
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -437,10 +458,10 @@ async function installManagedLlamaRuntime(host, options = {}) {
     const inspected = inspectLlamaServer(host, existing, "managed", release);
     if (inspected.compatible) return inspected;
   }
-  mkdirSync(root, { recursive: true });
+  mkdirSync2(root, { recursive: true });
   const temporary = mkdtempSync(join3(root, ".llama-install-"));
   const archive = join3(temporary, basename(new URL(artifact.url).pathname)), content = join3(temporary, "content");
-  mkdirSync(content);
+  mkdirSync2(content);
   host.log.write(`natlang: downloading llama.cpp ${release.version} ${artifact.key} (${Math.ceil(artifact.bytes / 1e6)} MB)
 `);
   try {
@@ -455,7 +476,7 @@ async function installManagedLlamaRuntime(host, options = {}) {
     if (!executable) throw new Error("downloaded llama.cpp archive does not contain llama-server");
     if (process.platform !== "win32") chmodSync(executable, 493);
     const relative2 = executable.slice(content.length + 1).split("\\").join("/");
-    writeFileSync(join3(content, "runtime.json"), JSON.stringify({
+    writeFileSync2(join3(content, "runtime.json"), JSON.stringify({
       version: release.version,
       build: release.build,
       commit: release.commit,
@@ -464,7 +485,7 @@ async function installManagedLlamaRuntime(host, options = {}) {
       executable: relative2
     }, null, 2) + "\n");
     const destination = dirname(managedRecordPath(root, release, artifact));
-    mkdirSync(dirname(destination), { recursive: true });
+    mkdirSync2(dirname(destination), { recursive: true });
     try {
       renameSync(content, destination);
     } catch (failure) {
@@ -523,7 +544,7 @@ function stockModel(id) {
 }
 
 // src/llama/models.ts
-import { createReadStream as createReadStream2, createWriteStream as createWriteStream2, existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, readFileSync as readFileSync2, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { createReadStream as createReadStream2, createWriteStream as createWriteStream2, existsSync as existsSync2, mkdirSync as mkdirSync3, readdirSync as readdirSync2, readFileSync as readFileSync2, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync as writeFileSync3 } from "node:fs";
 import { createHash as createHash2 } from "node:crypto";
 import { basename as basename2, dirname as dirname2, join as join4, resolve as resolve4 } from "node:path";
 import { Readable as Readable2 } from "node:stream";
@@ -627,8 +648,8 @@ async function managedModelSha256(host, release = DEFAULT_LOCAL_MODEL) {
   } catch {
   }
   const hash = await fileHash(path);
-  mkdirSync2(dirname2(cache), { recursive: true });
-  writeFileSync2(cache, `${stamp}
+  mkdirSync3(dirname2(cache), { recursive: true });
+  writeFileSync3(cache, `${stamp}
 ${hash}`);
   return hash;
 }
@@ -642,7 +663,7 @@ async function verifiedRelease(path, release) {
   }
   if (await fileHash(path) !== release.sha256) return false;
   try {
-    writeFileSync2(stamp, expected);
+    writeFileSync3(stamp, expected);
   } catch {
   }
   return true;
@@ -685,7 +706,7 @@ async function ensureStockModel(host, release, onProgress) {
     await new Promise((wake) => setTimeout(wake, 1e3));
   }
   if (await verifiedRelease(destination, release)) return destination;
-  mkdirSync2(dirname2(destination), { recursive: true });
+  mkdirSync3(dirname2(destination), { recursive: true });
   const temporary = `${destination}.partial-${process.pid}`;
   log.write(`natlang: downloading ${release.label} from ${release.source.repository} (${Math.ceil(release.bytes / 1e6)} MB, once)
 `);
@@ -749,7 +770,7 @@ var warmTag = (modelSha256, runtime, plan) => `${modelSha256.slice(0, 12)}-${run
 
 // src/llama/warm.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync3, rmSync as rmSync3, statSync as statSync2, utimesSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync3, rmSync as rmSync3, statSync as statSync2, utimesSync, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join5 } from "node:path";
 function openingOf(request) {
   const system = request.messages[0];
@@ -769,6 +790,12 @@ function sharedPrefix(first, second) {
   for (const match of common.matchAll(/<\|[^|<>\s]{1,40}\|>|<\/?[a-z_]{2,24}>/g)) cut = match.index + match[0].length;
   return common.slice(0, cut);
 }
+function baseOf(prefix) {
+  const open = prefix.indexOf("<tools>\n"), close = prefix.lastIndexOf("\n</tools>");
+  if (open < 0 || close < open) return void 0;
+  const lastLine = prefix.lastIndexOf("\n", close - 1);
+  return lastLine > open + "<tools>".length ? prefix.slice(0, lastLine + 1) : void 0;
+}
 async function post(host, endpoint, headers, path, body) {
   const response = await host.fetch(endpoint + path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   const text = await response.text();
@@ -779,12 +806,45 @@ async function warmOpening(host, server, directory, opening, tag, slots) {
   const { endpoint, headers } = server;
   const file = `${opening.key.slice(0, 16)}-${tag}.slot`, path = join5(directory, file), meta = `${path}.json`;
   let created = false, info;
+  const tokenize = async (content) => (await post(
+    host,
+    endpoint,
+    headers,
+    "/tokenize",
+    { content, add_special: false, parse_special: true }
+  )).tokens;
   try {
     if (existsSync3(path)) info = JSON.parse(readFileSync3(meta, "utf8"));
   } catch {
     info = void 0;
   }
-  let first = 0;
+  async function restoreOrSaveBase(text, tokens) {
+    if (!text) return void 0;
+    const own = await tokenize(text);
+    let shared = 0;
+    while (shared < own.length && shared < tokens.length && own[shared] === tokens[shared]) shared++;
+    const prefixTokens = tokens.slice(0, Math.max(0, shared - 1));
+    if (prefixTokens.length < 256 || prefixTokens.length >= tokens.length) return void 0;
+    const name = `${createHash3("sha256").update(JSON.stringify(prefixTokens)).digest("hex").slice(0, 16)}-${tag}.base.slot`;
+    if (existsSync3(join5(directory, name))) {
+      try {
+        await post(host, endpoint, headers, "/slots/0?action=restore", { filename: name });
+        const now = /* @__PURE__ */ new Date();
+        try {
+          utimesSync(join5(directory, name), now, now);
+        } catch {
+        }
+        return name;
+      } catch {
+        await post(host, endpoint, headers, "/slots/0?action=erase", {}).catch(() => void 0);
+        return void 0;
+      }
+    }
+    await post(host, endpoint, headers, "/completion", { prompt: prefixTokens, n_predict: 0, cache_prompt: true, id_slot: 0 });
+    await post(host, endpoint, headers, "/slots/0?action=save", { filename: name });
+    return name;
+  }
+  let first = 0, base;
   if (!info) {
     const render = async (content) => String((await post(
       host,
@@ -795,11 +855,17 @@ async function warmOpening(host, server, directory, opening, tag, slots) {
     )).prompt ?? "");
     const prefix = sharedPrefix(await render("\u2063A"), await render("\u2063B"));
     if (prefix.length < 256) return void 0;
+    const tokens = await tokenize(prefix);
     await post(host, endpoint, headers, "/slots/0?action=erase", {}).catch(() => void 0);
-    const completion = await post(host, endpoint, headers, "/completion", { prompt: prefix, n_predict: 0, cache_prompt: true, id_slot: 0 });
-    info = { chars: prefix.length, tokens: Number(completion.timings?.prompt_n ?? completion.tokens_evaluated ?? 0) };
+    base = await restoreOrSaveBase(baseOf(prefix), tokens);
+    const completion = await post(host, endpoint, headers, "/completion", { prompt: tokens, n_predict: 0, cache_prompt: true, id_slot: 0 });
+    info = {
+      chars: prefix.length,
+      tokens: tokens.length,
+      prefilled: Number(completion.timings?.prompt_n ?? tokens.length)
+    };
     await post(host, endpoint, headers, "/slots/0?action=save", { filename: file });
-    writeFileSync3(meta, JSON.stringify(info));
+    writeFileSync4(meta, JSON.stringify(info));
     created = true;
     first = 1;
   } else {
@@ -818,7 +884,17 @@ async function warmOpening(host, server, directory, opening, tag, slots) {
       break;
     }
   }
-  return { sha256: opening.key, chars: info.chars, tokens: info.tokens, bytes: statSync2(path).size, file, restoredSlots: restored, created };
+  return {
+    sha256: opening.key,
+    chars: info.chars,
+    tokens: info.tokens,
+    bytes: statSync2(path).size,
+    file,
+    restoredSlots: restored,
+    created,
+    ...created && info.prefilled !== void 0 ? { prefilled: info.prefilled } : {},
+    ...base ? { base } : {}
+  };
 }
 function pruneWarmStates(directory, keep = 24) {
   if (!existsSync3(directory)) return;
@@ -830,30 +906,20 @@ function pruneWarmStates(directory, keep = 24) {
 }
 
 // src/llama/shared.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync3, rmSync as rmSync4, writeFileSync as writeFileSync4 } from "node:fs";
-import { dirname as dirname3, join as join6 } from "node:path";
-var sharedServerPath = (host) => join6(host.directories.state, "model-server.json");
-function publishSharedServer(host, server) {
-  const path = sharedServerPath(host), temporary = `${path}.${process.pid}.tmp`;
-  mkdirSync3(dirname3(path), { recursive: true });
-  writeFileSync4(temporary, JSON.stringify({ schema: "natlang.shared-model-server/1", ...server }, null, 2) + "\n");
-  renameSync3(temporary, path);
-}
-function withdrawSharedServer(host, pid) {
-  const current = readSharedServer(host);
-  if (current?.pid === pid) rmSync4(sharedServerPath(host), { force: true });
-}
-function readSharedServer(host) {
-  const path = sharedServerPath(host);
-  if (!existsSync4(path)) return void 0;
-  try {
-    const value = JSON.parse(readFileSync4(path, "utf8"));
-    return value.schema === "natlang.shared-model-server/1" ? value : void 0;
-  } catch {
-    return void 0;
-  }
+import { createHash as createHash4 } from "node:crypto";
+import { closeSync as closeSync2, existsSync as existsSync4, mkdirSync as mkdirSync4, openSync as openSync2, readdirSync as readdirSync4, readFileSync as readFileSync4, renameSync as renameSync3, rmSync as rmSync4, writeFileSync as writeFileSync5, writeSync } from "node:fs";
+import { join as join6 } from "node:path";
+var sharedServersDirectory = (host) => join6(host.directories.state, "model-servers");
+var sharingEnabled = (environment) => environment.NATLANG_SHARED_SERVER !== "off";
+var sharedIdleSeconds = (environment) => {
+  const value = Number(environment.NATLANG_SHARED_SERVER_IDLE_S);
+  return Number.isFinite(value) && value >= 0 && environment.NATLANG_SHARED_SERVER_IDLE_S !== "" ? value : 300;
+};
+function sharedServerKey(identity) {
+  return createHash4("sha256").update(JSON.stringify(identity)).digest("hex").slice(0, 16);
 }
 var alive = (pid) => {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -861,21 +927,136 @@ var alive = (pid) => {
     return error.code === "EPERM";
   }
 };
-async function findSharedServer(host, modelSha256, runtime) {
-  if (host.environment.NATLANG_SHARED_SERVER === "off") return void 0;
-  const server = readSharedServer(host);
-  if (!server || server.pid === process.pid || server.modelSha256 !== modelSha256 || server.runtime !== runtime || !alive(server.pid)) return void 0;
+var sharedPaths = (directory, key) => ({
+  record: join6(directory, `${key}.json`),
+  lock: join6(directory, `${key}.lock`),
+  failed: join6(directory, `${key}.failed`),
+  log: join6(directory, `${key}.log`),
+  leases: join6(directory, `${key}.leases`)
+});
+function readSharedServerAt(path) {
   try {
-    const response = await host.fetch(server.endpoint + "/health");
-    return response.ok ? server : void 0;
+    const value = JSON.parse(readFileSync4(path, "utf8"));
+    return value.schema === "natlang.shared-model-server/2" ? value : void 0;
   } catch {
     return void 0;
+  }
+}
+function liveLeases(directory, key) {
+  const leases = sharedPaths(directory, key).leases;
+  let count = 0;
+  for (const name of existsSync4(leases) ? readdirSync4(leases) : []) {
+    const pid = Number(name.split("-")[0]);
+    if (Number.isSafeInteger(pid) && pid > 0 && alive(pid)) count++;
+    else rmSync4(join6(leases, name), { force: true });
+  }
+  return count;
+}
+function listSharedServers(host) {
+  const directory = sharedServersDirectory(host);
+  if (!existsSync4(directory)) return [];
+  return readdirSync4(directory).filter((name) => /^[0-9a-f]{16}\.json$/.test(name)).flatMap((name) => {
+    const record = readSharedServerAt(join6(directory, name));
+    if (record && alive(record.pid)) return [record];
+    rmSync4(join6(directory, name), { force: true });
+    return [];
+  });
+}
+async function healthy(host, directory, key) {
+  const record = readSharedServerAt(sharedPaths(directory, key).record);
+  if (!record || !alive(record.pid)) return void 0;
+  try {
+    return (await host.fetch(record.endpoint + "/health")).ok ? record : void 0;
+  } catch {
+    return void 0;
+  }
+}
+var leaseCounter = 0;
+function takeLease(directory, key) {
+  const leases = sharedPaths(directory, key).leases;
+  mkdirSync4(leases, { recursive: true });
+  const path = join6(leases, `${process.pid}-${++leaseCounter}`);
+  writeFileSync5(path, "");
+  let held = true;
+  const release = () => {
+    if (held) {
+      held = false;
+      rmSync4(path, { force: true });
+      process.removeListener("exit", release);
+    }
+  };
+  process.once("exit", release);
+  return release;
+}
+function tryLock(path) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync2(path, "wx");
+      writeSync(fd, String(process.pid));
+      closeSync2(fd);
+      return true;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      const holder = Number(readFileSync4(path, "utf8").trim());
+      if (Number.isSafeInteger(holder) && holder > 0 && alive(holder)) return false;
+      rmSync4(path, { force: true });
+    }
+  }
+  return false;
+}
+async function acquireSharedServer(host, key, spec, options = {}) {
+  const directory = sharedServersDirectory(host), paths = sharedPaths(directory, key);
+  mkdirSync4(directory, { recursive: true });
+  const release = takeLease(directory, key);
+  let locked = false;
+  try {
+    let supervisor;
+    for (; ; ) {
+      options.signal?.throwIfAborted();
+      const server = await healthy(host, directory, key);
+      if (server) return { server, started: supervisor !== void 0, release };
+      if (supervisor === void 0) {
+        if (!host.supervise) {
+          release();
+          return null;
+        }
+        if (tryLock(paths.lock)) {
+          locked = true;
+          rmSync4(paths.failed, { force: true });
+          supervisor = host.supervise(await spec());
+          locked = false;
+        }
+      } else if (existsSync4(paths.failed)) {
+        throw new Error(readFileSync4(paths.failed, "utf8").trim() || "managed model server failed to start");
+      } else if (!alive(supervisor) && !existsSync4(paths.record)) {
+        rmSync4(paths.lock, { force: true });
+        let output = "";
+        try {
+          output = readFileSync4(paths.log, "utf8").slice(-4e3);
+        } catch {
+        }
+        throw new Error(`managed model server exited during startup
+${output.trim()}`);
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+    }
+  } catch (error) {
+    if (locked) rmSync4(paths.lock, { force: true });
+    release();
+    throw error;
+  }
+}
+function stopSharedServer(server) {
+  try {
+    process.kill(server.pid, "SIGTERM");
+  } catch {
   }
 }
 
 // src/llama/server.ts
 import { basename as basename3 } from "node:path";
-import { mkdirSync as mkdirSync4 } from "node:fs";
+import { mkdirSync as mkdirSync5, readFileSync as readFileSync5, statSync as statSync3 } from "node:fs";
+import { createHash as createHash5 } from "node:crypto";
 var serverHelp = /* @__PURE__ */ new Map();
 function serverSupports(host, executable, option) {
   let help = serverHelp.get(executable);
@@ -959,6 +1140,7 @@ function createLlamaServer(host, options = {}) {
   const { environment, log } = host;
   const release = options.release ?? DEFAULT_LOCAL_MODEL, headers = options.headers;
   let prerequisites = localModelPrerequisites(host, release);
+  let lease = null;
   let launched = null, endpoint = null, starting = null;
   const stopping = new AbortController();
   let closed = false, plan = null;
@@ -990,7 +1172,7 @@ function createLlamaServer(host, options = {}) {
         );
         if (state) {
           warmed.push(state);
-          log.write(state.created ? `natlang: prefilled the ${state.tokens}-token prompt opening once for this model; later calls and runs restore it
+          log.write(state.created ? `natlang: prefilled the ${state.tokens}-token prompt opening once for this model${state.base && state.prefilled !== void 0 ? ` (${state.prefilled} new tokens on its saved shared base)` : ""}; later calls and runs restore it
 ` : `natlang: restored the warm ${state.tokens}-token prompt opening into ${state.restoredSlots} slot${state.restoredSlots === 1 ? "" : "s"}
 `);
           pruneWarmStates(host.directories.warmPrefixes);
@@ -1032,86 +1214,156 @@ function createLlamaServer(host, options = {}) {
     if (!prerequisites.executable) {
       const explicit = prerequisites.runtime.candidates.find((candidate) => candidate.source === "explicit");
       if (explicit) throw new Error(`NATLANG_LLAMA_SERVER is incompatible: ${describeLlamaRuntime(prerequisites.runtime)}`);
-      throw new Error(`managed model server is unavailable: ${describeLlamaRuntime(prerequisites.runtime)}; run natlang --setup or natlang --runtime install`);
+      throw new Error(`managed model server is unavailable: ${describeLlamaRuntime(prerequisites.runtime)}; run natlang setup --yes to install it, or select a hosted model with --provider ID`);
     }
-    const adapterless = !(options.loraAdapters?.() ?? []).length && !(options.nativeStates?.() ?? []).length;
-    const shared = adapterless && options.useSharedServer !== false ? await findSharedServer(host, await managedModelSha256(host, release), runtimeLabel(prerequisites.runtime.selected)) : void 0;
-    if (shared) {
-      plan = {
-        budgetSource: "configured-parallel",
-        slots: shared.slots,
-        contextPerSlot: shared.contextPerSlot,
-        totalContext: shared.slots * shared.contextPerSlot,
-        source: "configured",
-        budgetBytes: null,
-        modelBytes: 0,
-        kvBytesPerToken: 0,
-        formula: `shared model server (pid ${shared.pid})`
+    const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    const adapters = [...options.loraAdapters?.() ?? []].sort(byId), states = [...options.nativeStates?.() ?? []].sort(byId);
+    const tuned = adapters.length > 0 || states.length > 0;
+    const executable = prerequisites.executable;
+    if (states.length && !supportsNativeStates(host, executable))
+      throw new Error(`weights-unavailable: ${executable} cannot import native state spans (tuned soft states need the llama.cpp fork's --native-state)`);
+    const warmAllowed = environment.NATLANG_WARM_PREFIXES !== "off" && !tuned;
+    const command = (modelPath2, port2, slotPlan) => {
+      const template = templatePath(host, release);
+      const args2 = [
+        "-m",
+        modelPath2,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(port2),
+        "--parallel",
+        String(slotPlan.slots),
+        "-c",
+        String(slotPlan.totalContext),
+        "-ngl",
+        String(options.local?.gpuLayers ?? 99),
+        "--cache-ram",
+        String(options.local?.cacheRamMiB ?? 256),
+        "--no-webui",
+        "--jinja",
+        ...template ? ["--chat-template-file", template] : [],
+        // The stock file's sliding-window layers need the full cache for a warm opening or earlier prompt to be reused.
+        ...release.fullSlidingWindowCache && !environment.NATLANG_MODEL_PATH ? ["--swa-full"] : [],
+        ...options.local?.args ?? [],
+        ...warmAllowed ? ["--slot-save-path", host.directories.warmPrefixes] : []
+      ];
+      if (adapters.length) args2.push("--lora-init-without-apply", ...supportsPerSequenceLora(host, executable) ? ["--lora-per-sequence"] : []);
+      for (const adapter of adapters) args2.push("--lora", adapter.path);
+      for (const state of states) args2.push("--native-state", state.path);
+      return args2;
+    };
+    const loaded = () => {
+      loraIndex.clear();
+      nativeStatesLoaded.clear();
+      for (const adapter of adapters) loraIndex.set(adapter.id, loraIndex.size);
+      for (const state of states) nativeStatesLoaded.add(state.id);
+    };
+    if (!options.launch && options.useSharedServer !== false && sharingEnabled(environment)) {
+      const sha = await managedModelSha256(host, release), label = runtimeLabel(prerequisites.runtime.selected);
+      const template = templatePath(host, release);
+      const local = options.local ?? {};
+      const file = (item) => {
+        try {
+          const stat = statSync3(item.path);
+          return [item.id, item.path, stat.size, stat.mtimeMs];
+        } catch {
+          return [item.id, item.path];
+        }
       };
-      contended = true;
-      sharedServer = true;
-      warming = environment.NATLANG_WARM_PREFIXES !== "off" && !!shared.warm;
-      log.write(`natlang: using the ${shared.model} model kept loaded at ${shared.endpoint} (${shared.slots} slots)
+      const key = sharedServerKey({
+        model: sha,
+        runtime: label,
+        template: template ? createHash5("sha256").update(readFileSync5(template)).digest("hex") : null,
+        swaFull: !!release.fullSlidingWindowCache && !environment.NATLANG_MODEL_PATH,
+        gpuLayers: local.gpuLayers ?? null,
+        cacheRamMiB: local.cacheRamMiB ?? null,
+        args: local.args ?? [],
+        parallel: local.parallel ?? null,
+        contextTokens: local.contextTokens ?? null,
+        memoryBudgetMiB: local.memoryBudgetMiB ?? null,
+        kvBytesPerToken: local.kvBytesPerToken ?? null,
+        budgetEnv: environment.NATLANG_MODEL_MEMORY_BUDGET_MIB ?? null,
+        warm: warmAllowed ? host.directories.warmPrefixes : null,
+        adapters: adapters.map(file),
+        states: states.map(file)
+      });
+      const startTimeoutMs = Number(environment.NATLANG_MODEL_START_TIMEOUT_MS ?? 12e4);
+      const idleSeconds = tuned ? Math.min(30, sharedIdleSeconds(environment)) : sharedIdleSeconds(environment);
+      const spec = async () => {
+        const modelPath2 = await ensureModel(host, release), port2 = await host.processes.freePort();
+        const slotPlan = localSlotPlan(host, options.local, modelPath2, release);
+        if (warmAllowed) mkdirSync5(host.directories.warmPrefixes, { recursive: true });
+        log.write(`natlang: starting managed model ${basename3(modelPath2)}${tuned ? ` with ${adapters.length} adapter${adapters.length === 1 ? "" : "s"} and ${states.length} native state${states.length === 1 ? "" : "s"}` : ""}, ${slotPlan.slots} slot${slotPlan.slots === 1 ? "" : "s"} (${slotPlan.contextPerSlot} tokens each), shared by natlang runs on this machine
 `);
-      return shared.endpoint;
+        return {
+          command: executable,
+          args: command(modelPath2, port2, slotPlan),
+          endpoint: `http://127.0.0.1:${port2}`,
+          directory: sharedServersDirectory(host),
+          key,
+          startTimeoutMs,
+          record: {
+            endpoint: `http://127.0.0.1:${port2}`,
+            modelSha256: sha,
+            runtimeBuild: prerequisites.runtime.selected?.build ?? null,
+            runtime: label,
+            slots: slotPlan.slots,
+            contextPerSlot: slotPlan.contextPerSlot,
+            model: basename3(modelPath2),
+            warm: warmAllowed,
+            idleSeconds,
+            adapters: adapters.map((adapter) => adapter.id),
+            states: states.map((state) => state.id)
+          }
+        };
+      };
+      const startedAt2 = Date.now();
+      const leased = await acquireSharedServer(host, key, spec, { signal: stopping.signal });
+      if (leased) {
+        if (closed) {
+          leased.release();
+          throw new Error("model session is closed");
+        }
+        lease = leased.release;
+        const shared = leased.server;
+        plan = {
+          budgetSource: "configured-parallel",
+          slots: shared.slots,
+          contextPerSlot: shared.contextPerSlot,
+          totalContext: shared.slots * shared.contextPerSlot,
+          source: "configured",
+          budgetBytes: null,
+          modelBytes: 0,
+          kvBytesPerToken: 0,
+          formula: `shared model server (pid ${shared.serverPid})`
+        };
+        contended = true;
+        sharedServer = true;
+        modelSha256 = sha;
+        runtime = label;
+        warming = warmAllowed && shared.warm;
+        loaded();
+        log.write(leased.started ? `natlang: model ready in ${((Date.now() - startedAt2) / 1e3).toFixed(1)} s at ${shared.endpoint}; it stops after ${shared.idleSeconds} s unused
+` : `natlang: using the ${shared.model} model already loaded at ${shared.endpoint} (${shared.slots} slots)
+`);
+        return shared.endpoint;
+      }
     }
     const modelPath = await ensureModel(host, release);
     if (closed) throw new Error("model session is closed");
     const port = await host.processes.freePort();
     const base = `http://127.0.0.1:${port}`;
     plan = localSlotPlan(host, options.local, modelPath, release);
-    const template = templatePath(host, release);
-    const args = [
-      "-m",
-      modelPath,
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(port),
-      "--parallel",
-      String(plan.slots),
-      "-c",
-      String(plan.totalContext),
-      "-ngl",
-      String(options.local?.gpuLayers ?? 99),
-      "--cache-ram",
-      String(options.local?.cacheRamMiB ?? 256),
-      "--no-webui",
-      "--jinja",
-      ...template ? ["--chat-template-file", template] : [],
-      // The stock file's sliding-window layers need the full cache for a warm opening or earlier prompt to be reused.
-      ...release.fullSlidingWindowCache && !environment.NATLANG_MODEL_PATH ? ["--swa-full"] : [],
-      ...options.local?.args ?? []
-    ];
-    loraIndex.clear();
-    const adapters = options.loraAdapters?.() ?? [];
-    if (adapters.length) {
-      args.push("--lora-init-without-apply", ...supportsPerSequenceLora(host, prerequisites.executable) ? ["--lora-per-sequence"] : []);
-      for (const adapter of adapters) {
-        loraIndex.set(adapter.id, loraIndex.size);
-        args.push("--lora", adapter.path);
-      }
-    }
-    warming = environment.NATLANG_WARM_PREFIXES !== "off" && !adapters.length && !(options.nativeStates?.() ?? []).length;
-    if (warming) {
-      mkdirSync4(host.directories.warmPrefixes, { recursive: true });
-      args.push("--slot-save-path", host.directories.warmPrefixes);
-    }
-    nativeStatesLoaded.clear();
-    const states = options.nativeStates?.() ?? [];
-    if (states.length) {
-      if (!supportsNativeStates(host, prerequisites.executable))
-        throw new Error(`weights-unavailable: ${prerequisites.executable} cannot import native state spans (tuned soft states need the llama.cpp fork's --native-state)`);
-      for (const state of states) {
-        nativeStatesLoaded.add(state.id);
-        args.push("--native-state", state.path);
-      }
-    }
+    warming = warmAllowed;
+    if (warming) mkdirSync5(host.directories.warmPrefixes, { recursive: true });
+    const args = command(modelPath, port, plan);
+    loaded();
     log.write(`natlang: starting managed model ${basename3(modelPath)} with ${plan.slots} slot${plan.slots === 1 ? "" : "s"} (${plan.contextPerSlot} tokens each; ${plan.budgetSource === "configured-parallel" ? "local.parallel" : `${plan.budgetSource === "default" ? "default" : plan.budgetSource} KV budget ${Math.round((plan.budgetBytes ?? 0) / 2 ** 20)} MiB`})
 `);
     stopping.signal.throwIfAborted();
     const startedAt = Date.now();
-    launched = await (options.launch ?? spawnLauncher(host))({ command: prerequisites.executable, args, port, endpoint: base }, stopping.signal);
+    launched = await (options.launch ?? spawnLauncher(host))({ command: executable, args, port, endpoint: base }, stopping.signal);
     log.write(`natlang: model ready in ${((Date.now() - startedAt) / 1e3).toFixed(1)} s
 `);
     return base;
@@ -1161,6 +1413,8 @@ function createLlamaServer(host, options = {}) {
       stopping.abort();
       if (starting) await starting.catch(() => void 0);
       await launched?.stop();
+      lease?.();
+      lease = null;
       launched = null;
       endpoint = null;
     }
@@ -1182,10 +1436,11 @@ export {
   discoverLlamaRuntime,
   ensureModel,
   ensureStockModel,
-  findSharedServer,
   inspectLlamaServer,
   installManagedLlamaRuntime,
   isCompatibleLlamaVersion,
+  listSharedServers,
+  liveLeases,
   localModelPrerequisites,
   localSlotPlan,
   managedModelSha256,
@@ -1195,18 +1450,16 @@ export {
   openingOf,
   planServerSlots,
   pruneWarmStates,
-  publishSharedServer,
-  readSharedServer,
   runtimeLabel,
   sharedPrefix,
-  sharedServerPath,
+  sharedServersDirectory,
   spawnLauncher,
   stockModel,
   stockModelDownload,
   stockModelPath,
+  stopSharedServer,
   supportsNativeStates,
   templatePath,
   warmOpening,
-  warmTag,
-  withdrawSharedServer
+  warmTag
 };

@@ -51,6 +51,9 @@ function fakeRouter(slotCount: number) {
         prompt: messages.map((m) => `<|im_start|>${m.role}\n${m.content}<|im_end|>\n`).join("") + "<|im_start|>assistant\n",
       });
     }
+    if (url.pathname === "/tokenize") {
+      return Response.json({ tokens: Array.from({ length: 321 }, (_, index) => index) });
+    }
     if (url.pathname === "/completion") return Response.json({ timings: { prompt_n: 321 } });
     if (url.pathname.startsWith("/slots/") && url.searchParams.get("action") === "save") {
       await writeFile(join(rootDir, ROOT_LAYOUT.warmPrefixesDir, String(body?.["filename"])), "state");
@@ -109,6 +112,7 @@ describe("natlang serving", () => {
       "/slots",
       "/apply-template",
       "/apply-template",
+      "/tokenize",
       "/slots/0:erase",
       "/completion",
       "/slots/0:save",

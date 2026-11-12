@@ -1,6 +1,7 @@
 /**
  * One managed llama.cpp server: find or install its runtime, resolve its model and chat template, size its slots, start
- * it (or use a server another natlang process keeps loaded, or one the host supervises itself), keep the warm prompt
+ * it (shared by every natlang process that needs the same model, settings, adapters and native states, llama/shared.ts;
+ * or one the host supervises itself), keep the warm prompt
  * openings (llama/warm.ts) saved and restored in its slots, and stop it. Mechanism only; what to ask the model, how
  * requests are queued and how replies are scored belong to the caller, which reads `start()`'s endpoint.
  *
@@ -57,7 +58,8 @@ export type LlamaServerOptions = {
     ensureRuntime?: (discovery: LlamaRuntimeDiscovery) => Promise<LlamaServerInspection | null>;
     /** Sent with the package's own requests to the server (health, slots, warm states). */
     headers?: Record<string, string>;
-    /** A server another natlang process keeps loaded for exactly this model file and build may be used (default true). */
+    /** Use (or start) the server shared by natlang processes on this machine that need the same model, settings, adapters
+     * and native states (llama/shared.ts; default true, NATLANG_SHARED_SERVER=off turns it off). */
     useSharedServer?: boolean;
     launch?: LlamaLauncher;
     attach?: LlamaAttachment;
