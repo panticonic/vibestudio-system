@@ -31,8 +31,8 @@ split; `exact` per case.
 
 | Split | Mean quality | Exact cases | Gate |
 |---|---|---|---|
-| validation (4) | 1.000 | 4 of 4 | met |
-| test (4) | 0.938 | 3 of 4 (`local-models bootstrap failed`, a message with no detail, read as `engine`) | met |
+| validation (4) | 1.000 | 4 of 4 | met (also through `pnpm natlang:eval`) |
+| test (4) | 0.938 (also through `pnpm natlang:eval`) | 3 of 4 (`local-models bootstrap failed`, a message with no detail, read as `engine`) | met |
 
 About 7-10 s per case (one decision per failed model; a machine with no failed model makes no model call at all).
 
