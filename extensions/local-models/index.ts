@@ -75,9 +75,9 @@ import {
  * `sha256sum natlang-runtime.json`.
  */
 const ENGINE_PIN: EnginePin = {
-  buildTag: "natlang-b12069",
+  buildTag: "natlang-b12070",
   manifestSha256:
-    "d943d20897615e6aec27c46fe167e0653ecd2e7e998679e9325577a86c5b1ab4",
+    "37752c5aafe5e153562d389a36fecd12a81792f1a3528a9d34e2d92f4dd36498",
 };
 
 const BENCHMARK_RECENT_MS = 7 * 24 * 60 * 60 * 1000;
