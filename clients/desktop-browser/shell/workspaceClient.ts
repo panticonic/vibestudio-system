@@ -547,6 +547,8 @@ export function createShellWorkspaceClient(
     ) => workspacePresentation.searchTree(input),
     observe: (panelId: string) =>
       productPanelRuntime.panelTree.get(panelId).observe(),
+    /** Build proof of the slot's history entries, newest first (tendrils). */
+    historyProof: (panelId: string) => panelRuntimeClient.historyProof(panelId),
     getPresentation: (panelId: string) => viewClient.getPresentation(panelId),
     getPresentations: (panelIds: string[]) =>
       viewClient.getPresentations(panelIds),
