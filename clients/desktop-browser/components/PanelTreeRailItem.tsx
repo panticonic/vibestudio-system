@@ -1,7 +1,6 @@
 import type { FlattenedPanel } from "../shell/hooks/PanelTreeContext";
 import { isPanelClosePointerButton } from "@vibestudio/shared/panelCommands";
 import { PanelIcon } from "./PanelIcon";
-import { confirmClosePanel } from "./ConfirmDialog";
 import type { TreeMoveKey } from "./panelTreeKeyboard";
 
 /** The same tree navigation target, presented as one icon with its full path. */
@@ -13,7 +12,7 @@ export function PanelTreeRailItem({
   onSelect,
   onMoveFocus,
   onPanelContextMenu,
-  onArchive,
+  onClose,
 }: {
   item: FlattenedPanel;
   title: string;
@@ -22,7 +21,7 @@ export function PanelTreeRailItem({
   onSelect(id: string, options?: { openBeside?: boolean }): void;
   onMoveFocus(id: string, key: TreeMoveKey): void;
   onPanelContextMenu?(id: string, position: { x: number; y: number }): Promise<void>;
-  onArchive?(id: string): void;
+  onClose?(id: string): void;
 }) {
   const { panel } = item;
   return (
@@ -59,10 +58,7 @@ export function PanelTreeRailItem({
       onAuxClick={(event) => {
         if (!isPanelClosePointerButton(event.button)) return;
         event.preventDefault();
-        void (async () => {
-          if (panel.childCount && !(await confirmClosePanel(panel.title, panel.childCount))) return;
-          onArchive?.(panel.id);
-        })();
+        onClose?.(panel.id);
       }}
     >
       <PanelIcon

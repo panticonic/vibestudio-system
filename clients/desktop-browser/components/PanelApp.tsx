@@ -26,6 +26,7 @@ import {
   LayoutDragProvider,
 } from "../shell/hooks/index.js";
 import { useShellEvent } from "../shell/useShellEvent";
+import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 
 import { PanelStack } from "./PanelStack";
 import type { ChromeCommand } from "./PanelStack";
@@ -68,6 +69,10 @@ function PanelAppContent() {
   useShellEvent("panel-tree-invalidated", (event) => {
     for (const slotId of event.removedSlotIds) hostCommands.releaseSlot(slotId);
   });
+  // The Undo on this workspace's close notice. Notification actions arrive on
+  // the watched stream or addressed to this session; both reach the same owner.
+  useShellEvent("notification:action", panel.handleNotificationAction);
+  useDirectShellEvent("notification:action", panel.handleNotificationAction);
   const visible = useWorkspaceVisible();
   const navigationHost = useWorkspaceNavigationHost();
   const workspaceId = navigationHost?.workspaceId ?? "system";

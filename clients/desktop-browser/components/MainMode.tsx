@@ -11,7 +11,6 @@ import {
 } from "../state/appModeAtoms";
 
 import { useShellEvent } from "../shell/useShellEvent";
-import { useClientMenu } from "../shell/useClientMenu";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { ConnectionSettingsDialog } from "./ConnectionSettingsDialog";
 import {
@@ -67,23 +66,6 @@ export default function MainMode() {
       [setSettingsTarget],
     ),
   );
-
-  // This client's native menus; the host builds them from this data and relays choices back.
-  const { app, notification } = client;
-  useClientMenu({
-    panelCommandsEnabled: settingsTarget?.section !== "browser-data",
-    clearBuildCache: useCallback(() => app.clearBuildCache(), [app]),
-    failed: useCallback(
-      (action: string, error: unknown) => {
-        void notification.show({
-          type: "error",
-          title: "That menu command failed",
-          message: `${action}: ${error instanceof Error ? error.message : String(error)}`,
-        });
-      },
-      [notification],
-    ),
-  });
 
   // Register shell overlays — hides panel views so dialogs aren't obscured
   useShellOverlay(workspaceChooserOpen);

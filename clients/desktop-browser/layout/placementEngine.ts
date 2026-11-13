@@ -35,7 +35,6 @@ export type LayoutAction =
   | { type: "place-panel"; panelId: string; target: LayoutDropTarget }
   | { type: "move-pane-to-new-column"; paneId: string }
   | { type: "split-below"; panelId: string; anchorPaneId: string }
-  | { type: "close-pane"; paneId: string }
   | { type: "tree-reconcile"; removed: Array<{ panelId: string; fallbackCandidates: string[] }> }
   | { type: "focus-pane"; paneId: string }
   | { type: "resize-columns"; columnFrs: number[] }
@@ -45,7 +44,7 @@ export interface LayoutEnv {
   viewportWidth: number;
   viewportHeight: number; // vertical fit tests (rule 2c/3) need it
   paneChromeHeight: number; // permanent titlebar + divider per pane
-  firstRootPanelId(): string | null; // seed after closing the last pane; null = empty workspace
+  rootPanelIds(): readonly string[]; // tree order; the first surviving one seeds an emptied layout
   minWidthOf(panelId: string): number; // from placement hints / defaults
 }
 
@@ -359,8 +358,6 @@ function reduceLayoutAction(
       return applyMovePaneToNewColumn(layout, action.paneId);
     case "split-below":
       return applySplitBelow(cloneLayout(layout), action.panelId, action.anchorPaneId, env);
-    case "close-pane":
-      return applyClosePane(cloneLayout(layout), action.paneId, env);
     case "tree-reconcile":
       return applyTreeReconcile(cloneLayout(layout), action.removed, env);
     case "resize-columns":
@@ -749,8 +746,17 @@ function applySplitBelow(
   return insertPaneBelow(next, anchor, panelId);
 }
 
-/** Rule 4: close-pane — layout-only removal with fr redistribution and last-pane reseed. */
-function applyClosePane(next: PanelLayout, paneId: string, env: LayoutEnv): PanelLayout {
+/**
+ * Rule 4: a pane whose panel left the tree with nothing to fall back to goes,
+ * with fr redistribution and last-pane reseed. `removed` are the panels that
+ * left with it: the root list may not have caught up, and none of them seeds.
+ */
+function applyClosePane(
+  next: PanelLayout,
+  paneId: string,
+  env: LayoutEnv,
+  removed: ReadonlySet<string>
+): PanelLayout {
   const location = findPane(next, paneId);
   if (!location) return next;
   const wasFocused = next.focusedPaneId === paneId;
@@ -762,8 +768,8 @@ function applyClosePane(next: PanelLayout, paneId: string, env: LayoutEnv): Pane
 
   if (next.columns.length === 0) {
     // Closing the last pane reseeds from the first root panel (§4.4).
-    const seed = env.firstRootPanelId();
-    if (seed === null) {
+    const seed = env.rootPanelIds().find((rootId) => !removed.has(rootId));
+    if (seed === undefined) {
       return { columns: [], focusedPaneId: null };
     }
     return normalizeLayout({ columns: [newColumn(seed)], focusedPaneId: null });
@@ -803,7 +809,7 @@ function applyTreeReconcile(
   }
   let result: PanelLayout = next;
   for (const paneId of panesToClose) {
-    result = applyClosePane(cloneLayout(result), paneId, env);
+    result = applyClosePane(cloneLayout(result), paneId, env, removedIds);
   }
   return normalizeLayout(result);
 }

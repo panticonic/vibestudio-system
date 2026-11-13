@@ -98,7 +98,7 @@ const COMMAND_PRESENTATION: Partial<
   "open-external": { icon: ExternalLink },
   duplicate: { icon: CopyPlus },
   "toggle-pin": { icon: Pin },
-  archive: { icon: Archive },
+  close: { icon: Archive },
 };
 
 function findPanelById(
@@ -448,7 +448,7 @@ export function PanelDrawer({
         await shellClient.panels.refresh();
       } catch (error) {
         pushToast({
-          title: "Could not archive panel",
+          title: "Could not close panel",
           message: error instanceof Error ? error.message : "Try again.",
           tone: "danger",
         });
@@ -535,13 +535,13 @@ export function PanelDrawer({
             return create.then((result) => onSelectPanel(result.id));
           });
           return;
-        case "archive":
+        case "close":
           void shellClient.panels
             .archive(panelId)
             .then(() => shellClient.panels.refresh())
             .catch((error: unknown) =>
               pushToast({
-                title: "Could not archive panel",
+                title: "Could not close panel",
                 message: error instanceof Error ? error.message : "Try again.",
                 tone: "danger",
               }),
@@ -567,7 +567,7 @@ export function PanelDrawer({
           : []),
         "duplicate",
         "toggle-pin",
-        "archive",
+        "close",
       ];
       const definitions = getPanelCommandDefinitions({ isPinned });
       const commands = commandIds.map((id) => {
@@ -586,7 +586,7 @@ export function PanelDrawer({
             command.id === "toggle-pin" && isPinned
               ? PinOff
               : presentation?.icon,
-          tone: command.id === "archive" ? "danger" : "default",
+          tone: command.id === "close" ? "danger" : "default",
         };
       });
       showActionSheet({

@@ -170,7 +170,7 @@ describe("panel navigation placement", () => {
     viewportHeight: 800,
     paneChromeHeight: PANE_VERTICAL_CHROME_HEIGHT,
     minWidthOf: () => MIN_COLUMN_WIDTH,
-    firstRootPanelId: () => "parent",
+    rootPanelIds: () => ["parent"],
   });
 
   it.each(["child", "grandchild"])(

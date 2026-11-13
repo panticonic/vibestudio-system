@@ -19,7 +19,9 @@ interface PaneColumnProps {
   unresponsivePanels: Set<string>;
   onDismissUnresponsive: (panelId: string) => void;
   onFocusPane: (paneId: string) => void;
-  onClosePane?: (paneId: string) => void;
+  /** Whether a pane can be placed elsewhere: only when there is somewhere else. */
+  movable: boolean;
+  onClosePanel: (panelId: string) => void;
   onMovePane: (
     paneId: string,
     direction: "left" | "right" | "up" | "down",
@@ -40,7 +42,8 @@ export function PaneColumn({
   unresponsivePanels,
   onDismissUnresponsive,
   onFocusPane,
-  onClosePane,
+  movable,
+  onClosePanel,
   onMovePane,
   onResizePanes,
 }: PaneColumnProps) {
@@ -140,7 +143,8 @@ export function PaneColumn({
             unresponsive={unresponsivePanels.has(pane.panelId)}
             onDismissUnresponsive={onDismissUnresponsive}
             onFocusPane={onFocusPane}
-            onClosePane={onClosePane}
+            movable={movable}
+            onClosePanel={onClosePanel}
             onMovePane={onMovePane}
           />
         </Fragment>

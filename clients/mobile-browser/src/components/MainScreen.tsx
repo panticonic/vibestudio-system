@@ -183,7 +183,7 @@ const PANEL_COMMAND_PRESENTATION: Partial<
   duplicate: { icon: CopyPlusIcon },
   "toggle-pin": { icon: PinIcon },
   unload: { icon: PowerIcon },
-  archive: { icon: ArchiveIcon },
+  close: { icon: ArchiveIcon },
   "focus-address": { icon: Link2Icon },
 };
 
@@ -1335,7 +1335,7 @@ export function MainScreen({
             prev.filter((entry) => entry.panelId !== panelId),
           );
           return;
-        case "archive":
+        case "close":
           void shellClient.panels.archive(panelId).then(refreshTree);
           return;
         case "focus-address":
@@ -1381,7 +1381,7 @@ export function MainScreen({
           "duplicate",
           "toggle-pin",
           "unload",
-          "archive",
+          "close",
         ],
       );
       const contributedCommands = presentMobileHostCommands(
@@ -1426,7 +1426,7 @@ export function MainScreen({
                   ? PinOffIcon
                   : presentation?.icon,
               tone:
-                command.id === "archive"
+                command.id === "close"
                   ? ("danger" as const)
                   : ("default" as const),
             };

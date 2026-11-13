@@ -7,6 +7,7 @@ import {
 } from "@vibestudio/shared/desktopKeymap";
 import { ABOUT_PAGES } from "@vibestudio/workspace-contracts/aboutNamespace";
 import { localShellEvents } from "./localShellEvents";
+import type { ShellWorkspaceClient } from "./workspaceClient";
 
 /**
  * This client's native menus (`native-menus`). The host owns no browser UI: it
@@ -36,8 +37,9 @@ export interface MenuModel {
 
 /**
  * Chords that belong to the client no matter what has keyboard focus, so a
- * misbehaving page cannot swallow how a person gets out of it. Closing a panel
- * is deliberately not here: it is unrecoverable, so it stays with the menu.
+ * misbehaving page cannot swallow how a person gets out of it, or back to what
+ * they closed. Closing a panel is deliberately not here: pages bind that chord
+ * themselves (a terminal's delete-word), so it stays with the menu.
  */
 const CHROME_OWNED: readonly DesktopBindingId[] = [
   "commandPalette",
@@ -51,6 +53,7 @@ const CHROME_OWNED: readonly DesktopBindingId[] = [
   "findNext",
   "findPrevious",
   "newPanel",
+  "reopenClosedPanel",
   "nextPanel",
   "previousPanel",
   "toggleFullScreen",
@@ -139,6 +142,11 @@ export function buildClientMenu(
     "previousPanel",
   );
   const closePanel = panelItem("close-panel", "Close Panel", "closePanel");
+  const reopenClosedPanel = panelItem(
+    "reopen-closed-panel",
+    "Reopen Closed Panel",
+    "reopenClosedPanel",
+  );
   const zoomIn = panelItem("zoom-in", "Zoom In", "zoomIn");
   const zoomOut = panelItem("zoom-out", "Zoom Out", "zoomOut");
   const resetZoom = panelItem("reset-zoom", "Reset Zoom", "resetZoom");
@@ -196,7 +204,7 @@ export function buildClientMenu(
           sep,
           nextPanel,
           previousPanel,
-          ...(isMac ? [sep, closePanel] : []),
+          ...(isMac ? [sep, closePanel, reopenClosedPanel] : []),
         ],
       },
       {
@@ -264,6 +272,7 @@ export function buildClientMenu(
           previousPanel,
           sep,
           closePanel,
+          reopenClosedPanel,
         ],
       },
       {
@@ -308,8 +317,16 @@ export function buildClientMenu(
   };
 }
 
+/** What the menu does to the focused workspace's panels. */
+export type MenuWorkspacePanels = Pick<
+  ShellWorkspaceClient["panel"],
+  "getFocusedPanelId" | "close" | "reopenLastClosed"
+>;
+
 export interface MenuActionContext {
   menu?: MenuModel;
+  /** The focused workspace's panels; null while no workspace is focused. */
+  focusedPanels(): MenuWorkspacePanels | null;
   /** Run something only the host's compositor can do to the panel surface. */
   panelHost(action: string): Promise<void>;
   clearBuildCache(): Promise<void>;
@@ -337,7 +354,6 @@ const HOST_ACTIONS: Record<string, string> = {
   "refresh-display": "refresh-display",
   "copy-display-diagnostics": "copy-display-diagnostics",
   "client-devtools": "toggle-client-devtools",
-  "close-panel": "close-focused-panel",
   "next-panel": "next-panel",
   "previous-panel": "previous-panel",
 };
@@ -375,6 +391,14 @@ export function runMenuAction(
     return;
   }
   switch (actionId) {
+    case "close-panel":
+      closeFocusedPanel(context).catch(fail);
+      return;
+    case "reopen-closed-panel": {
+      const panels = context.focusedPanels();
+      if (panels) panels.reopenLastClosed().catch(fail);
+      return;
+    }
     case "new-panel":
       localShellEvents.emit("navigate-about", { page: ABOUT_PAGES.NEW });
       return;
@@ -440,4 +464,16 @@ export function runMenuAction(
     default:
       fail(new Error(`Unknown menu action: ${actionId}`));
   }
+}
+
+/**
+ * The focused panel closes through this client, so it can be undone from here
+ * like any other close. With no panel to close, the chord closes the window:
+ * that is the host's to do.
+ */
+async function closeFocusedPanel(context: MenuActionContext): Promise<void> {
+  const panels = context.focusedPanels();
+  const panelId = panels ? await panels.getFocusedPanelId() : null;
+  if (panels && panelId) await panels.close(panelId);
+  else await context.panelHost("close-focused-panel");
 }

@@ -208,7 +208,7 @@ body,
 }
 
 /* Archiving a panel warms to red on hover. */
-.breadcrumb-archive-btn:hover {
+.breadcrumb-close-btn:hover {
   background-color: var(--red-a4);
 }
 

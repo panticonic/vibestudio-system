@@ -31,7 +31,8 @@ interface ColumnRowProps {
   unresponsivePanels: Set<string>;
   onDismissUnresponsive: (panelId: string) => void;
   onFocusPane: (paneId: string) => void;
-  onClosePane: (paneId: string) => void;
+  /** Close the panel a pane shows (the panel, not merely the pane). */
+  onClosePanel: (panelId: string) => void;
   onResizeColumns: (columnFrs: number[]) => void;
   onResizePanes: (columnId: string, paneFrs: number[]) => void;
   /** Called when a residency transition settles, to force a surface resync (§5.4). */
@@ -68,7 +69,7 @@ export function ColumnRow({
   unresponsivePanels,
   onDismissUnresponsive,
   onFocusPane,
-  onClosePane,
+  onClosePanel,
   onResizeColumns,
   onResizePanes,
   onTransitionSettled,
@@ -276,7 +277,8 @@ export function ColumnRow({
               unresponsivePanels={unresponsivePanels}
               onDismissUnresponsive={onDismissUnresponsive}
               onFocusPane={onFocusPane}
-              onClosePane={layoutPaneCount > 1 ? onClosePane : undefined}
+              movable={layoutPaneCount > 1}
+              onClosePanel={onClosePanel}
               onMovePane={onMovePane}
               onResizePanes={onResizePanes}
             />

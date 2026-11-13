@@ -13,7 +13,10 @@ import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { observeDurableProjection } from "@vibestudio/shell-core/durableObservation";
 import type { EventName, EventPayloads } from "./workspaceClient";
-import { useShellWorkspaceClient } from "./workspaceContext";
+import {
+  useShellWorkspaceClient,
+  useWorkspaceVisible,
+} from "./workspaceContext";
 import { localShellEvents } from "./localShellEvents";
 
 // Re-export for consumers
@@ -38,6 +41,11 @@ export function useShellEvent<E extends EventName>(
   readSnapshot?: (signal: AbortSignal) => void | Promise<void>,
 ): void {
   const { events } = useShellWorkspaceClient();
+  // Events this client raises for itself are the person acting on what they
+  // see, so only the visible workspace receives them; retained background
+  // workspaces must not, say, reload or close their own focused panel too.
+  const visible = useWorkspaceVisible();
+  const visibleRef = useRef(visible);
   // Use ref to store the latest callback without triggering effect re-runs
   const callbackRef = useRef(callback);
 
@@ -45,12 +53,15 @@ export function useShellEvent<E extends EventName>(
   // effect leaves a window where it can dispatch to the previous render.
   useLayoutEffect(() => {
     callbackRef.current = callback;
+    visibleRef.current = visible;
   });
 
   useEffect(() => {
     const lifetime = new AbortController();
     // The same handler also serves events this client raises for itself.
-    const releaseLocal = localShellEvents.on(event, (payload) => callbackRef.current(payload));
+    const releaseLocal = localShellEvents.on(event, (payload) => {
+      if (visibleRef.current) callbackRef.current(payload);
+    });
     const observation = observeDurableProjection({
       listen: (invalidate) =>
         events.on(event, (payload) => {

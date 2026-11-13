@@ -63,6 +63,7 @@ const shortcutGroups: ShortcutGroup[] = [
       { description: "Next panel", binding: "nextPanel" },
       { description: "Previous panel", binding: "previousPanel" },
       { description: "Close current panel", binding: "closePanel" },
+      { description: "Reopen closed panel", binding: "reopenClosedPanel" },
       { description: "Keyboard shortcuts", binding: "keyboardShortcuts" },
       { description: "Quit application", keys: { mac: ["⌘", "Q"] } },
     ],

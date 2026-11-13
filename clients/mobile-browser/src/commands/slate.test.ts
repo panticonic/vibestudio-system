@@ -109,7 +109,7 @@ describe("mobile slate", () => {
       .find((command) => command.id === "panel.close")!
       .run({}, slateDeps);
     expect(slateDeps.performPanelCommand).toHaveBeenCalledWith(
-      "archive",
+      "close",
       "panel:tree/root/0",
     );
   });

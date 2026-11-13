@@ -41,12 +41,14 @@ import {
 } from "../shell/client";
 import {
   ShellWorkspaceClientContext,
+  useShellWorkspaceClient,
   WorkspaceNavigationHostContext,
   WorkspaceDesktopHostContext,
   WorkspaceVisibilityContext,
   ShellPresentationStoreContext,
 } from "../shell/workspaceContext";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
+import { useClientMenu } from "../shell/useClientMenu";
 import {
   settingsDialogAtom,
   workspaceCatalogRevisionAtom,
@@ -227,6 +229,34 @@ export function WorkspaceDesktop({
   }, [focusedId]);
   const focusedRef = useRef(focusedId);
   focusedRef.current = focusedId;
+
+  // This client's native menus; the host builds them from this data and relays
+  // choices back. Panel entries act on the focused workspace, which this owns.
+  const windowClient = useShellWorkspaceClient();
+  const settingsTarget = useAtomValue(settingsDialogAtom);
+  useClientMenu({
+    panelCommandsEnabled: settingsTarget?.section !== "browser-data",
+    focusedPanels: useCallback(() => {
+      const workspaceId = focusedRef.current;
+      return workspaceId
+        ? (owners.current.get(workspaceId)?.client.panel ?? null)
+        : null;
+    }, []),
+    clearBuildCache: useCallback(
+      () => windowClient.app.clearBuildCache(),
+      [windowClient],
+    ),
+    failed: useCallback(
+      (action: string, error: unknown) => {
+        void windowClient.notification.show({
+          type: "error",
+          title: "That menu command failed",
+          message: `${action}: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      },
+      [windowClient],
+    ),
+  });
   const nativeSync = useSyncExternalStore(
     nativePanelPresentation.subscribe,
     nativePanelPresentation.getSnapshot,

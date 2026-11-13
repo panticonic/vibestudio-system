@@ -16,7 +16,18 @@ function everyItem(items: readonly MenuItem[]): MenuItem[] {
   ]);
 }
 
-const context = () => ({
+function workspacePanels(focusedPanelId: string | null = "focused") {
+  return {
+    getFocusedPanelId: vi.fn(async () => focusedPanelId),
+    close: vi.fn(async (_panelId: string) => undefined),
+    reopenLastClosed: vi.fn(async () => null),
+  };
+}
+
+const context = (
+  panels: ReturnType<typeof workspacePanels> | null = workspacePanels(),
+) => ({
+  focusedPanels: vi.fn(() => panels as never),
   panelHost: vi.fn(async () => undefined),
   clearBuildCache: vi.fn(async () => undefined),
   failed: vi.fn(),
@@ -53,6 +64,62 @@ describe("client menu", () => {
     );
   });
 
+  it("offers reopening a closed panel beside closing one", () => {
+    for (const platform of ["mac", "other"] as const) {
+      const model = buildClientMenu(platform);
+      const panelMenu = model.popup.find((item) => item.label === "Panel");
+      const ids = actionIds(panelMenu?.submenu ?? []);
+      expect(ids.indexOf("reopen-closed-panel"), platform).toBe(
+        ids.indexOf("close-panel") + 1,
+      );
+    }
+    const file = buildClientMenu("mac").menus.find((menu) => menu.label === "File");
+    const fileIds = actionIds(file?.items ?? []);
+    expect(fileIds.indexOf("reopen-closed-panel")).toBe(
+      fileIds.indexOf("close-panel") + 1,
+    );
+  });
+
+  it("closes the focused panel through the client so it can be undone", async () => {
+    const panels = workspacePanels("mail");
+    const ctx = context(panels);
+    runMenuAction("close-panel", ctx);
+    await vi.waitFor(() => expect(panels.close).toHaveBeenCalledWith("mail"));
+    expect(ctx.panelHost).not.toHaveBeenCalled();
+    expect(ctx.failed).not.toHaveBeenCalled();
+  });
+
+  it("closes the window through the host when there is no panel to close", async () => {
+    const empty = workspacePanels(null);
+    const ctx = context(empty);
+    runMenuAction("close-panel", ctx);
+    await vi.waitFor(() =>
+      expect(ctx.panelHost).toHaveBeenCalledWith("close-focused-panel"),
+    );
+    expect(empty.close).not.toHaveBeenCalled();
+    const unfocused = context(null);
+    runMenuAction("close-panel", unfocused);
+    await vi.waitFor(() =>
+      expect(unfocused.panelHost).toHaveBeenCalledWith("close-focused-panel"),
+    );
+  });
+
+  it("reopens the focused workspace's last close and reports a failure", async () => {
+    const panels = workspacePanels();
+    runMenuAction("reopen-closed-panel", context(panels));
+    expect(panels.reopenLastClosed).toHaveBeenCalledOnce();
+    const failing = workspacePanels();
+    failing.reopenLastClosed.mockRejectedValueOnce(new Error("gone"));
+    const ctx = context(failing);
+    runMenuAction("reopen-closed-panel", ctx);
+    await vi.waitFor(() =>
+      expect(ctx.failed).toHaveBeenCalledWith(
+        "reopen-closed-panel",
+        expect.any(Error),
+      ),
+    );
+  });
+
   it("reserves chords only for entries that have one, and keeps closing a panel unreserved", () => {
     const model = buildClientMenu("other");
     const items = [
@@ -65,6 +132,9 @@ describe("client menu", () => {
     expect(
       items.find((item) => item.id === "close-panel")?.chromeOwned,
     ).toBeUndefined();
+    expect(
+      items.find((item) => item.id === "reopen-closed-panel")?.chromeOwned,
+    ).toBe(true);
   });
 
   it("disables panel entries and ignores their dispatch while protected Settings are open", () => {

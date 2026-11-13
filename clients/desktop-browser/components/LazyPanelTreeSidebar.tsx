@@ -54,7 +54,6 @@ import { PanelIcon } from "./PanelIcon";
 import { PanelTreeRailItem } from "./PanelTreeRailItem";
 import { buildSidebarRows, type SidebarRow } from "./panelTreeRows";
 import { flattenTree } from "../shell/hooks/PanelTreeContext";
-import { confirmClosePanel } from "./ConfirmDialog";
 import { buildGuides } from "./panelTreeGuides.js";
 import { panelTreeKeyboardTarget, type TreeMoveKey } from "./panelTreeKeyboard.js";
 
@@ -292,7 +291,7 @@ interface SortableTreeItemProps {
   onSelect: (panelId: string, options?: { openBeside?: boolean }) => void;
   onToggleCollapse: (panelId: string) => void;
   onPanelContextMenu?: (panelId: string, position: { x: number; y: number }) => Promise<void>;
-  onArchive?: (panelId: string) => void;
+  onClose?: (panelId: string) => void;
   onAddChild?: (panelId: string) => void;
   onIndent: (panelId: string) => void;
   onUnindent: (panelId: string) => void;
@@ -316,7 +315,7 @@ const SortableTreeItem = memo(
     onSelect,
     onToggleCollapse,
     onPanelContextMenu,
-    onArchive,
+    onClose,
     onAddChild,
     onIndent,
     onUnindent,
@@ -428,17 +427,12 @@ const SortableTreeItem = memo(
       ]
     );
 
-    const handleArchive = useCallback(
+    const handleClose = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
-        void (async () => {
-          if (panel.childCount > 0 && !(await confirmClosePanel(panel.title, panel.childCount))) {
-            return;
-          }
-          onArchive?.(panel.id);
-        })();
+        onClose?.(panel.id);
       },
-      [panel.childCount, panel.id, panel.title, onArchive]
+      [panel.id, onClose]
     );
 
     const handleAuxClick = useCallback(
@@ -446,9 +440,9 @@ const SortableTreeItem = memo(
         if (!isPanelClosePointerButton(e.button)) return;
         e.preventDefault();
         e.stopPropagation();
-        handleArchive(e);
+        handleClose(e);
       },
-      [handleArchive]
+      [handleClose]
     );
 
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -647,7 +641,7 @@ const SortableTreeItem = memo(
               variant="ghost"
               color="gray"
               aria-label="Close panel"
-              onClick={handleArchive}
+              onClick={handleClose}
               className="app-tree-action app-tree-action-danger"
               style={{
                 width: ACTION_BUTTON_SIZE,
@@ -696,7 +690,7 @@ const SortableTreeItem = memo(
       prev.onMoveFocus === next.onMoveFocus &&
       prev.onToggleCollapse === next.onToggleCollapse &&
       prev.onPanelContextMenu === next.onPanelContextMenu &&
-      prev.onArchive === next.onArchive &&
+      prev.onClose === next.onClose &&
       prev.onAddChild === next.onAddChild &&
       prev.onIndent === next.onIndent &&
       prev.onUnindent === next.onUnindent
@@ -772,7 +766,7 @@ interface LazyPanelTreeSidebarProps {
   ancestorIds: string[];
   onSelect: (panelId: string, options?: { openBeside?: boolean }) => void;
   onPanelContextMenu?: (panelId: string, position: { x: number; y: number }) => Promise<void>;
-  onArchive?: (panelId: string) => void;
+  onClose?: (panelId: string) => void;
 }
 
 export function LazyPanelTreeSidebar({
@@ -784,7 +778,7 @@ export function LazyPanelTreeSidebar({
   ancestorIds,
   onSelect,
   onPanelContextMenu,
-  onArchive,
+  onClose,
 }: LazyPanelTreeSidebarProps) {
   const { notification, panel } = useShellWorkspaceClient();
 
@@ -1265,7 +1259,7 @@ export function LazyPanelTreeSidebar({
                     onSelect={onSelect}
                     onMoveFocus={moveFocus}
                     onPanelContextMenu={onPanelContextMenu}
-                    onArchive={onArchive}
+                    onClose={onClose}
                   />
                 ) : (
                   <SortableTreeItem
@@ -1288,7 +1282,7 @@ export function LazyPanelTreeSidebar({
                     onSelect={onSelect}
                     onToggleCollapse={toggleCollapse}
                     onPanelContextMenu={onPanelContextMenu}
-                    onArchive={onArchive}
+                    onClose={onClose}
                     onAddChild={handleAddChild}
                     onIndent={indentPanel}
                     onUnindent={unindentPanel}

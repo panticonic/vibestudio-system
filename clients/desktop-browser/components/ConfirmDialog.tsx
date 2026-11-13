@@ -40,15 +40,6 @@ export function confirmAction(request: ConfirmRequest): Promise<boolean> {
   });
 }
 
-/** The shared wording for closing (archiving) a panel that has sub-panels. */
-export function confirmClosePanel(title: string, subPanelCount: number): Promise<boolean> {
-  return confirmAction({
-    title: `Close “${title}” and its ${subPanelCount} sub-panel${subPanelCount === 1 ? "" : "s"}?`,
-    confirmLabel: "Close panel",
-    destructive: true,
-  });
-}
-
 export function ConfirmDialogHost() {
   const current = useSyncExternalStore(subscribe, () => pending[0] ?? null);
   useShellOverlay(current !== null);

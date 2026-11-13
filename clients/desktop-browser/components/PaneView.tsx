@@ -30,7 +30,10 @@ interface PaneViewProps {
   unresponsive: boolean;
   onDismissUnresponsive: (panelId: string) => void;
   onFocusPane: (paneId: string) => void;
-  onClosePane?: (paneId: string) => void;
+  /** Whether the grip places this pane: only when there is somewhere else. */
+  movable: boolean;
+  /** Close the panel this pane shows, as a browser closes a tab. */
+  onClosePanel: (panelId: string) => void;
   /** Arrow-key placement while the grip has keyboard focus. */
   onMovePane: (
     paneId: string,
@@ -50,11 +53,11 @@ export function PaneView({
   unresponsive,
   onDismissUnresponsive,
   onFocusPane,
-  onClosePane,
+  movable,
+  onClosePanel,
   onMovePane,
 }: PaneViewProps) {
   const { beginPaneDrag } = useLayoutDrag();
-  const movable = Boolean(onClosePane);
 
   return (
     <Flex
@@ -140,37 +143,35 @@ export function PaneView({
           >
             {titleBar}
           </Box>
-          {onClosePane && (
-            <Tooltip content="Close pane — panel stays in the tree">
-              <IconButton
-                size="1"
-                variant="soft"
-                color="gray"
-                radius="small"
-                aria-label="Close pane"
-                data-pane-close={pane.id}
-                tabIndex={0}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onClosePane(pane.id);
-                }}
-                style={
-                  {
-                    appRegion: "no-drag",
-                    WebkitAppRegion: "no-drag",
-                    width: PANE_TITLEBAR_HEIGHT - 5,
-                    height: PANE_TITLEBAR_HEIGHT - 5,
-                    flexShrink: 0,
-                    margin: "0 2px",
-                    padding: 0,
-                  } as CSSProperties
-                }
-              >
-                <Cross2Icon width={12} height={12} />
-              </IconButton>
+          <Tooltip content="Close panel">
+            <IconButton
+              size="1"
+              variant="soft"
+              color="gray"
+              radius="small"
+              aria-label="Close panel"
+              data-pane-close={pane.id}
+              tabIndex={0}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClosePanel(pane.panelId);
+              }}
+              style={
+                {
+                  appRegion: "no-drag",
+                  WebkitAppRegion: "no-drag",
+                  width: PANE_TITLEBAR_HEIGHT - 5,
+                  height: PANE_TITLEBAR_HEIGHT - 5,
+                  flexShrink: 0,
+                  margin: "0 2px",
+                  padding: 0,
+                } as CSSProperties
+              }
+            >
+              <Cross2Icon width={12} height={12} />
+            </IconButton>
             </Tooltip>
-          )}
           {reserveWindowControls && (
             <Box style={{ width: WINDOW_CONTROL_RESERVE_PX, flexShrink: 0 }} />
           )}

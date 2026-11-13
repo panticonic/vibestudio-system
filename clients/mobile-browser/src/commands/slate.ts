@@ -130,7 +130,7 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
   },
   "panel.close": (_args, deps) => {
     if (deps.activePanelId)
-      deps.performPanelCommand("archive", deps.activePanelId);
+      deps.performPanelCommand("close", deps.activePanelId);
     return { close: true };
   },
   "panel.focus": ({ panel: panelId }, deps) => {

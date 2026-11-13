@@ -20,7 +20,7 @@ describe("mobile contributed panel commands", () => {
   });
 
   it("does not confuse durable panel actions with contributed commands", () => {
-    expect(contributedHostCommandId("archive")).toBeNull();
+    expect(contributedHostCommandId("close")).toBeNull();
     expect(contributedHostCommandId("contributed-panel-command:%E0%A4%A")).toBeNull();
   });
 });

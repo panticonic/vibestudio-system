@@ -51,7 +51,7 @@ interface EnvOverrides {
   viewportWidth?: number;
   viewportHeight?: number;
   paneChromeHeight?: number;
-  firstRootPanelId?: string | null;
+  rootPanelIds?: string[];
   minWidths?: Record<string, number>;
 }
 
@@ -60,8 +60,7 @@ function makeEnv(overrides: EnvOverrides = {}): LayoutEnv {
     viewportWidth: overrides.viewportWidth ?? 2000,
     viewportHeight: overrides.viewportHeight ?? 1000,
     paneChromeHeight: overrides.paneChromeHeight ?? 28,
-    firstRootPanelId: () =>
-      overrides.firstRootPanelId === undefined ? "root" : overrides.firstRootPanelId,
+    rootPanelIds: () => overrides.rootPanelIds ?? ["root"],
     minWidthOf: (panelId) => overrides.minWidths?.[panelId] ?? MIN_COLUMN_WIDTH,
   };
 }
@@ -622,13 +621,18 @@ describe("open-beside / split-below explicit (rule 3)", () => {
   });
 });
 
-describe("close-pane (rule 4)", () => {
+/** A panel leaving the tree with nothing to fall back to: its pane goes (rule 4). */
+function removeWithoutFallback(panelId: string): LayoutAction {
+  return { type: "tree-reconcile", removed: [{ panelId, fallbackCandidates: [] }] };
+}
+
+describe("closing a pane (rule 4)", () => {
   it("removes the pane and redistributes heightFr proportionally", () => {
     const layout = layoutOf(["A", "B", "C"]);
     paneAt(layout, 0, 0).heightFr = 1;
     paneAt(layout, 0, 1).heightFr = 2;
     paneAt(layout, 0, 2).heightFr = 1;
-    const next = applyLayoutAction(layout, { type: "close-pane", paneId: "pane-0-1" }, makeEnv());
+    const next = applyLayoutAction(layout, removeWithoutFallback("B"), makeEnv());
     expect(colAt(next, 0).panes.map((p) => p.panelId)).toEqual(["A", "C"]);
     const a = paneAt(next, 0, 0);
     const c = paneAt(next, 0, 1);
@@ -640,7 +644,7 @@ describe("close-pane (rule 4)", () => {
   it("removes an emptied column and redistributes widthFr", () => {
     const layout = layoutOf(["A"], ["B"], ["C"]);
     layout.columns.forEach((c, i) => (c.widthFr = i + 1));
-    const next = applyLayoutAction(layout, { type: "close-pane", paneId: "pane-1-0" }, makeEnv());
+    const next = applyLayoutAction(layout, removeWithoutFallback("B"), makeEnv());
     expect(next.columns.map((c) => c.panes[0]?.panelId)).toEqual(["A", "C"]);
     expect(colAt(next, 0).widthFr / colAt(next, 1).widthFr).toBeCloseTo(1 / 3);
     assertInvariants(next);
@@ -649,14 +653,14 @@ describe("close-pane (rule 4)", () => {
   it("moves focus to the nearest surviving pane in the same column first", () => {
     const layout = layoutOf(["A", "B"], ["C"]);
     layout.focusedPaneId = "pane-0-1";
-    const next = applyLayoutAction(layout, { type: "close-pane", paneId: "pane-0-1" }, makeEnv());
+    const next = applyLayoutAction(layout, removeWithoutFallback("B"), makeEnv());
     expect(next.focusedPaneId).toBe("pane-0-0");
   });
 
   it("moves focus to the left neighbor column when the column emptied", () => {
     const layout = layoutOf(["A"], ["B"]);
     layout.focusedPaneId = "pane-1-0";
-    const next = applyLayoutAction(layout, { type: "close-pane", paneId: "pane-1-0" }, makeEnv());
+    const next = applyLayoutAction(layout, removeWithoutFallback("B"), makeEnv());
     expect(next.focusedPaneId).toBe("pane-0-0");
     assertInvariants(next);
   });
@@ -664,18 +668,30 @@ describe("close-pane (rule 4)", () => {
   it("keeps focus untouched when a non-focused pane closes", () => {
     const layout = layoutOf(["A"], ["B"]);
     layout.focusedPaneId = "pane-0-0";
-    const next = applyLayoutAction(layout, { type: "close-pane", paneId: "pane-1-0" }, makeEnv());
+    const next = applyLayoutAction(layout, removeWithoutFallback("B"), makeEnv());
     expect(next.focusedPaneId).toBe("pane-0-0");
   });
 
-  it("reseeds from firstRootPanelId after closing the last pane", () => {
+  it("reseeds from the first root after closing the last pane", () => {
     const layout = layoutOf(["A"]);
     const next = applyLayoutAction(
       layout,
-      { type: "close-pane", paneId: "pane-0-0" },
-      makeEnv({ firstRootPanelId: "root" })
+      removeWithoutFallback("A"),
+      makeEnv({ rootPanelIds: ["root", "other-root"] })
     );
     expect(visiblePanelIds(next)).toEqual(["root"]);
+    assertInvariants(next);
+  });
+
+  it("never reseeds from a root that left in the same update", () => {
+    // The root list has not caught up with the close yet.
+    const layout = layoutOf(["root"]);
+    const next = applyLayoutAction(
+      layout,
+      removeWithoutFallback("root"),
+      makeEnv({ rootPanelIds: ["root", "other-root"] })
+    );
+    expect(visiblePanelIds(next)).toEqual(["other-root"]);
     assertInvariants(next);
   });
 
@@ -683,17 +699,11 @@ describe("close-pane (rule 4)", () => {
     const layout = layoutOf(["A"]);
     const next = applyLayoutAction(
       layout,
-      { type: "close-pane", paneId: "pane-0-0" },
-      makeEnv({ firstRootPanelId: null })
+      removeWithoutFallback("A"),
+      makeEnv({ rootPanelIds: [] })
     );
     expect(next).toEqual({ columns: [], focusedPaneId: null });
     assertInvariants(next);
-  });
-
-  it("ignores an unknown paneId", () => {
-    const layout = layoutOf(["A"]);
-    const next = applyLayoutAction(layout, { type: "close-pane", paneId: "nope" }, makeEnv());
-    expect(visiblePanelIds(next)).toEqual(["A"]);
   });
 });
 
@@ -752,7 +762,7 @@ describe("tree-reconcile (rules 5 and 8)", () => {
           { panelId: "C", fallbackCandidates: ["B", "A"] },
         ],
       },
-      makeEnv({ firstRootPanelId: "root" })
+      makeEnv({ rootPanelIds: ["root"] })
     );
     expect(visiblePanelIds(next)).toEqual(["root"]);
     assertInvariants(next);
@@ -763,7 +773,7 @@ describe("tree-reconcile (rules 5 and 8)", () => {
     const next = applyLayoutAction(
       layout,
       { type: "tree-reconcile", removed: [{ panelId: "A", fallbackCandidates: [] }] },
-      makeEnv({ firstRootPanelId: null })
+      makeEnv({ rootPanelIds: [] })
     );
     expect(next).toEqual({ columns: [], focusedPaneId: null });
   });
@@ -912,7 +922,7 @@ describe("computeViewport (§3.1 / D10)", () => {
     let layout = layoutOf(["root"], ["A"], ["B"], ["C"], ["D"]);
     layout.focusedPaneId = "pane-3-0";
     layout = reconcileViewport(layout, env);
-    layout = applyLayoutAction(layout, { type: "close-pane", paneId: "pane-2-0" }, env);
+    layout = applyLayoutAction(layout, removeWithoutFallback("B"), env);
     expect(computeViewport(layout, env).residentColumnIds).toEqual(["col-3", "col-4"]);
     expect(layout.focusedPaneId).toBe("pane-3-0");
   });
@@ -1150,7 +1160,15 @@ describe("property: random action sequences preserve invariants", () => {
       case 3:
         return { type: "split-below", panelId, anchorPaneId: anyPaneId };
       case 4:
-        return { type: "close-pane", paneId: anyPaneId };
+        return {
+          type: "tree-reconcile",
+          removed: [
+            {
+              panelId: panes.length > 0 ? pick(panes).panelId : panelId,
+              fallbackCandidates: [],
+            },
+          ],
+        };
       case 5: {
         const removedCount = 1 + Math.floor(rand() * 3);
         return {
@@ -1197,7 +1215,7 @@ describe("property: random action sequences preserve invariants", () => {
       const env = makeEnv({
         viewportWidth: 600 + Math.floor(rand() * 2000),
         viewportHeight: 300 + Math.floor(rand() * 1200),
-        firstRootPanelId: rand() < 0.2 ? null : "root",
+        rootPanelIds: rand() < 0.2 ? [] : ["root"],
         minWidths: Object.fromEntries(
           PANELS.map((panelId) => [panelId, 400 + Math.floor(rand() * 600)])
         ),

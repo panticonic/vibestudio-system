@@ -19,6 +19,8 @@ vi.mock("./client.js", () => ({
 }));
 
 import { useShellEvent } from "./useShellEvent";
+import { localShellEvents } from "./localShellEvents";
+import { WorkspaceVisibilityContext } from "./workspaceContext";
 
 function Probe({ onUpdate }: { onUpdate: (payload: unknown) => void }) {
   useShellEvent("panel-tree-invalidated", onUpdate as never);
@@ -174,3 +176,27 @@ it.each(["transport", "access", "internal"] as const)(
     }
   },
 );
+
+it("delivers events this client raises only to the visible workspace", async () => {
+  subscribe.mockReset().mockResolvedValue(undefined);
+  unsubscribe.mockReset().mockResolvedValue(undefined);
+  onEvent.mockReset().mockImplementation(() => () => undefined);
+  const visible = vi.fn();
+  const background = vi.fn();
+  const mounted = render(
+    <>
+      <WorkspaceVisibilityContext.Provider value={true}>
+        <Probe onUpdate={visible} />
+      </WorkspaceVisibilityContext.Provider>
+      <WorkspaceVisibilityContext.Provider value={false}>
+        <Probe onUpdate={background} />
+      </WorkspaceVisibilityContext.Provider>
+    </>,
+  );
+  const payload = { removedSlotIds: [] };
+  localShellEvents.emit("panel-tree-invalidated", payload as never);
+  expect(visible).toHaveBeenCalledExactlyOnceWith(payload);
+  expect(background).not.toHaveBeenCalled();
+  mounted.unmount();
+  await waitFor(() => expect(unsubscribe).toHaveBeenCalled());
+});

@@ -89,8 +89,12 @@ function desktopRuns(client: ShellWorkspaceClient): Record<string, SlateRun> {
     },
     "panel.close": async () => {
       const id = await panel.getFocusedPanelId();
-      if (id) await panel.archive(id);
+      if (id) await panel.close(id);
       return { close: true };
+    },
+    "panel.reopen": async () => {
+      const reopened = await panel.reopenLastClosed();
+      return reopened ? { close: true } : { message: "No closed panel to reopen" };
     },
     "panel.focus": ({ panel: panelId }, deps) => {
       if (panelId) deps.navigateToId(panelId);

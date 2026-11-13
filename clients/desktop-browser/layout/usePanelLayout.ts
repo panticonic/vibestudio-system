@@ -88,7 +88,7 @@ export function usePanelLayout(
       viewportWidth,
       viewportHeight,
       paneChromeHeight: PANE_VERTICAL_CHROME_HEIGHT,
-      firstRootPanelId: () => rootPanelsRef.current[0]?.id ?? null,
+      rootPanelIds: () => rootPanelsRef.current.map((panel) => panel.id),
       minWidthOf: (panelId) => minWidthOfPanel(latestMapsRef.current, panelId),
     }),
     [viewportWidth, viewportHeight]

@@ -8,7 +8,7 @@ import { usePanelTrust } from "./usePanelTrust";
  * - Expand/collapse chevron for panels with children
  * - Active panel highlight (soft accent fill + accent text, not a solid slab)
  * - Pin indicator
- * - Swipe-to-archive gesture (swipe left reveals "Archive" action)
+ * - Swipe-to-close gesture (swipe left reveals "Close" action)
  */
 
 import { useCallback } from "react";
@@ -169,7 +169,7 @@ export function PanelTreeItem({
         ]}
       >
         <Archive size={16} color="#ffffff" />
-        <Text style={styles.archiveText}>Archive</Text>
+        <Text style={styles.archiveText}>Close</Text>
       </Animated.View>
 
       <GestureDetector gesture={panGesture}>

@@ -17,7 +17,7 @@ function owner() {
   const panel = {
     getFocusedPanelId: vi.fn(async () => "same-panel-id"),
     createAboutPanel: vi.fn(async () => {}),
-    archive: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
   };
   const quickfire = { clear: vi.fn(async () => ({ cleared: true })) };
   const hostCommands = { run: vi.fn(async () => {}) };
@@ -66,10 +66,10 @@ describe("workspace-owned command slate", () => {
     await shared.run("panel.close");
     resolve("personal-panel");
     await pending;
-    expect(personal.panel.archive).toHaveBeenCalledExactlyOnceWith(
+    expect(personal.panel.close).toHaveBeenCalledExactlyOnceWith(
       "personal-panel",
     );
-    expect(shared.panel.archive).toHaveBeenCalledExactlyOnceWith(
+    expect(shared.panel.close).toHaveBeenCalledExactlyOnceWith(
       "same-panel-id",
     );
   });

@@ -34,7 +34,8 @@ describe("PaneView placement controls", () => {
         unresponsive={false}
         onDismissUnresponsive={vi.fn()}
         onFocusPane={focus}
-        onClosePane={vi.fn()}
+        movable
+        onClosePanel={vi.fn()}
         onMovePane={vi.fn()}
       />,
       { wrapper },
@@ -44,7 +45,7 @@ describe("PaneView placement controls", () => {
     fireEvent.click(button);
     expect(focus).toHaveBeenCalledWith("pane-a");
     expect(drag.beginPaneDrag).not.toHaveBeenCalled();
-    expect(getByRole("button", { name: "Close pane" }).tabIndex).toBe(0);
+    expect(getByRole("button", { name: "Close panel" }).tabIndex).toBe(0);
   });
 
   it("moves through the grip without a post-drag click focusing its former occupant", () => {
@@ -61,7 +62,8 @@ describe("PaneView placement controls", () => {
         unresponsive={false}
         onDismissUnresponsive={vi.fn()}
         onFocusPane={focus}
-        onClosePane={vi.fn()}
+        movable
+        onClosePanel={vi.fn()}
         onMovePane={move}
       />,
       { wrapper },
@@ -79,7 +81,7 @@ describe("PaneView placement controls", () => {
     fireEvent.keyDown(grip, { key: "ArrowRight" });
     expect(move).toHaveBeenCalledWith("pane-a", "right");
   });
-  it("closes its own pane without hovering or starting a drag", () => {
+  it("closes its panel, even as the only pane, without hovering or starting a drag", () => {
     const close = vi.fn();
     const { getByRole, container } = render(
       <PaneView
@@ -92,13 +94,17 @@ describe("PaneView placement controls", () => {
         unresponsive={false}
         onDismissUnresponsive={vi.fn()}
         onFocusPane={vi.fn()}
-        onClosePane={close}
+        movable={false}
+        onClosePanel={close}
         onMovePane={vi.fn()}
       />,
       { wrapper },
     );
-    fireEvent.click(getByRole("button", { name: "Close pane" }));
-    expect(close).toHaveBeenCalledWith("pane-b");
+    fireEvent.click(getByRole("button", { name: "Close panel" }));
+    expect(close).toHaveBeenCalledWith("b");
+    expect(drag.beginPaneDrag).not.toHaveBeenCalled();
+    // The only pane has nowhere to move to: its grip does not start a drag.
+    fireEvent.pointerDown(getByRole("button", { name: "Move Notes" }));
     expect(drag.beginPaneDrag).not.toHaveBeenCalled();
     expect(container.querySelector("[data-pane-rail]")).toBeNull();
   });

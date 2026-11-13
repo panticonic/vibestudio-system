@@ -1,6 +1,6 @@
 import { userFacingError } from "@workspace/client-kit-web/userFacingError";
 import { usePanelTrust } from "./usePanelTrust";
-import { confirmAction, confirmClosePanel } from "./ConfirmDialog";
+import { confirmAction } from "./ConfirmDialog";
 import {
   useShellWorkspaceClient,
   useWorkspaceVisible,
@@ -1031,7 +1031,6 @@ const groupStyle = {
 interface HoverableBreadcrumbItemProps {
   panelId: string;
   title: string;
-  childCount: number;
   icon?: string;
   iconVersion?: string;
   iconState?: string;
@@ -1042,17 +1041,11 @@ interface HoverableBreadcrumbItemProps {
   onNavigate: () => void;
   onContextMenu: (e: MouseEvent<HTMLSpanElement>) => void;
   onEditAddress?: () => void;
-  /**
-   * When set, this item is the one showing in the focused pane and another pane
-   * would survive closing it, so its X closes the pane instead of archiving the
-   * panel. Archiving stays on middle-click and the context menu.
-   */
 }
 
 function HoverableBreadcrumbItem({
   panelId,
   title,
-  childCount,
   icon,
   iconVersion,
   iconState,
@@ -1081,12 +1074,8 @@ function HoverableBreadcrumbItem({
     }
   };
 
-  const archivePanel = () => {
-    void (async () => {
-      if (childCount > 0 && !(await confirmClosePanel(title, childCount)))
-        return;
-      await panel.archive(panelId);
-    })().catch((error) => {
+  const closePanel = () => {
+    panel.close(panelId).catch((error: unknown) => {
       console.error("Failed to close panel from title bar", error);
       void notification.show({
         type: "error",
@@ -1100,14 +1089,14 @@ function HoverableBreadcrumbItem({
   const handleClose = (e: MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    archivePanel();
+    closePanel();
   };
 
   const handleAuxClick = (e: MouseEvent<HTMLSpanElement>) => {
     if (!isPanelClosePointerButton(e.button)) return;
     e.preventDefault();
     e.stopPropagation();
-    archivePanel();
+    closePanel();
   };
 
   const handleMouseDown = (e: MouseEvent<HTMLSpanElement>) => {
@@ -1178,7 +1167,7 @@ function HoverableBreadcrumbItem({
         >
           {title}
         </Text>
-        {/* Archiving remains a secondary action on the panel itself. */}
+        {/* Closing remains a secondary action on the panel itself. */}
         {!isCurrent && (isHovered || isTouch) && (
           <IconButton
             size="1"
@@ -1186,9 +1175,9 @@ function HoverableBreadcrumbItem({
             color="gray"
             radius="small"
             aria-label="Close panel"
-            title="Archive panel"
+            title="Close panel"
             onClick={handleClose}
-            className="breadcrumb-archive-btn"
+            className="breadcrumb-close-btn"
             style={
               {
                 appRegion: "no-drag",
@@ -1452,7 +1441,6 @@ function BreadcrumbBar({
       key={panel.id}
       panelId={panel.id}
       title={panel.title}
-      childCount={panel.childCount}
       icon={panel.icon}
       iconVersion={panel.iconVersion}
       iconState={panel.iconState}
@@ -1471,7 +1459,6 @@ function BreadcrumbBar({
       key={ancestor.id}
       panelId={ancestor.id}
       title={ancestor.title}
-      childCount={ancestor.childCount}
       icon={ancestor.icon}
       iconVersion={ancestor.iconVersion}
       iconState={ancestor.iconState}
@@ -1669,7 +1656,6 @@ function BreadcrumbBar({
           <HoverableBreadcrumbItem
             panelId={navigationData.current.id}
             title={navigationData.current.title}
-            childCount={navigationData.current.childCount}
             icon={navigationData.current.icon}
             iconVersion={navigationData.current.iconVersion}
             iconState={navigationData.current.iconState}

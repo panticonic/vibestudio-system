@@ -4,6 +4,7 @@ import {
   keyPlatformOfBrowser,
   runMenuAction,
   type MenuModel,
+  type MenuWorkspacePanels,
 } from "./clientMenu";
 
 interface MenuBridge {
@@ -23,10 +24,17 @@ type ClientBridge = { menu?: MenuBridge; panelHost?: PanelHostBridge };
  */
 export function useClientMenu(deps: {
   panelCommandsEnabled?: boolean;
+  /** The focused workspace's panels; null while no workspace is focused. */
+  focusedPanels(): MenuWorkspacePanels | null;
   clearBuildCache(): Promise<void>;
   failed(action: string, error: unknown): void;
 }): void {
-  const { clearBuildCache, failed, panelCommandsEnabled = true } = deps;
+  const {
+    clearBuildCache,
+    failed,
+    focusedPanels,
+    panelCommandsEnabled = true,
+  } = deps;
   const platform = keyPlatformOfBrowser(globalThis.navigator?.userAgent ?? "");
   const model = useMemo(
     () => buildClientMenu(platform, { panelCommandsEnabled }),
@@ -48,6 +56,7 @@ export function useClientMenu(deps: {
     return menu.onAction((actionId) =>
       runMenuAction(actionId, {
         menu: currentModel.current,
+        focusedPanels,
         panelHost: (action) => {
           if (!bridge.panelHost)
             return Promise.reject(new Error("This host has no panel host"));
@@ -57,5 +66,5 @@ export function useClientMenu(deps: {
         failed,
       }),
     );
-  }, [clearBuildCache, failed, model]);
+  }, [clearBuildCache, failed, focusedPanels, model]);
 }

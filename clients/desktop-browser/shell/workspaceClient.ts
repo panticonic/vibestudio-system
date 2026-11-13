@@ -106,6 +106,7 @@ import {
   HOST_COMMAND_RUN_EVENT,
 } from "@vibestudio/shared/hostCommands";
 import { createBrowserSiteActions } from "./browserSiteActions";
+import { createPanelClosing } from "./panelClosing";
 // Type for the shell transport bridge injected by the preload script
 type ShellTransportBridge = {
   send: (envelope: RpcEnvelope) => Promise<void>;
@@ -527,6 +528,13 @@ export function createShellWorkspaceClient(
   // =============================================================================
   // Panel Service
   // =============================================================================
+  const panelClosing = createPanelClosing({
+    panelTree: productPanelRuntime.panelTree,
+    notification: {
+      show: (opts) => notificationClient.show(opts),
+      dismiss: (id) => notificationClient.dismiss(id),
+    },
+  });
   const panel = {
     getRootGroups: (
       input: Parameters<typeof workspacePresentation.rootGroups>[0],
@@ -624,8 +632,16 @@ export function createShellWorkspaceClient(
       productPanelRuntime.panelTree.navigateHistory(panelId, delta),
     unload: (panelId: string) =>
       productPanelRuntime.panelTree.get(panelId).unload(),
-    archive: (panelId: string) =>
-      productPanelRuntime.panelTree.get(panelId).archive(),
+    /** Close a panel and its descendants, offering to undo it. */
+    close: panelClosing.close,
+    /** Closes that can be reopened now, most recent first. */
+    closed: panelClosing.closed,
+    /** Reopen the close rooted at `slotId` and present it. */
+    reopen: panelClosing.reopen,
+    /** Reopen the most recent close; resolves null when there is none. */
+    reopenLastClosed: panelClosing.reopenLastClosed,
+    /** Route `notification:action` here so the undo notice's Undo works. */
+    handleNotificationAction: panelClosing.handleNotificationAction,
     createAboutPanel: async (page: string) => {
       const createOptions =
         page === "new"

@@ -112,7 +112,7 @@ describe("CommandSheet", () => {
     await waitFor(() => getByTestId("command-row-command:panel.close"));
     fireEvent.press(getByTestId("command-row-command:panel.close"));
     expect(deps.performPanelCommand).toHaveBeenCalledWith(
-      "archive",
+      "close",
       "panel:tree/root/0",
     );
   });

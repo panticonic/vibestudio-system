@@ -4,7 +4,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PanelTreeRailItem } from "./PanelTreeRailItem";
@@ -15,14 +14,13 @@ vi.mock("./PanelIcon", () => ({
     <span data-icon-source={source} />
   ),
 }));
-vi.mock("./ConfirmDialog", () => ({ confirmClosePanel: async () => true }));
 afterEach(cleanup);
 
 it("navigates from a labelled favicon, supports open-beside, keyboard focus and the existing context actions", async () => {
   const onSelect = vi.fn(),
     onMoveFocus = vi.fn(),
     onPanelContextMenu = vi.fn(async () => {}),
-    onArchive = vi.fn();
+    onClose = vi.fn();
   const item: FlattenedPanel = {
     id: "mail",
     parentId: "window",
@@ -46,7 +44,7 @@ it("navigates from a labelled favicon, supports open-beside, keyboard focus and 
       onSelect={onSelect}
       onMoveFocus={onMoveFocus}
       onPanelContextMenu={onPanelContextMenu}
-      onArchive={onArchive}
+      onClose={onClose}
     />,
   );
   const row = screen.getByRole("treeitem", { name: "Inbox" });
@@ -64,5 +62,5 @@ it("navigates from a labelled favicon, supports open-beside, keyboard focus and 
   fireEvent.contextMenu(row, { clientX: 12, clientY: 44 });
   expect(onPanelContextMenu).toHaveBeenCalledWith("mail", { x: 12, y: 44 });
   fireEvent(row, new MouseEvent("auxclick", { button: 1, bubbles: true }));
-  await waitFor(() => expect(onArchive).toHaveBeenCalledWith("mail"));
+  expect(onClose).toHaveBeenCalledWith("mail");
 });

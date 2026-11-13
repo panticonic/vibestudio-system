@@ -56,7 +56,6 @@ import type { NavigateToPanelId } from "./NavigationContext";
 import { LazyPanelTreeSidebar } from "./LazyPanelTreeSidebar";
 import { useShellEvent } from "../shell/useShellEvent";
 import { SavePasswordBar } from "./SavePasswordBar";
-import { confirmClosePanel } from "./ConfirmDialog";
 import { assertPresent } from "../utils/assertPresent";
 import { ColumnRow } from "./ColumnRow";
 import { PanelColumnNavigation } from "./PanelColumnNavigation";
@@ -512,12 +511,6 @@ export const PanelStack = memo(function PanelStack({
         case "add-child-below":
           await createChildForPanel(panelId, "split-below");
           break;
-        case "close-pane": {
-          const location = paneForPanel(layout, panelId);
-          if (location)
-            dispatch({ type: "close-pane", paneId: location.pane.id });
-          break;
-        }
         case "open-in-new-column": {
           dispatch(openInNewColumnAction(layout, panelId));
           break;
@@ -560,9 +553,8 @@ export const PanelStack = memo(function PanelStack({
           // Unload panel resources but keep in tree (can be re-loaded later)
           await panelService.unload(panelId);
           break;
-        case "archive":
-          // Close panel (remove from tree)
-          await panelService.archive(panelId);
+        case "close":
+          await panelService.close(panelId);
           break;
       }
     },
@@ -609,10 +601,10 @@ export const PanelStack = memo(function PanelStack({
     [contentSize.height, handlePanelAction, layout],
   );
 
-  // Handle direct close button clicks (X button in tree sidebar)
-  const handleArchive = useCallback(async (panelId: string) => {
+  // Direct close buttons: the tree row's × and the pane title bar's ×.
+  const handleClose = useCallback(async (panelId: string) => {
     try {
-      await panelService.archive(panelId);
+      await panelService.close(panelId);
     } catch (error) {
       reportPanelCommandError(notification, "Close panel", error);
     }
@@ -746,21 +738,9 @@ export const PanelStack = memo(function PanelStack({
               reportPanelCommandError(notification, "Unload", error),
             );
           return;
-        case "archive": {
-          const subPanelCount = panelMap.get(panelId)?.children.length ?? 0;
-          void (async () => {
-            if (
-              visiblePanel &&
-              subPanelCount > 0 &&
-              !(await confirmClosePanel(visiblePanel.title, subPanelCount))
-            )
-              return;
-            await panelService.archive(panelId);
-          })().catch((error) =>
-            reportPanelCommandError(notification, "Close panel", error),
-          );
+        case "close":
+          void handleClose(panelId);
           return;
-        }
         case "focus-address":
           window.dispatchEvent(new Event("shell-focus-address"));
           return;
@@ -1090,7 +1070,7 @@ export const PanelStack = memo(function PanelStack({
       setPinnedPanelIds,
       bumpPinMutationSeq,
       visiblePanel,
-      panelMap,
+      handleClose,
     ],
   );
 
@@ -1185,10 +1165,6 @@ export const PanelStack = memo(function PanelStack({
       if (pane) dispatch({ type: "focus-pane", paneId: pane.id });
     },
     [layout, dispatch],
-  );
-  const closePane = useCallback(
-    (paneId: string) => dispatch({ type: "close-pane", paneId }),
-    [dispatch],
   );
   const dismissUnresponsive = useCallback((panelId: string) => {
     setUnresponsivePanels((current) => {
@@ -1383,7 +1359,7 @@ export const PanelStack = memo(function PanelStack({
                 navigateFromTree(id, options);
               }}
               onPanelContextMenu={showPanelContextMenu}
-              onArchive={handleArchive}
+              onClose={handleClose}
             />,
             navigationHost.element,
           )}
@@ -1555,7 +1531,7 @@ export const PanelStack = memo(function PanelStack({
                   unresponsivePanels={unresponsivePanels}
                   onDismissUnresponsive={dismissUnresponsive}
                   onFocusPane={focusPane}
-                  onClosePane={closePane}
+                  onClosePanel={handleClose}
                   onResizeColumns={resizeColumns}
                   onResizePanes={resizePanes}
                   onTransitionSettled={bumpLayoutEpoch}
