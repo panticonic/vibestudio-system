@@ -147,6 +147,7 @@ export function buildClientMenu(
     "Reopen Closed Panel",
     "reopenClosedPanel",
   );
+  const closedPanels = panelItem("closed-panels", "Closed Panels…");
   const zoomIn = panelItem("zoom-in", "Zoom In", "zoomIn");
   const zoomOut = panelItem("zoom-out", "Zoom Out", "zoomOut");
   const resetZoom = panelItem("reset-zoom", "Reset Zoom", "resetZoom");
@@ -204,7 +205,9 @@ export function buildClientMenu(
           sep,
           nextPanel,
           previousPanel,
-          ...(isMac ? [sep, closePanel, reopenClosedPanel] : []),
+          ...(isMac
+            ? [sep, closePanel, reopenClosedPanel, closedPanels]
+            : []),
         ],
       },
       {
@@ -273,6 +276,7 @@ export function buildClientMenu(
           sep,
           closePanel,
           reopenClosedPanel,
+          closedPanels,
         ],
       },
       {
@@ -297,6 +301,7 @@ export function buildClientMenu(
           sep,
           bookmarks,
           history,
+          closedPanels,
           downloads,
           sep,
           credentials,
@@ -337,6 +342,7 @@ export interface MenuActionContext {
 const ABOUT_PAGE: Record<string, string> = {
   "about:bookmarks": ABOUT_PAGES.BOOKMARKS,
   "about:history": ABOUT_PAGES.HISTORY,
+  "closed-panels": ABOUT_PAGES.CLOSED,
   "about:downloads": ABOUT_PAGES.DOWNLOADS,
   "about:credentials": ABOUT_PAGES.CREDENTIALS,
   "about:permissions": ABOUT_PAGES.PERMISSIONS,

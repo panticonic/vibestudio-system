@@ -27,9 +27,14 @@ function harness() {
         ];
       },
     })),
-    closed: vi.fn(async (input?: { limit?: number }) =>
-      closes.slice(0, input?.limit ?? closes.length),
-    ),
+    closed: vi.fn(async (input?: { limit?: number; cursor?: string }) => {
+      const start = Number(input?.cursor ?? 0);
+      const end = start + (input?.limit ?? 20);
+      return {
+        items: closes.slice(start, end),
+        nextCursor: end < closes.length ? String(end) : null,
+      };
+    }),
     reopen: vi.fn(async (id: string) => {
       closes = closes.filter((entry) => entry.slotId !== id);
       return { id, focus };
@@ -44,7 +49,15 @@ function harness() {
     panelTree: panelTree as never,
     notification,
   });
-  return { closing, panelTree, notification, archive, focus };
+  const closeElsewhere = (count: number) => {
+    closes = [
+      ...Array.from({ length: count }, (_, index) =>
+        closedEntry(`elsewhere-${index}`, `Elsewhere ${index}`),
+      ),
+      ...closes,
+    ];
+  };
+  return { closing, panelTree, notification, archive, focus, closeElsewhere };
 }
 
 describe("panel closing", () => {
@@ -59,6 +72,35 @@ describe("panel closing", () => {
       ttl: 0,
       actions: [{ id: "undo", label: "Undo", variant: "solid" }],
     });
+  });
+
+  it("finds its close past the first page when others closed panels meanwhile", async () => {
+    const { closing, panelTree, notification, closeElsewhere } = harness();
+    const archive = panelTree.get.getMockImplementation()!;
+    panelTree.get.mockImplementationOnce((id: string) => ({
+      archive: async () => {
+        await archive(id).archive();
+        closeElsewhere(60);
+      },
+    }));
+    await closing.close("a");
+    expect(panelTree.closed).toHaveBeenCalledTimes(2);
+    expect(notification.show).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Closed “Title a”" }),
+    );
+  });
+
+  it("announces nothing when its close was reopened before it was found", async () => {
+    const { closing, panelTree, notification } = harness();
+    const archive = panelTree.get.getMockImplementation()!;
+    panelTree.get.mockImplementationOnce((id: string) => ({
+      archive: async () => {
+        await archive(id).archive();
+        await panelTree.reopen(id);
+      },
+    }));
+    await closing.close("a");
+    expect(notification.show).not.toHaveBeenCalled();
   });
 
   it("replaces the previous notice when another panel closes", async () => {

@@ -96,6 +96,10 @@ function desktopRuns(client: ShellWorkspaceClient): Record<string, SlateRun> {
       const reopened = await panel.reopenLastClosed();
       return reopened ? { close: true } : { message: "No closed panel to reopen" };
     },
+    "panel.closedList": async () => {
+      await panel.createAboutPanel("closed");
+      return { close: true };
+    },
     "panel.focus": ({ panel: panelId }, deps) => {
       if (panelId) deps.navigateToId(panelId);
       return { close: true };

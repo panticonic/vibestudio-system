@@ -634,8 +634,6 @@ export function createShellWorkspaceClient(
       productPanelRuntime.panelTree.get(panelId).unload(),
     /** Close a panel and its descendants, offering to undo it. */
     close: panelClosing.close,
-    /** Closes that can be reopened now, most recent first. */
-    closed: panelClosing.closed,
     /** Reopen the close rooted at `slotId` and present it. */
     reopen: panelClosing.reopen,
     /** Reopen the most recent close; resolves null when there is none. */

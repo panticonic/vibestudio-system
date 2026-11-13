@@ -80,6 +80,40 @@ describe("client menu", () => {
     );
   });
 
+  it("lists closed panels after reopening one, and beside History", () => {
+    for (const platform of ["mac", "other"] as const) {
+      const model = buildClientMenu(platform);
+      const submenu = (label: string) =>
+        actionIds(
+          model.popup.find((item) => item.label === label)?.submenu ?? [],
+        );
+      const panelIds = submenu("Panel");
+      expect(panelIds.indexOf("closed-panels"), platform).toBe(
+        panelIds.indexOf("reopen-closed-panel") + 1,
+      );
+      const workspaceIds = submenu("Workspace");
+      expect(workspaceIds.indexOf("closed-panels"), platform).toBe(
+        workspaceIds.indexOf("about:history") + 1,
+      );
+    }
+    const file = buildClientMenu("mac").menus.find((menu) => menu.label === "File");
+    const fileIds = actionIds(file?.items ?? []);
+    expect(fileIds.indexOf("closed-panels")).toBe(
+      fileIds.indexOf("reopen-closed-panel") + 1,
+    );
+  });
+
+  it("opens the closed panels about page", () => {
+    const opened = vi.fn();
+    const release = localShellEvents.on("navigate-about", opened);
+    try {
+      runMenuAction("closed-panels", context());
+    } finally {
+      release();
+    }
+    expect(opened).toHaveBeenCalledExactlyOnceWith({ page: "closed" });
+  });
+
   it("closes the focused panel through the client so it can be undone", async () => {
     const panels = workspacePanels("mail");
     const ctx = context(panels);

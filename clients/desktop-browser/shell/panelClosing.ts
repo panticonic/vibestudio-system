@@ -51,13 +51,30 @@ export function createPanelClosing(deps: {
     }
   };
 
+  /**
+   * The reopenable close rooted at `slotId`, or null once it is no longer
+   * reopenable. Closes are listed most recent first, so a close just made is
+   * normally on the first page; later closes by others can push it further.
+   */
+  const findClosed = async (slotId: string) => {
+    let cursor: string | undefined;
+    do {
+      const page = await panelTree.closed({
+        limit: 50,
+        ...(cursor ? { cursor } : {}),
+      });
+      const entry = page.items.find((candidate) => candidate.slotId === slotId);
+      if (entry) return entry;
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    return null;
+  };
+
   const close = async (panelId: string): Promise<void> => {
     await panelTree.get(panelId).archive();
     // Counted once the close happened: a failed close supersedes nothing.
     const issued = ++generation;
-    const entry = (await panelTree.closed()).find(
-      (candidate) => candidate.slotId === panelId,
-    );
+    const entry = await findClosed(panelId);
     // Someone reopened it already: there is nothing to undo.
     if (!entry) return;
     const descendants = entry.closedCount - 1;
@@ -93,13 +110,11 @@ export function createPanelClosing(deps: {
 
   return {
     close,
-    /** Closes that can be reopened now, most recent first. */
-    closed: (input?: { limit?: number }) => panelTree.closed(input),
     /** Reopen the close rooted at `slotId` and present it. */
     reopen,
     /** Reopen the most recent close; resolves null when there is none. */
     reopenLastClosed: async () => {
-      const [last] = await panelTree.closed({ limit: 1 });
+      const [last] = (await panelTree.closed({ limit: 1 })).items;
       return last ? reopen(last.slotId) : null;
     },
     /**
