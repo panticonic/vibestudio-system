@@ -1,6 +1,6 @@
 // src/llama/node.ts
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir as homedir2, platform as platform2 } from "node:os";
 import { join as join2, resolve as resolve2 } from "node:path";
@@ -117,6 +117,7 @@ function nodeLlamaHost(environment = process.env, log = process.stderr) {
         { detached: true, stdio: ["ignore", output, output], env: environment }
       );
       closeSync(output);
+      child.once("exit", () => rmSync(specPath, { force: true }));
       child.unref();
       return child.pid ?? 0;
     }
@@ -139,7 +140,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
-  rmSync,
+  rmSync as rmSync2,
   writeFileSync as writeFileSync2
 } from "node:fs";
 import { cpus } from "node:os";
@@ -389,18 +390,18 @@ async function buildForkLlamaRuntime(host, options = {}) {
       backend: cuda ? "cuda" : process.platform === "darwin" ? "metal" : "cpu",
       builtAt: (/* @__PURE__ */ new Date()).toISOString()
     }, null, 2) + "\n");
-    rmSync(destination, { recursive: true, force: true });
+    rmSync2(destination, { recursive: true, force: true });
     mkdirSync2(dirname(destination), { recursive: true });
     renameSync(staged, destination);
   } finally {
-    rmSync(work, { recursive: true, force: true });
+    rmSync2(work, { recursive: true, force: true });
   }
   const inspected = inspectLlamaServer(host, join3(destination, "bin", process.platform === "win32" ? "llama-server.exe" : "llama-server"), "fork");
   if (!inspected.compatible) throw new Error(`the installed fork llama-server does not run as the pinned commit: ${inspected.reason ?? inspected.output}`);
   const suffix = `-${process.platform}-${process.arch}`;
   for (const entry of readdirSync(dirname(destination)))
     if (entry.startsWith("fork-") && entry.endsWith(suffix) && join3(dirname(destination), entry) !== destination)
-      rmSync(join3(dirname(destination), entry), { recursive: true, force: true });
+      rmSync2(join3(dirname(destination), entry), { recursive: true, force: true });
   return inspected;
 }
 function discoverLlamaRuntime(host, release = LLAMA_RUNTIME_RELEASE) {
@@ -497,7 +498,7 @@ async function installManagedLlamaRuntime(host, options = {}) {
     if (!inspected.compatible) throw new Error(`installed llama-server is incompatible: ${inspected.reason}`);
     return inspected;
   } finally {
-    rmSync(temporary, { recursive: true, force: true });
+    rmSync2(temporary, { recursive: true, force: true });
   }
 }
 function describeLlamaRuntime(discovery) {
@@ -544,7 +545,7 @@ function stockModel(id) {
 }
 
 // src/llama/models.ts
-import { createReadStream as createReadStream2, createWriteStream as createWriteStream2, existsSync as existsSync2, mkdirSync as mkdirSync3, readdirSync as readdirSync2, readFileSync as readFileSync2, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { createReadStream as createReadStream2, createWriteStream as createWriteStream2, existsSync as existsSync2, mkdirSync as mkdirSync3, readdirSync as readdirSync2, readFileSync as readFileSync2, renameSync as renameSync2, rmSync as rmSync3, statSync, writeFileSync as writeFileSync3 } from "node:fs";
 import { createHash as createHash2 } from "node:crypto";
 import { basename as basename2, dirname as dirname2, join as join4, resolve as resolve4 } from "node:path";
 import { Readable as Readable2 } from "node:stream";
@@ -739,8 +740,8 @@ async function ensureStockModel(host, release, onProgress) {
     }
     return destination;
   } finally {
-    rmSync2(temporary, { force: true });
-    rmSync2(`${temporary}.verified`, { force: true });
+    rmSync3(temporary, { force: true });
+    rmSync3(`${temporary}.verified`, { force: true });
   }
 }
 async function ensureModel(host, release) {
@@ -770,7 +771,7 @@ var warmTag = (modelSha256, runtime, plan) => `${modelSha256.slice(0, 12)}-${run
 
 // src/llama/warm.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync3, rmSync as rmSync3, statSync as statSync2, utimesSync, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync3, rmSync as rmSync4, statSync as statSync2, utimesSync, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join5 } from "node:path";
 function openingOf(request) {
   const system = request.messages[0];
@@ -900,14 +901,14 @@ function pruneWarmStates(directory, keep = 24) {
   if (!existsSync3(directory)) return;
   const states = readdirSync3(directory).filter((name) => name.endsWith(".slot")).map((name) => ({ name, at: statSync2(join5(directory, name)).mtimeMs })).sort((a, b) => b.at - a.at);
   for (const state of states.slice(keep)) {
-    rmSync3(join5(directory, state.name), { force: true });
-    rmSync3(join5(directory, `${state.name}.json`), { force: true });
+    rmSync4(join5(directory, state.name), { force: true });
+    rmSync4(join5(directory, `${state.name}.json`), { force: true });
   }
 }
 
 // src/llama/shared.ts
 import { createHash as createHash4 } from "node:crypto";
-import { closeSync as closeSync2, existsSync as existsSync4, mkdirSync as mkdirSync4, openSync as openSync2, readdirSync as readdirSync4, readFileSync as readFileSync4, renameSync as renameSync3, rmSync as rmSync4, writeFileSync as writeFileSync5, writeSync } from "node:fs";
+import { closeSync as closeSync2, existsSync as existsSync4, mkdirSync as mkdirSync4, openSync as openSync2, readdirSync as readdirSync4, readFileSync as readFileSync4, renameSync as renameSync3, rmSync as rmSync5, writeFileSync as writeFileSync5, writeSync } from "node:fs";
 import { join as join6 } from "node:path";
 var sharedServersDirectory = (host) => join6(host.directories.state, "model-servers");
 var sharingEnabled = (environment) => environment.NATLANG_SHARED_SERVER !== "off";
@@ -948,7 +949,7 @@ function liveLeases(directory, key) {
   for (const name of existsSync4(leases) ? readdirSync4(leases) : []) {
     const pid = Number(name.split("-")[0]);
     if (Number.isSafeInteger(pid) && pid > 0 && alive(pid)) count++;
-    else rmSync4(join6(leases, name), { force: true });
+    else rmSync5(join6(leases, name), { force: true });
   }
   return count;
 }
@@ -958,7 +959,7 @@ function listSharedServers(host) {
   return readdirSync4(directory).filter((name) => /^[0-9a-f]{16}\.json$/.test(name)).flatMap((name) => {
     const record = readSharedServerAt(join6(directory, name));
     if (record && alive(record.pid)) return [record];
-    rmSync4(join6(directory, name), { force: true });
+    rmSync5(join6(directory, name), { force: true });
     return [];
   });
 }
@@ -981,7 +982,7 @@ function takeLease(directory, key) {
   const release = () => {
     if (held) {
       held = false;
-      rmSync4(path, { force: true });
+      rmSync5(path, { force: true });
       process.removeListener("exit", release);
     }
   };
@@ -999,7 +1000,7 @@ function tryLock(path) {
       if (error.code !== "EEXIST") throw error;
       const holder = Number(readFileSync4(path, "utf8").trim());
       if (Number.isSafeInteger(holder) && holder > 0 && alive(holder)) return false;
-      rmSync4(path, { force: true });
+      rmSync5(path, { force: true });
     }
   }
   return false;
@@ -1022,14 +1023,14 @@ async function acquireSharedServer(host, key, spec, options = {}) {
         }
         if (tryLock(paths.lock)) {
           locked = true;
-          rmSync4(paths.failed, { force: true });
+          rmSync5(paths.failed, { force: true });
           supervisor = host.supervise(await spec());
           locked = false;
         }
       } else if (existsSync4(paths.failed)) {
         throw new Error(readFileSync4(paths.failed, "utf8").trim() || "managed model server failed to start");
       } else if (!alive(supervisor) && !existsSync4(paths.record)) {
-        rmSync4(paths.lock, { force: true });
+        rmSync5(paths.lock, { force: true });
         let output = "";
         try {
           output = readFileSync4(paths.log, "utf8").slice(-4e3);
@@ -1041,7 +1042,7 @@ ${output.trim()}`);
       await new Promise((resolveWait) => setTimeout(resolveWait, 200));
     }
   } catch (error) {
-    if (locked) rmSync4(paths.lock, { force: true });
+    if (locked) rmSync5(paths.lock, { force: true });
     release();
     throw error;
   }
