@@ -16,7 +16,10 @@ import {
   sameWorkspacePushScope,
   type WorkspaceApprovalTarget,
 } from "@vibestudio/shared/workspacePushScope";
-import type { PushUserInboxDataPayload } from "@vibestudio/shared/userNotifications";
+import type {
+  PushPanelPresentDataPayload,
+  PushUserInboxDataPayload,
+} from "@vibestudio/shared/userNotifications";
 import type { ShellClient } from "./shellClient";
 
 const PERMISSION_DENIED_TOAST_KEY = "vibestudio:push:permission-denied-toast-at";
@@ -30,6 +33,8 @@ export interface PushRuntimeCallbacks {
    * acknowledge the entry the way any other surface would.
    */
   onInboxDeepLink?: (payload: PushUserInboxDataPayload) => void;
+  /** An agent asked for a panel on this device and the person tapped the notification. */
+  onPanelPresent?: (payload: PushPanelPresentDataPayload) => void;
   onToast?: (toast: {
     title?: string;
     message: string;
@@ -134,6 +139,7 @@ export async function registerForPushNotifications(
 
   const route = (open: NotificationOpen) => {
     if (open.kind === "inbox") callbacks.onInboxDeepLink?.(open.payload);
+    else if (open.kind === "panel-present") callbacks.onPanelPresent?.(open.payload);
     else callbacks.onApprovalDeepLink?.(open.target);
   };
   const takeOpen = () =>

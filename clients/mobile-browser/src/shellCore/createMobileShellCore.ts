@@ -35,6 +35,8 @@ export function createMobileShellCore(deps: {
       deps.workspaceId,
     ),
     allowMissingManifests: true,
+    // The same label this client registers with the runtime coordinator.
+    device: { label: "Mobile", platform: "mobile" },
     serverInfo: {
       gatewayConfig: { serverUrl, workspace: deps.workspaceId },
     },

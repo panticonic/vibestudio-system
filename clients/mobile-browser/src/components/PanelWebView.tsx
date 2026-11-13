@@ -472,6 +472,15 @@ export function buildBridgeBootstrapScript(
         getPanelInit: () => callHost("getPanelInit", []),
         getBootstrapConfig: () => callHost("getPanelInit", []),
         getInfo: () => callHost("getInfo", []),
+        // Device powers for pages (tendrils plan 4.8): the screen stays on only
+        // while this panel is shown; calls fail plainly without the grant.
+        device: {
+          capabilities: () => callHost("device.capabilities", []),
+          keepAwake: (on) => callHost("device.keepAwake", [on === true]),
+          haptic: (kind) => callHost("device.haptic", [kind]),
+          speak: (request) => callHost("device.speak", [request]),
+          stopSpeaking: () => callHost("device.stopSpeaking", []),
+        },
         focusPanel: (panelId) => callHost("focusPanel", [panelId]),
         openDevtools: () => callHost("openDevtools", []),
         openFolderDialog: (opts) => callHost("openFolderDialog", [opts]),

@@ -148,6 +148,23 @@ describe("pushRegistration", () => {
     expect(onInboxDeepLink).toHaveBeenCalledWith(payload);
   });
 
+  it("routes a tapped panel-present notification to the panel", async () => {
+    const h = createHarness();
+    const payload = {
+      ...scope,
+      kind: "panel-present",
+      slotId: "panel:tree/trip",
+      title: "A panel is waiting for you",
+      priority: "normal",
+    };
+    const onPanelPresent = jest.fn();
+    const onApprovalDeepLink = jest.fn();
+    await register(h, { onPanelPresent, onApprovalDeepLink });
+    h.listeners.open?.({ kind: "panel-present", payload });
+    expect(onPanelPresent).toHaveBeenCalledWith(payload);
+    expect(onApprovalDeepLink).not.toHaveBeenCalled();
+  });
+
   it("cancels displayed notifications of this workspace whose approval is no longer pending", async () => {
     const h = createHarness();
     h.notifications.displayed.mockResolvedValue([

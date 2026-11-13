@@ -13,6 +13,9 @@ export const MOBILE_PANEL_PROJECTION_EVENTS = [
   "panel-presentation-changed",
   "panel:executionActivated",
   "panel:executionFailed",
+  // Not a projection change, but admitted with the same watch: a request for
+  // this device that arrives during reconciliation must not be lost either.
+  "panel-presentation-requested",
 ] as const satisfies readonly EventName[];
 
 export async function reconcileWatchedPanelProjection(input: {

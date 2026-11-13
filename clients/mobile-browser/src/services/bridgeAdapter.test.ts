@@ -10,6 +10,7 @@ import {
 import type { RemoteSession } from "@vibestudio/rn-client-api";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { HOST_COMMAND_CONTRIBUTION_EVENT } from "@vibestudio/shared/hostCommands";
+import { PanelDevicePowers } from "./panelDevicePowers";
 
 function createAdapter(
   overrides?: Partial<Parameters<typeof createBridgeAdapter>[0]>,
@@ -25,6 +26,13 @@ function createAdapter(
     },
     deliverToPanel: jest.fn(),
     getPanelLease: jest.fn(),
+    devicePowers: new PanelDevicePowers({
+      granted: () => true,
+      setKeepAwake: jest.fn(async () => undefined),
+      haptic: jest.fn(async () => undefined),
+      speak: jest.fn(async () => undefined),
+      stopSpeaking: jest.fn(async () => undefined),
+    }),
     ...overrides,
   });
 }
@@ -904,5 +912,34 @@ describe("bridgeAdapter native app navigation", () => {
     await expect(pending).rejects.toThrow("no longer hosted here");
     expect(f.openShellSurface).not.toHaveBeenCalled();
     expect(f.deliverToPanel).not.toHaveBeenCalled();
+  });
+});
+
+describe("device powers for panels", () => {
+  it("routes a panel's device calls to the controller with the calling panel", async () => {
+    const devicePowers = {
+      capabilities: jest.fn(() => ["keepAwake", "haptic", "speak"]),
+      keepAwake: jest.fn(async () => undefined),
+      haptic: jest.fn(async () => undefined),
+      speak: jest.fn(async () => undefined),
+      stopSpeaking: jest.fn(async () => undefined),
+    };
+    const adapter = createAdapter({ devicePowers: devicePowers as never });
+    await expect(adapter.handle("panel:tree/trip", "device.capabilities", [])).resolves.toEqual([
+      "keepAwake",
+      "haptic",
+      "speak",
+    ]);
+    await adapter.handle("panel:tree/trip", "device.keepAwake", [true]);
+    await adapter.handle("panel:tree/trip", "device.haptic", ["success"]);
+    await adapter.handle("panel:tree/trip", "device.speak", [{ text: "Turn left", lang: "en" }]);
+    await adapter.handle("panel:tree/trip", "device.stopSpeaking", []);
+    expect(devicePowers.keepAwake).toHaveBeenCalledWith("panel:tree/trip", true);
+    expect(devicePowers.haptic).toHaveBeenCalledWith("success");
+    expect(devicePowers.speak).toHaveBeenCalledWith("panel:tree/trip", { text: "Turn left", lang: "en" });
+    await expect(adapter.handle("panel:tree/trip", "device.haptic", ["rumble"])).rejects.toThrow(
+      "Unknown haptic kind",
+    );
+    await expect(adapter.handle("panel:tree/trip", "device.speak", [{}])).rejects.toThrow("needs { text }");
   });
 });
