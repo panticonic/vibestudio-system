@@ -27,7 +27,6 @@ export function createMobileShellCore(deps: {
   const presentation = createWorkspacePresentationClient(deps.transport);
   const { panelManager } = createShellCore({
     registry,
-    device: { label: "Mobile browser", platform: "mobile" },
     call: (service, method, args) =>
       deps.transport.call("main", mainRpcMethod(`${service}.${method}`), args),
     workspaceState: presentation.workspaceState,
@@ -36,6 +35,8 @@ export function createMobileShellCore(deps: {
       deps.workspaceId,
     ),
     allowMissingManifests: true,
+    // The same label this client registers with the runtime coordinator.
+    device: { label: "Mobile", platform: "mobile" },
     serverInfo: {
       gatewayConfig: { serverUrl, workspace: deps.workspaceId },
     },

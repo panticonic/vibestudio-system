@@ -73,6 +73,10 @@ import {
 import { useNativeShellOverlay } from "../shell/useNativeShellOverlay";
 import { BrowserFavicon } from "./BrowserFavicon";
 import { PanelIcon } from "./PanelIcon";
+import {
+  historyProofNotice,
+  type HistoryProofNotice,
+} from "./historyProofNotice";
 
 import { isMac, WINDOW_CONTROL_RESERVE_PX } from "./windowChrome";
 
@@ -742,6 +746,32 @@ function PanelAddressBar({
     setPathValue(chromeState.source);
   }, [chromeState.panelId, chromeState.source]);
 
+  // Build proof changes when the page loads, rebuilds or goes back, all of
+  // which move these chrome facts.
+  const [proofNotice, setProofNotice] = useState<HistoryProofNotice | null>(
+    null,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    void panel
+      .historyProof(chromeState.panelId)
+      .then((entries) => {
+        if (!cancelled) setProofNotice(historyProofNotice(entries));
+      })
+      .catch(() => {
+        if (!cancelled) setProofNotice(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    panel,
+    chromeState.panelId,
+    chromeState.isLoading,
+    chromeState.canGoBack,
+    chromeState.canGoForward,
+  ]);
+
   useEffect(() => {
     const source = pathValue.trim();
     if (!source) {
@@ -896,6 +926,24 @@ function PanelAddressBar({
           </IconButton>
         </Tooltip>
       )}
+      {proofNotice ? (
+        <Tooltip
+          content={
+            proofNotice.detail
+              ? `${proofNotice.title}: ${proofNotice.detail}`
+              : proofNotice.title
+          }
+        >
+          <Text
+            color="amber"
+            role="status"
+            aria-label={proofNotice.title}
+            style={{ display: "inline-flex" }}
+          >
+            <ExclamationTriangleIcon />
+          </Text>
+        </Tooltip>
+      ) : null}
       <Tooltip content={chromeState.isLoading ? "Stop" : "Reload"}>
         <IconButton
           size="1"

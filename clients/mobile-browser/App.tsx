@@ -131,6 +131,22 @@ function AppContent() {
             }),
           );
       },
+      onPanelPresent: (payload) => {
+        if (!directory) return;
+        void directory
+          .resolveNotificationWorkspace(payload)
+          .then(async (session) => {
+            await directory.activate(payload.workspaceId);
+            session.client.presentHere(payload.slotId);
+          })
+          .catch((error: unknown) =>
+            pushToast({
+              title: "Could not open the panel",
+              message: String(error),
+              tone: "danger",
+            }),
+          );
+      },
       onToast: (toast) => pushToast(toast),
     })
       .then((nextCleanup) => {

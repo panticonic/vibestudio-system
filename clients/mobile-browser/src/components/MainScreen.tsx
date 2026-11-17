@@ -41,6 +41,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { WorkspaceConnectionBar } from "./WorkspaceConnectionBar";
 import { AppBar } from "./AppBar";
 import { workspaceBrowserProfile } from "../services/workspaceBrowserProfile";
+import type { MobilePresentationRequest } from "../services/presentationRequests";
 import { LoadedPanelWebView } from "./LoadedPanelWebView";
 import { syncManagedWebViewThemes } from "./webViewThemes";
 import { CommandSheet } from "./CommandSheet";
@@ -958,9 +959,13 @@ export function MainScreen({
   // A pending build remains valid; elapsed time never starts a second owner.
   useEffect(() => {
     if (!hostConfig || !shellClient) return;
-    panelMaterializations.retainOnly(
-      new Set(webViewStack.map((entry) => entry.panelId)),
-    );
+    const retained = new Set(webViewStack.map((entry) => entry.panelId));
+    panelMaterializations.retainOnly(retained);
+    shellClient.devicePowers
+      .retainOnly(retained)
+      .catch((error: unknown) =>
+        console.warn("[MainScreen] Could not release keep-awake", error),
+      );
     syncRetainedRuntimeOwners();
     for (const entry of webViewStack) {
       const panel = shellClient.panels.registry.getPanel(entry.panelId);
@@ -1013,6 +1018,38 @@ export function MainScreen({
     retainPanelPresentation,
     startPanelMaterialization,
   ]);
+  // An agent asked for a panel on this phone (tendrils plan 4.5): run it here,
+  // taking it from whichever device had it, and show it if asked.
+  const presentRequestedPanel = useCallback(
+    async (request: MobilePresentationRequest) => {
+      if (!shellClient) return;
+      if (!(await shellClient.panels.hydrate(request.slotId))) return;
+      if (request.focus) activatePanel(request.slotId);
+      const lease = shellClient.panels.registry.getRuntimeLease(request.slotId);
+      const here =
+        lease?.clientSessionId === shellClient.credentials.deviceId &&
+        webViewStackRef.current.some((entry) => entry.panelId === request.slotId);
+      if (here || panelMaterializations.has(request.slotId)) return;
+      panelMaterializations.retry(request.slotId);
+      retainPanelPresentation(request.slotId);
+      startPanelMaterialization(request.slotId, "takeOver");
+    },
+    [
+      activatePanel,
+      panelMaterializations,
+      retainPanelPresentation,
+      shellClient,
+      startPanelMaterialization,
+    ],
+  );
+  useEffect(() => {
+    if (!shellClient) return;
+    return shellClient.onPresentationRequested((request) => {
+      presentRequestedPanel(request).catch((error: unknown) =>
+        console.warn("[MainScreen] Presentation request failed", error),
+      );
+    });
+  }, [presentRequestedPanel, shellClient]);
   useEffect(() => {
     if (!shellClient) return;
     refreshTree();
@@ -1039,6 +1076,14 @@ export function MainScreen({
       unsubNav();
     };
   }, [activatePanel, refreshTree, shellClient]);
+  useEffect(() => {
+    if (!shellClient) return;
+    shellClient.devicePowers
+      .setVisiblePanel(workspaceVisible ? activePanelId : null)
+      .catch((error: unknown) =>
+        console.warn("[MainScreen] Could not update keep-awake", error),
+      );
+  }, [activePanelId, shellClient, workspaceVisible]);
   useEffect(() => {
     if (!activePanelId || !shellClient) return;
     void shellClient.panels.notifyFocused(activePanelId);

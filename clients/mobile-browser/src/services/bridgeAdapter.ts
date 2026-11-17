@@ -1,4 +1,9 @@
 import { createTypedRpcServiceClient } from "@vibestudio/shared/typedRpcServiceClient";
+import {
+  HAPTIC_KINDS,
+  type HapticKind,
+} from "@vibestudio/rn-client-api/devicePowersProtocol";
+import type { PanelDevicePowers } from "./panelDevicePowers";
 import { appMethods } from "@vibestudio/service-schemas/app";
 import {
   mobileShellSurface,
@@ -57,6 +62,8 @@ export function createBridgeAdapter(deps: {
    * matches; undefined until the panel has been materialized (lease acquired).
    */
   getPanelLease: (panelId: string) => PanelLease | undefined;
+  /** `__vibestudioShell.device` for panels (tendrils plan 4.8). */
+  devicePowers: PanelDevicePowers;
 }) {
   // Panel RPC relay. A panel's RpcClient rides this postMessage bridge: it sends
   // RPC envelopes via `postEnvelope` and receives them via `onEnvelope` (delivered
@@ -431,6 +438,29 @@ export function createBridgeAdapter(deps: {
           throw new Error(
             "CDP automation is routed through the server broker and is not available for mobile-held WebViews",
           );
+        case "device.capabilities":
+          return deps.devicePowers.capabilities();
+        case "device.keepAwake":
+          return deps.devicePowers.keepAwake(panelId, args[0] === true);
+        case "device.haptic": {
+          const [kind] = args;
+          if (!HAPTIC_KINDS.includes(kind as HapticKind))
+            throw new Error(`Unknown haptic kind: ${String(kind)}`);
+          return deps.devicePowers.haptic(kind as HapticKind);
+        }
+        case "device.speak": {
+          const [request] = args as [{ text?: unknown; lang?: unknown }?];
+          if (typeof request?.text !== "string" || !request.text)
+            throw new Error("device.speak needs { text }");
+          return deps.devicePowers.speak(panelId, {
+            text: request.text,
+            ...(typeof request.lang === "string" && request.lang
+              ? { lang: request.lang }
+              : {}),
+          });
+        }
+        case "device.stopSpeaking":
+          return deps.devicePowers.stopSpeaking();
         case "openDevtools":
           return;
         case "openFolderDialog":

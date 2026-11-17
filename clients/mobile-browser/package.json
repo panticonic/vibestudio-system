@@ -36,7 +36,8 @@
           "clipboard",
           "open-external",
           "browser-import",
-          "camera"
+          "camera",
+          "device-powers"
         ]
       },
       "intents": [

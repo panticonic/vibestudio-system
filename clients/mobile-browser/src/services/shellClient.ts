@@ -30,6 +30,12 @@ import type { ThemeAppearance } from "@vibestudio/shared/types";
 import { Appearance } from "react-native";
 import { WorkspaceClient } from "@vibestudio/service-schemas/clients/shellWorkspaceClient";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
+import {
+  PresentationRequestInbox,
+  type MobilePresentationRequest,
+} from "./presentationRequests";
+import { PanelDevicePowers } from "./panelDevicePowers";
+import { clientApi } from "@workspace/client-kit-native/host";
 import type { EventName, EventPayloads } from "@vibestudio/shared/events";
 import { createRecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
 import {
@@ -293,6 +299,7 @@ class MobilePanels implements PanelHost {
       openShellSurface: (target: MobileShellSurface) => void;
       clientSessionId: string;
       localStorageScope: string;
+      devicePowers: PanelDevicePowers;
     },
   ) {
     this.registration = createPanelHostRegistration({
@@ -377,6 +384,7 @@ class MobilePanels implements PanelHost {
             this.websiteHost?.delivery(panelId, envelope) ?? envelope,
           ),
         getPanelLease: (panelId) => this.runtimeLeases.get(panelId),
+        devicePowers: this.deps.devicePowers,
       });
     }
     this.websiteHost ??= new WebsiteDocumentHost({
@@ -746,6 +754,10 @@ class MobilePanels implements PanelHost {
     });
     this.deps.navigateToPanel(result.panelId);
     return { id: result.panelId, title: result.title };
+  }
+  /** Load one durable slot into the local projection without navigating to it. */
+  async hydrate(panelId: string): Promise<boolean> {
+    return (await this.requireManager().getPanel(asPanelSlotId(panelId))) !== null;
   }
   async focus(panelId: string): Promise<void> {
     const manager = this.requireManager();
@@ -1379,6 +1391,17 @@ export class ShellClient {
   private shellSurfaceListeners = new Set<
     (target: MobileShellSurface) => void
   >();
+  private readonly presentations = new PresentationRequestInbox(
+    () => this.credentials.deviceId,
+  );
+  /** Screen, haptics and speech for panels; the screen follows which panel is shown. */
+  readonly devicePowers = new PanelDevicePowers({
+    granted: () => clientApi().capabilities.has("device-powers"),
+    setKeepAwake: (on) => clientApi().devicePowers.setKeepAwake(on),
+    haptic: (kind) => clientApi().devicePowers.haptic(kind),
+    speak: (request) => clientApi().devicePowers.speak(request),
+    stopSpeaking: () => clientApi().devicePowers.stopSpeaking(),
+  });
   private recoveryCompleteListeners = new Set<(kind: RecoveryKind) => void>();
   private workspaceInfo: WorkspaceInfo | null = null;
   private readonly accountProfileClient: MobileAccountProfileClient;
@@ -1442,6 +1465,7 @@ export class ShellClient {
       deliverToShell: (panelId, envelope) =>
         this.hostCommands.deliverShellEnvelope(panelId, envelope),
       openShellSurface: (target) => this.openShellSurface(target),
+      devicePowers: this.devicePowers,
     });
     const userNotificationStore = createGadServiceClient(this.transport);
     this.userNotifications = {
@@ -1557,6 +1581,29 @@ export class ShellClient {
         event as EventPayloads["panel:executionFailed"],
       );
     });
+    this.events.on("panel-presentation-requested", (event) => {
+      if (!this.disposed) this.presentations.receive(event);
+    });
+  }
+  /** Requests addressed to this device while it was away; read on every (re)connect. */
+  private async readPendingPresentations(): Promise<void> {
+    const pending = await this.panelRuntime.listPresentationRequests();
+    for (const request of pending) this.presentations.receive(request);
+  }
+  /** The person tapped a panel-present notification: show that panel here. */
+  presentHere(slotId: string): void {
+    this.presentations.receive({
+      slotId,
+      deviceId: this.credentials.deviceId,
+      focus: true,
+      alert: "none",
+    });
+  }
+  /** An agent asked for a panel on this phone (tendrils plan 4.5). */
+  onPresentationRequested(
+    listener: (request: MobilePresentationRequest) => void,
+  ): () => void {
+    return this.presentations.subscribe(listener);
   }
   async init(): Promise<void> {
     const deadline = Date.now() + 120_000;
@@ -1853,6 +1900,10 @@ export class ShellClient {
         }
         await this.persistStartupSnapshot(info.config.id);
         if (this.disposed || signal.aborted) return;
+        await this.readPendingPresentations().catch((error: unknown) =>
+          console.warn("[ShellClient] Presentation requests could not be read", error),
+        );
+        if (this.disposed || signal.aborted) return;
         smokePhase("workspace-reconciled");
         this.onReadinessChange?.("reconciled");
         return;
@@ -1986,6 +2037,7 @@ export class ShellClient {
         async () => {
           await this.panels.recoverRegistration();
           await this.panels.refresh();
+          await this.readPendingPresentations();
         },
       ),
       this.recovery.registerColdRecoverHandler(
@@ -1993,6 +2045,7 @@ export class ShellClient {
         async () => {
           await this.panels.recoverRegistration();
           await this.panels.recoverSnapshot();
+          await this.readPendingPresentations();
         },
       ),
     ];
@@ -2014,6 +2067,7 @@ export class ShellClient {
     this.recoveryCompleteListeners.clear();
     this.panelSelection.clear();
     this.shellSurfaceListeners.clear();
+    this.presentations.clear();
     this.browserPrivacyPresentation.clear();
     this.closing = (async () => {
       await this.events.unsubscribeAll().catch(() => {});
