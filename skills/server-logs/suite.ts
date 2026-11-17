@@ -90,12 +90,12 @@ export default defineEvaluationSuite<CaseInput, CaseExpected>({
   fixture: {
     async create(testCase, context) {
       const app = (await context.loadFreshProgram()) as {
-        briefServerLog: { collect(request: LogRequest): Promise<LogBrief> };
+        briefServerLog(request: LogRequest): Promise<LogBrief>;
       };
       const services = { serverLog: recordedServerLog(testCase.input.recording) };
       return {
         execute: () =>
-          context.runtime.run(() => app.briefServerLog.collect(testCase.input.request), {
+          context.runtime.run(() => app.briefServerLog(testCase.input.request), {
             services,
           }),
       };

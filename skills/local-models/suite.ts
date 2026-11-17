@@ -26,7 +26,7 @@ export default defineEvaluationSuite<CaseInput, CaseExpected>({
   fixture: {
     async create(testCase, context) {
       const app = (await context.loadFreshProgram()) as {
-        localModelReadiness: { collect(): Promise<Readiness> };
+        localModelReadiness(): Promise<Readiness>;
       };
       // The recorded answer of the local-models extension, as the `localModels` service decodes it.
       const services = {
@@ -37,7 +37,7 @@ export default defineEvaluationSuite<CaseInput, CaseExpected>({
         },
       };
       return {
-        execute: () => context.runtime.run(() => app.localModelReadiness.collect(), { services }),
+        execute: () => context.runtime.run(() => app.localModelReadiness(), { services }),
       };
     },
   },
