@@ -27,6 +27,7 @@ export function createMobileShellCore(deps: {
   const presentation = createWorkspacePresentationClient(deps.transport);
   const { panelManager } = createShellCore({
     registry,
+    device: { label: "Mobile browser", platform: "mobile" },
     call: (service, method, args) =>
       deps.transport.call("main", mainRpcMethod(`${service}.${method}`), args),
     workspaceState: presentation.workspaceState,

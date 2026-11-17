@@ -142,10 +142,15 @@ describe("pushRegistration", () => {
     h.notifications.takeInitialOpen.mockResolvedValue({ kind: "approval", target });
     const onApprovalDeepLink = jest.fn();
     const onInboxDeepLink = jest.fn();
-    await register(h, { onApprovalDeepLink, onInboxDeepLink });
+    const onPanelPresentDeepLink = jest.fn();
+    await register(h, { onApprovalDeepLink, onInboxDeepLink, onPanelPresentDeepLink });
     expect(onApprovalDeepLink).toHaveBeenCalledWith(target);
     h.listeners.open?.({ kind: "inbox", payload });
     expect(onInboxDeepLink).toHaveBeenCalledWith(payload);
+    const panelPayload = { ...scope, kind: "panel-present", slotId: "slot-1", title: "Report", priority: "normal" };
+    h.listeners.open?.({ kind: "panel-present", payload: panelPayload });
+    expect(onPanelPresentDeepLink).toHaveBeenCalledWith(panelPayload);
+    expect(onApprovalDeepLink).toHaveBeenCalledTimes(1);
   });
 
   it("cancels displayed notifications of this workspace whose approval is no longer pending", async () => {
