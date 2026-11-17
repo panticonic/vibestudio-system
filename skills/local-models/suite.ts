@@ -32,7 +32,7 @@ export default defineEvaluationSuite<CaseInput, CaseExpected>({
       const services = {
         localModels: {
           async listModels() {
-            return testCase.input.rows;
+            return structuredClone(testCase.input.rows);
           },
         },
       };

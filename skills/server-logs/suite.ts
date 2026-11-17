@@ -22,7 +22,7 @@ const LEVELS = ["verbose", "info", "warn", "error"] as const;
 /** The `serverLog` service answering from one recorded window, with the real filter semantics of tail, query and stats. */
 function recordedServerLog(recording: Recording) {
   const answer = (records: LogRecord[]) => ({
-    records,
+    records: structuredClone(records),
     latestSeq: recording.latestSeq,
     workspaceId: "recorded",
     serverBootId: recording.serverBootId,
