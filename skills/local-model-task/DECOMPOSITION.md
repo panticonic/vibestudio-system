@@ -22,3 +22,17 @@ Inventory before implementation:
 | Fixture oracle | Compare the typed result against independent case expectations and require an exact ordered, caller-recorded interaction journal. |
 
 Execution and verification use owner-scoped fixture ports. They do not start models or download artifacts.
+
+## Compare candidates for one workspace task
+
+The compare operation decides whether one of the caller's ordered alternatives can take an existing
+workspace task. `compareCandidates` delegates each exact ref to `reviewCandidate`, which calls the
+same `inspectSelected` and `planDelegation` stages used for a single model. The comparison records
+every disposition, then selects the first eligible handoff. Absent or incompatible rows remain
+visible even when a later candidate can take the task.
+
+The managed adapter obtains one consistent snapshot from the installed local-model extension.
+It projects selected rows into the existing inventory contract and records which refs were actually
+read. A second extension read verifies that the assigned rows stayed stable across the workflow.
+The read-only adapter grants no installation operation. Exact ordering and capability predicates
+are checked independently by the managed system-test verifier.

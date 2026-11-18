@@ -17,7 +17,8 @@ export type LocalTaskInventoryRow = {
 export type LocalTaskRequest = {
   goal: string;
   modelRef: string;
-  operation: "inspect" | "prepare" | "delegate";
+  operation: "inspect" | "prepare" | "delegate" | "compare";
+  alternatives?: string[];
   mayInstall: boolean;
   needsTools: boolean;
   minimumContext: number;
@@ -35,7 +36,8 @@ export type LocalTaskDisposition =
   | "installation-unverified"
   | "unsupported-tools"
   | "context-too-small"
-  | "ready-to-delegate";
+  | "ready-to-delegate"
+  | "no-candidate";
 export type LocalTaskReceipt =
   | { kind: "installed"; ref: string; jobId: string }
   | { kind: "validated-existing"; ref: string }
@@ -49,5 +51,13 @@ export type LocalTaskReport = {
   ref: string;
   state: LocalTaskState | null;
   receipt: LocalTaskReceipt | null;
+  handoff: { ref: string; mode: "fresh" | "fork" } | null;
+  candidates?: LocalTaskCandidate[];
+};
+
+export type LocalTaskCandidate = {
+  ref: string;
+  state: LocalTaskState | null;
+  disposition: LocalTaskDisposition;
   handoff: { ref: string; mode: "fresh" | "fork" } | null;
 };

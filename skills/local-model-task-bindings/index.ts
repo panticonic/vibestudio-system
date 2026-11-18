@@ -8,18 +8,22 @@ export type LocalTaskExtensionPort = {
 
 const EXTENSION = "@workspace-extensions/local-models";
 
+export async function readLocalModelInventory(
+  extensions: LocalTaskExtensionPort,
+) {
+  const method = localModelsExtensionMethods.listModels;
+  return method.result.parse(
+    await extensions.invoke(EXTENSION, method.method, []),
+  );
+}
+
 export function createLocalModelTaskBindings(
   extensions: LocalTaskExtensionPort,
   assignment: LocalTaskAssignment,
 ) {
   return bindLocalModelTask(
     {
-      async listModels() {
-        const method = localModelsExtensionMethods.listModels;
-        return method.result.parse(
-          await extensions.invoke(EXTENSION, method.method, []),
-        );
-      },
+      listModels: () => readLocalModelInventory(extensions),
       installModel: (ref) =>
         extensions.invoke(EXTENSION, "installModel", [ref]),
     },

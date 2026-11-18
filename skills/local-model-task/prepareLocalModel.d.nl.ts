@@ -20,7 +20,8 @@ type LocalTaskInventoryRow = {
 type LocalTaskRequest = {
   goal: string;
   modelRef: string;
-  operation: "inspect" | "prepare" | "delegate";
+  operation: "inspect" | "prepare" | "delegate" | "compare";
+  alternatives?: string[];
   mayInstall: boolean;
   needsTools: boolean;
   minimumContext: number;
@@ -37,7 +38,8 @@ type LocalTaskDisposition = | "usable"
   | "installation-unverified"
   | "unsupported-tools"
   | "context-too-small"
-  | "ready-to-delegate";
+  | "ready-to-delegate"
+  | "no-candidate";
 type LocalTaskReceipt = | { kind: "installed"; ref: string; jobId: string }
   | { kind: "validated-existing"; ref: string }
   | { kind: "state-changed"; ref: string };
@@ -51,6 +53,13 @@ type LocalTaskReport = {
   state: LocalTaskState | null;
   receipt: LocalTaskReceipt | null;
   handoff: { ref: string; mode: "fresh" | "fork" } | null;
+  candidates?: LocalTaskCandidate[];
 };
-declare const fn: NatlangFunction<[request: LocalTaskRequest], LocalTaskReport> & { readonly applyInstallation: NatlangFunction<[ref: string], LocalTaskReceipt>; readonly decideInstallation: NatlangFunction<[request: LocalTaskRequest, initial: LocalTaskObservation], "install" | "confirm" | "skip">; readonly inspectSelected: NatlangFunction<[ref: string], LocalTaskObservation> & { readonly interpretState: NatlangFunction<[row: LocalTaskInventoryRow | null], LocalTaskDisposition> }; readonly planDelegation: NatlangFunction<[request: LocalTaskRequest, row: LocalTaskInventoryRow | null], { disposition: LocalTaskDisposition; handoff: { ref: string; mode: "fresh" | "fork" } | null }>; readonly readOutcome: NatlangFunction<[ref: string, receipt: LocalTaskReceipt], LocalTaskObservation> & { readonly resolveOutcome: NatlangFunction<[observed: LocalTaskDisposition, receipt: LocalTaskReceipt], LocalTaskDisposition>; readonly interpretState: NatlangFunction<[row: LocalTaskInventoryRow | null], LocalTaskDisposition> } };
+type LocalTaskCandidate = {
+  ref: string;
+  state: LocalTaskState | null;
+  disposition: LocalTaskDisposition;
+  handoff: { ref: string; mode: "fresh" | "fork" } | null;
+};
+declare const fn: NatlangFunction<[request: LocalTaskRequest], LocalTaskReport> & { readonly applyInstallation: NatlangFunction<[ref: string], LocalTaskReceipt>; readonly compareCandidates: NatlangFunction<[request: LocalTaskRequest], LocalTaskReport> & { readonly reviewCandidate: NatlangFunction<[ref: string, request: LocalTaskRequest], LocalTaskCandidate> & { readonly inspectSelected: NatlangFunction<[ref: string], LocalTaskObservation> & { readonly interpretState: NatlangFunction<[row: LocalTaskInventoryRow | null], LocalTaskDisposition> }; readonly planDelegation: NatlangFunction<[request: LocalTaskRequest, row: LocalTaskInventoryRow | null], { disposition: LocalTaskDisposition; handoff: { ref: string; mode: "fresh" | "fork" } | null }> } }; readonly decideInstallation: NatlangFunction<[request: LocalTaskRequest, initial: LocalTaskObservation], "install" | "confirm" | "skip">; readonly inspectSelected: NatlangFunction<[ref: string], LocalTaskObservation> & { readonly interpretState: NatlangFunction<[row: LocalTaskInventoryRow | null], LocalTaskDisposition> }; readonly planDelegation: NatlangFunction<[request: LocalTaskRequest, row: LocalTaskInventoryRow | null], { disposition: LocalTaskDisposition; handoff: { ref: string; mode: "fresh" | "fork" } | null }>; readonly readOutcome: NatlangFunction<[ref: string, receipt: LocalTaskReceipt], LocalTaskObservation> & { readonly resolveOutcome: NatlangFunction<[observed: LocalTaskDisposition, receipt: LocalTaskReceipt], LocalTaskDisposition>; readonly interpretState: NatlangFunction<[row: LocalTaskInventoryRow | null], LocalTaskDisposition> } };
 export default fn;

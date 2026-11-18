@@ -20,7 +20,8 @@ type LocalTaskInventoryRow = {
 type LocalTaskRequest = {
   goal: string;
   modelRef: string;
-  operation: "inspect" | "prepare" | "delegate";
+  operation: "inspect" | "prepare" | "delegate" | "compare";
+  alternatives?: string[];
   mayInstall: boolean;
   needsTools: boolean;
   minimumContext: number;
@@ -37,7 +38,8 @@ type LocalTaskDisposition = | "usable"
   | "installation-unverified"
   | "unsupported-tools"
   | "context-too-small"
-  | "ready-to-delegate";
+  | "ready-to-delegate"
+  | "no-candidate";
 type LocalTaskReceipt = | { kind: "installed"; ref: string; jobId: string }
   | { kind: "validated-existing"; ref: string }
   | { kind: "state-changed"; ref: string };
@@ -50,6 +52,13 @@ type LocalTaskReport = {
   ref: string;
   state: LocalTaskState | null;
   receipt: LocalTaskReceipt | null;
+  handoff: { ref: string; mode: "fresh" | "fork" } | null;
+  candidates?: LocalTaskCandidate[];
+};
+type LocalTaskCandidate = {
+  ref: string;
+  state: LocalTaskState | null;
+  disposition: LocalTaskDisposition;
   handoff: { ref: string; mode: "fresh" | "fork" } | null;
 };
 declare const fn: NatlangFunction<[row: LocalTaskInventoryRow | null], LocalTaskDisposition>;

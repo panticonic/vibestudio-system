@@ -13,6 +13,26 @@ export type LocalTaskAssignment = {
   authorizedInstallRef: string | null;
 };
 
+export function inventoryRow(
+  inventory: LocalModelEntry[],
+  ref: string,
+): LocalTaskInventoryRow | null {
+  const matches = inventory.filter((row) => "local:" + row.slug === ref);
+  if (matches.length > 1)
+    throw new Error("The assigned local model has duplicate inventory rows");
+  const row = matches[0];
+  if (!row) return null;
+  return {
+    ref,
+    state: row.state,
+    fit: row.fit.fit,
+    toolsCapable: row.toolsCapable,
+    contextWindow: row.contextWindow,
+    progress: row.download?.progress ?? null,
+    errorMessage: row.errorMessage,
+  };
+}
+
 function completedReceipt(
   expectedRef: string,
   value: unknown,
@@ -54,20 +74,7 @@ export function bindLocalModelTask(
     if (ref !== modelRef)
       throw new Error("Inspect only the assigned local model");
     const inventory = await source.listModels();
-    const matches = inventory.filter((row) => "local:" + row.slug === ref);
-    if (matches.length > 1)
-      throw new Error("The assigned local model has duplicate inventory rows");
-    const row = matches[0];
-    if (!row) return null;
-    return {
-      ref,
-      state: row.state,
-      fit: row.fit.fit,
-      toolsCapable: row.toolsCapable,
-      contextWindow: row.contextWindow,
-      progress: row.download?.progress ?? null,
-      errorMessage: row.errorMessage,
-    };
+    return inventoryRow(inventory, ref);
   };
   const installOnce = async (ref: string): Promise<LocalTaskReceipt> => {
     if (ref !== modelRef || ref !== authorizedInstallRef) {
