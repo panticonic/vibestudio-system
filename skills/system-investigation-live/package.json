@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./live.ts" },
-  "dependencies": { "@vibestudio/service-schemas": "workspace:*" }
+  "exports": {
+    ".": "./live.ts",
+    "./continuation": "./continuation.ts"
+  },
+  "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
+    "@workspace-skills/local-model-task-bindings": "workspace:*"
+  }
 }
