@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLocalModelTaskBindings } from "./binding.js";
+import { createLocalModelTaskBindings } from "../local-model-task-bindings/index.js";
 import { createLocalModelTaskFixture } from "./fixture.js";
 import { verifyLocalModelTask } from "./oracle.js";
 import { localModelTaskWorlds } from "./worlds.js";

@@ -1,5 +1,5 @@
 import type { LocalModelEntry } from "@workspace/model-catalog/localModels";
-import { createLocalModelTaskBindings } from "./binding.js";
+import { createLocalModelTaskBindings } from "../local-model-task-bindings/index.js";
 import type { LocalTaskWorld } from "./worlds.js";
 
 export type LocalTaskFixtureOperation = "listModels" | "installModel";

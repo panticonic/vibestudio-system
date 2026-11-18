@@ -9,6 +9,13 @@ Use the local-models extension to install and manage models, and the normal
 agent runtime to run them. Never ask for loopback credentials or call a model
 server directly.
 
+For a typed readiness and handoff task, call
+`runWorkflow.domains.localModel.prepareLocalModel` from the shared workflow
+program. Bind the exact selected model with `createLocalModelTaskBindings`
+from `@workspace-skills/local-model-task-bindings`. An installation also
+requires the caller to supply the authorized model ref. The handoff records
+whether the observed model can support the requested tools and context size.
+
 ## Check availability
 
 From agent eval, load the typed readiness report. Code reads the catalog and

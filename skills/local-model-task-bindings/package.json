@@ -1,0 +1,12 @@
+{
+  "name": "@workspace-skills/local-model-task-bindings",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@workspace/model-catalog": "workspace:*"
+  }
+}
