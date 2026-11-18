@@ -1,5 +1,5 @@
 import type { LocalModelEntry } from "@workspace/model-catalog/localModels";
-import { createLocalModelTaskBindings } from "../local-model-task-bindings/index.js";
+import { bindLocalModelTask } from "../local-model-task-bindings/bind.js";
 import type { LocalTaskWorld } from "./worlds.js";
 
 export type LocalTaskFixtureOperation = "listModels" | "installModel";
@@ -10,58 +10,51 @@ export function createLocalModelTaskFixture(world: LocalTaskWorld) {
   const slug = modelRef.slice("local:".length);
   let read = 0;
   const operations: LocalTaskFixtureOperation[] = [];
-  const bindings = createLocalModelTaskBindings(
+  const bindings = bindLocalModelTask(
     {
-      async invoke(extension, method, args) {
-        if (extension !== "@workspace-extensions/local-models")
-          throw new Error("Unexpected fixture extension");
-        if (method === "listModels" && args.length === 0) {
-          operations.push("listModels");
-          if (read >= world.snapshots.length)
-            throw new Error("Fixture inventory was read too many times");
-          const snapshot = world.snapshots[read++];
-          if (!snapshot) return [];
-          return [
-            {
-              slug,
-              displayName: "Fixture model",
-              baseUrl: "https://local-fixture.invalid",
-              server: "main",
-              maxTokens: snapshot.contextWindow ?? 8192,
-              contextWindow: snapshot.contextWindow ?? 8192,
-              toolsCapable: snapshot.toolsCapable ?? true,
-              reasoningCapable: false,
-              fit: {
-                fit: snapshot.fit ?? "full-gpu",
-                estTokensPerSec: null,
-                contextLength: 8192,
-                gpuLayers: 0,
-                notes: [],
-              },
-              measuredTokensPerSec: null,
-              state: snapshot.state,
-              download:
-                snapshot.state === "downloading"
-                  ? {
-                      progress: 0.25,
-                      phase: "active",
-                      receivedBytes: 25,
-                      totalBytes: 100,
-                    }
-                  : null,
-              errorMessage:
-                snapshot.state === "error"
-                  ? "Fixture validation could not load the model"
-                  : null,
+      async listModels() {
+        operations.push("listModels");
+        if (read >= world.snapshots.length)
+          throw new Error("Fixture inventory was read too many times");
+        const snapshot = world.snapshots[read++];
+        if (!snapshot) return [];
+        return [
+          {
+            slug,
+            displayName: "Fixture model",
+            baseUrl: "https://local-fixture.invalid",
+            server: "main",
+            maxTokens: snapshot.contextWindow ?? 8192,
+            contextWindow: snapshot.contextWindow ?? 8192,
+            toolsCapable: snapshot.toolsCapable ?? true,
+            reasoningCapable: false,
+            fit: {
+              fit: snapshot.fit ?? "full-gpu",
+              estTokensPerSec: null,
+              contextLength: 8192,
+              gpuLayers: 0,
+              notes: [],
             },
-          ] satisfies LocalModelEntry[];
-        }
-        if (
-          method !== "installModel" ||
-          args.length !== 1 ||
-          args[0] !== modelRef ||
-          !world.installation
-        ) {
+            measuredTokensPerSec: null,
+            state: snapshot.state,
+            download:
+              snapshot.state === "downloading"
+                ? {
+                    progress: 0.25,
+                    phase: "active",
+                    receivedBytes: 25,
+                    totalBytes: 100,
+                  }
+                : null,
+            errorMessage:
+              snapshot.state === "error"
+                ? "Fixture validation could not load the model"
+                : null,
+          },
+        ] satisfies LocalModelEntry[];
+      },
+      async installModel(ref) {
+        if (ref !== modelRef || !world.installation) {
           throw new Error("Unexpected fixture installation");
         }
         operations.push("installModel");
