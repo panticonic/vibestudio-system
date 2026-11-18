@@ -82,6 +82,13 @@ progress through `listModels` and report a failed or incomplete installation.
 Don't delegate to a downloading model and suspend in the hope that the child
 will finish installing it.
 
+For a typed workflow that prepares one selected model, use
+`skills/local-model-task/prepareLocalModel.nl` with the caller-owned bindings
+from `@workspace-skills/local-model-task-fixtures/binding`. The caller assigns
+the exact model ref and grants installation separately after the user requests
+it. The workflow rechecks inventory after the install and returns a handoff
+only when the requested model, tools, and context capacity are ready.
+
 ## Run a task on a local model
 
 Models run inside agent turns. For a bounded delegated task, spawn a normal

@@ -1,0 +1,15 @@
+{
+  "name": "@workspace-skills/local-model-task-fixtures",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./binding": "./binding.ts",
+    "./fixture": "./fixture.ts",
+    "./oracle": "./oracle.ts",
+    "./worlds": "./worlds.ts"
+  },
+  "dependencies": {
+    "@workspace/model-catalog": "workspace:*"
+  }
+}

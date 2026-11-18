@@ -1,0 +1,14 @@
+{
+  "schema": "natlang.package/v2",
+  "name": "vibestudio-local-model-task",
+  "version": "0.1.0",
+  "serviceBinding": "explicit",
+  "targets": { "main": { "entry": "prepareLocalModel.nl" } },
+  "serviceScopes": {
+    "localModelTaskInventory": [
+      "prepareLocalModel/inspectSelected.nl",
+      "prepareLocalModel/readOutcome.nl"
+    ],
+    "localModelTaskInstall": ["prepareLocalModel/applyInstallation.nl"]
+  }
+}
