@@ -8,6 +8,7 @@ export type SystemFinding = {
 export type SystemInvestigationReport = {
   status: SystemStatus;
   findings: SystemFinding[];
+  windows?: SystemLogWindowReport[];
 };
 
 export type SystemPerformanceRun = {
@@ -64,12 +65,22 @@ export type SystemLogInput = {
   sinceSeq: number;
   tag: string;
 };
+export type SystemLogAuditInput = {
+  kind: "server-log-audit";
+  goal: string;
+  windows: SystemLogInput[];
+};
+export type SystemLogWindowReport = {
+  status: SystemStatus;
+  findings: SystemFinding[];
+};
 export type SystemInvestigationRequest =
   | SystemPerformanceInput
   | SystemClientInput
   | SystemRemoteInput
   | SystemModelsInput
   | SystemLogInput
+  | SystemLogAuditInput
   | SystemClientSurfaceInput;
 
 export type SystemPerformanceComparison = {

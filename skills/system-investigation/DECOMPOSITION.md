@@ -14,3 +14,10 @@ This program joins guidance from Client Development, Remote Access, Performance,
 Existing model-readiness and host-log brief programs remain available for their original reports. This program adds an evidence-driven investigation over those same services. A result from one stage cannot change a caller's deployed state or broaden its authority.
 
 `auditClientSurface` adds observational audits from the desktop browser and mobile workspace client guides, Mobile Debug, and the React Native build-provider guide. The typed reports distinguish workspace identity over asynchronous operations, invitation lifecycle, platform and ABI checks, and device-scoped readiness. Its TypeScript helpers select exact artifact and receipt identities. The caller's original host surfaces retain all capability ownership.
+
+The log-audit operation delegates each ordered log window to the existing `readLogs` and
+`interpretLogWindow` stages. It preserves each result and its evidence separately so a later window
+cannot overwrite a finding from an earlier one. The host adapter binds the exact boot cursor and
+subsystem reads to a bounded per-case marker in the actual VibeStudio server log. Sequence
+selection, filtering, and readback use the server log RPC. Compile-time fixtures keep exercising
+the same semantic stages with their own observations.

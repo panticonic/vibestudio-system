@@ -10,6 +10,7 @@ type SystemFinding = {
 type SystemInvestigationReport = {
   status: SystemStatus;
   findings: SystemFinding[];
+  windows?: SystemLogWindowReport[];
 };
 type SystemPerformanceRun = {
   id: string;
@@ -62,11 +63,21 @@ type SystemLogInput = {
   sinceSeq: number;
   tag: string;
 };
+type SystemLogAuditInput = {
+  kind: "server-log-audit";
+  goal: string;
+  windows: SystemLogInput[];
+};
+type SystemLogWindowReport = {
+  status: SystemStatus;
+  findings: SystemFinding[];
+};
 type SystemInvestigationRequest = | SystemPerformanceInput
   | SystemClientInput
   | SystemRemoteInput
   | SystemModelsInput
   | SystemLogInput
+  | SystemLogAuditInput
   | SystemClientSurfaceInput;
 type SystemPerformanceComparison = {
   verdict:
@@ -163,5 +174,5 @@ type SystemClientSurfaceInput = | {
       audit: "mobile-probe";
       observation: SystemMobileProbeAudit;
     };
-declare const fn: NatlangFunction<[request: SystemInvestigationRequest], SystemInvestigationReport> & { readonly assessModels: NatlangFunction<[input: SystemModelsInput], SystemInvestigationReport> & { readonly assessModelState: NatlangFunction<[model: SystemModelObservation | null, slug: string], SystemInvestigationReport> & { readonly classifyFailure: NatlangFunction<[message: string], "download" | "storage" | "memory" | "engine" | "unknown"> } }; readonly auditClientSurface: NatlangFunction<[input: SystemClientSurfaceInput], SystemInvestigationReport> & { readonly inspectBootstrap: NatlangFunction<[evidence: SystemBootstrapAudit], SystemInvestigationReport> & { readonly decideBootstrap: NatlangFunction<[evidence: SystemBootstrapAudit, primary: SystemBootstrapAudit["artifacts"]], SystemInvestigationReport>; readonly findPrimary: ((evidence: SystemBootstrapAudit) => SystemBootstrapAudit["artifacts"]) & {  } }; readonly inspectInteraction: NatlangFunction<[evidence: SystemInteractionAudit], SystemInvestigationReport> & { readonly findWorkspaceReceipt: ((evidence: SystemInteractionAudit) => string | null) & {  } }; readonly inspectMobileProbe: NatlangFunction<[evidence: SystemMobileProbeAudit], SystemInvestigationReport>; readonly inspectPairing: NatlangFunction<[evidence: SystemPairingAudit], SystemInvestigationReport> }; readonly comparePerformance: NatlangFunction<[input: SystemPerformanceInput], SystemInvestigationReport> & { readonly compare: ((input: SystemPerformanceInput) => SystemPerformanceComparison) & {  }; readonly interpretComparison: NatlangFunction<[comparison: SystemPerformanceComparison, runIds: string[]], SystemInvestigationReport> }; readonly readLogs: NatlangFunction<[input: SystemLogInput], SystemInvestigationReport> & { readonly interpretLogWindow: NatlangFunction<[boot: string, records: SystemLogRecord[]], SystemInvestigationReport> }; readonly traceClient: NatlangFunction<[input: SystemClientInput], SystemInvestigationReport> & { readonly decideClient: NatlangFunction<[checks: SystemClientEvidence[]], SystemInvestigationReport>; readonly selectAttempt: ((input: SystemClientInput) => SystemClientEvidence[]) & {  } }; readonly traceRemote: NatlangFunction<[input: SystemRemoteInput], SystemInvestigationReport> & { readonly locateBoundary: NatlangFunction<[checks: SystemRemoteEvidence[]], SystemInvestigationReport> } };
+declare const fn: NatlangFunction<[request: SystemInvestigationRequest], SystemInvestigationReport> & { readonly assessModels: NatlangFunction<[input: SystemModelsInput], SystemInvestigationReport> & { readonly assessModelState: NatlangFunction<[model: SystemModelObservation | null, slug: string], SystemInvestigationReport> & { readonly classifyFailure: NatlangFunction<[message: string], "download" | "storage" | "memory" | "engine" | "unknown"> } }; readonly auditClientSurface: NatlangFunction<[input: SystemClientSurfaceInput], SystemInvestigationReport> & { readonly inspectBootstrap: NatlangFunction<[evidence: SystemBootstrapAudit], SystemInvestigationReport> & { readonly decideBootstrap: NatlangFunction<[evidence: SystemBootstrapAudit, primary: SystemBootstrapAudit["artifacts"]], SystemInvestigationReport>; readonly findPrimary: ((evidence: SystemBootstrapAudit) => SystemBootstrapAudit["artifacts"]) & {  } }; readonly inspectInteraction: NatlangFunction<[evidence: SystemInteractionAudit], SystemInvestigationReport> & { readonly findWorkspaceReceipt: ((evidence: SystemInteractionAudit) => string | null) & {  } }; readonly inspectMobileProbe: NatlangFunction<[evidence: SystemMobileProbeAudit], SystemInvestigationReport>; readonly inspectPairing: NatlangFunction<[evidence: SystemPairingAudit], SystemInvestigationReport> }; readonly auditLogWindows: NatlangFunction<[input: SystemLogAuditInput], SystemInvestigationReport> & { readonly readLogs: NatlangFunction<[input: SystemLogInput], SystemInvestigationReport> & { readonly interpretLogWindow: NatlangFunction<[boot: string, records: SystemLogRecord[]], SystemInvestigationReport> } }; readonly comparePerformance: NatlangFunction<[input: SystemPerformanceInput], SystemInvestigationReport> & { readonly compare: ((input: SystemPerformanceInput) => SystemPerformanceComparison) & {  }; readonly interpretComparison: NatlangFunction<[comparison: SystemPerformanceComparison, runIds: string[]], SystemInvestigationReport> }; readonly readLogs: NatlangFunction<[input: SystemLogInput], SystemInvestigationReport> & { readonly interpretLogWindow: NatlangFunction<[boot: string, records: SystemLogRecord[]], SystemInvestigationReport> }; readonly traceClient: NatlangFunction<[input: SystemClientInput], SystemInvestigationReport> & { readonly decideClient: NatlangFunction<[checks: SystemClientEvidence[]], SystemInvestigationReport>; readonly selectAttempt: ((input: SystemClientInput) => SystemClientEvidence[]) & {  } }; readonly traceRemote: NatlangFunction<[input: SystemRemoteInput], SystemInvestigationReport> & { readonly locateBoundary: NatlangFunction<[checks: SystemRemoteEvidence[]], SystemInvestigationReport> } };
 export default fn;
