@@ -1,7 +1,16 @@
 declare module "natlang:services" {
   export namespace localModels {
     function listModels(): Promise<
-      import("./types.js").SystemModelObservation[]
+      Array<
+        import("./types.js").SystemModelObservation & {
+          displayName: string;
+          fit: { estTokensPerSec: number | null };
+          download: {
+            progress: number;
+            phase: "active" | "queued" | "paused";
+          } | null;
+        }
+      >
     >;
   }
   export namespace serverLog {
