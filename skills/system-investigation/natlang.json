@@ -1,0 +1,11 @@
+{
+  "schema": "natlang.package/v2",
+  "name": "vibestudio-system-investigation",
+  "version": "0.1.0",
+  "serviceBinding": "explicit",
+  "targets": { "main": { "entry": "investigateSystem.nl" } },
+  "serviceScopes": {
+    "localModels": ["investigateSystem/assessModels.nl"],
+    "serverLog": ["investigateSystem/readLogs.nl"]
+  }
+}
