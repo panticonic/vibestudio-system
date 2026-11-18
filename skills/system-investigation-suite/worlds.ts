@@ -1,5 +1,6 @@
 import type {
   SystemClientEvidence,
+  SystemClientSurfaceInput,
   SystemInvestigationReport,
   SystemInvestigationRequest,
   SystemLogRecord,
@@ -237,6 +238,373 @@ function modelIncident(
   if (followup) fixture.expected.findings.push(followup);
   return fixture;
 }
+
+type Audit = SystemClientSurfaceInput["audit"];
+type Observation<A extends Audit> = Extract<
+  SystemClientSurfaceInput,
+  { audit: A }
+>["observation"];
+function scenario<A extends Audit>(
+  id: string,
+  goal: string,
+  audit: A,
+  observation: NoInfer<Observation<A>>,
+  status: SystemStatus,
+  finding: string,
+  evidenceIds: string[],
+): SystemInvestigationWorld {
+  return {
+    id: `system-investigation-${id}`,
+    sourceGroup: `vibestudio:system-investigation:client-surface:${id}`,
+    request: {
+      kind: "client-surface",
+      goal,
+      audit,
+      observation,
+    } as SystemClientSurfaceInput,
+    expected: { status, findings: [{ code: finding, evidenceIds }] },
+  };
+}
+const manifest = {
+  id: "bootstrap",
+  abi: "rn-host-6",
+  build: "app:7",
+  provider: "native-builder",
+};
+const expectation = {
+  abi: "rn-host-6",
+  build: "app:7",
+  provider: "native-builder",
+};
+const primary = {
+  id: "android-primary",
+  platform: "android" as const,
+  role: "primary" as const,
+  expectedIntegrity: "sha256:abc",
+  observedIntegrity: "sha256:abc",
+};
+const invite = {
+  id: "invite-5",
+  deepLink: "https://workspace.invalid/pair/invite-5",
+  room: "assigned-room",
+};
+const install = {
+  id: "installed",
+  kind: "installed" as const,
+  attempt: "candidate",
+  backend: "adb" as const,
+  outcome: "observed" as const,
+};
+const launch = { ...install, id: "launched", kind: "launched" as const };
+const ready = {
+  ...install,
+  id: "workspace-ready",
+  kind: "workspace-ready" as const,
+};
+
+const surfaceCases = [
+  scenario(
+    "desktop-switch-misattribution",
+    "Did a focus switch send the result of my desktop interaction to the wrong workspace?",
+    "workspace-interaction",
+    {
+      surface: "desktop-browser",
+      start: { id: "op", workspace: "System" },
+      receipts: [
+        { id: "dispatch", kind: "operation", workspace: "System" },
+        { id: "late-completion", kind: "completion", workspace: "Personal" },
+      ],
+    },
+    "blocked",
+    "workspace-attribution",
+    ["late-completion"],
+  ),
+  scenario(
+    "mobile-original-workspace",
+    "Did my mobile action stay bound to its original workspace?",
+    "workspace-interaction",
+    {
+      surface: "mobile-browser",
+      start: { id: "tap", workspace: "Project" },
+      receipts: [
+        { id: "dispatch", kind: "operation", workspace: "Project" },
+        { id: "visible-in-original", kind: "completion", workspace: "Project" },
+      ],
+    },
+    "ready",
+    "workspace-action-verified",
+    ["visible-in-original"],
+  ),
+  scenario(
+    "duplicate-direct-delivery",
+    "Why did the desktop show two notifications for the same completed action?",
+    "workspace-interaction",
+    {
+      surface: "desktop-browser",
+      start: { id: "op", workspace: "System" },
+      receipts: [
+        { id: "painted", kind: "completion", workspace: "System" },
+        { id: "direct-delivery", kind: "notification", workspace: "System" },
+        { id: "duplicate-forward", kind: "notification", workspace: "System" },
+      ],
+    },
+    "attention",
+    "duplicate-notification",
+    ["direct-delivery", "duplicate-forward"],
+  ),
+  scenario(
+    "mobile-no-completion-event",
+    "Is there a completed action in the current mobile interaction recording?",
+    "workspace-interaction",
+    {
+      surface: "mobile-browser",
+      start: { id: "tap-op", workspace: "Personal" },
+      receipts: [
+        { id: "dispatched", kind: "operation", workspace: "Personal" },
+      ],
+    },
+    "inconclusive",
+    "action-unsettled",
+    ["tap-op"],
+  ),
+
+  scenario(
+    "pairing-no-deep-link",
+    "Can the observed desktop invitation display an official pairing QR?",
+    "pairing",
+    {
+      invite: { ...invite, deepLink: null },
+      receipts: [],
+    },
+    "blocked",
+    "incomplete-pairing-invite",
+    ["invite-5"],
+  ),
+  scenario(
+    "paired-exact-invite",
+    "Has my current desktop invitation actually settled?",
+    "pairing",
+    {
+      invite,
+      receipts: [
+        { id: "old-pair", kind: "paired", inviteId: "old" },
+        { id: "new-paired", kind: "paired", inviteId: "invite-5" },
+      ],
+    },
+    "ready",
+    "pairing-settled",
+    ["new-paired"],
+  ),
+  scenario(
+    "expired-invite-vs-unrelated-pair",
+    "Did the current invite pair or expire independently of other device activity?",
+    "pairing",
+    {
+      invite,
+      receipts: [
+        { id: "another-pair", kind: "paired", inviteId: "invite-4" },
+        { id: "expired", kind: "expired", inviteId: "invite-5" },
+      ],
+    },
+    "blocked",
+    "pairing-expired",
+    ["expired"],
+  ),
+  scenario(
+    "pairing-device-list-poll",
+    "Can a listDevices result establish that this pairing invite was redeemed?",
+    "pairing",
+    {
+      invite,
+      receipts: [
+        { id: "inventory-observed", kind: "devices-polled", inviteId: null },
+      ],
+    },
+    "inconclusive",
+    "unproven-by-device-inventory",
+    ["inventory-observed"],
+  ),
+
+  scenario(
+    "native-bootstrap-ready",
+    "Verify Android activation prerequisites from the displayed native bootstrap receipts.",
+    "bootstrap",
+    {
+      platform: "android",
+      expectation,
+      manifest,
+      artifacts: [primary],
+    },
+    "ready",
+    "bootstrap-verified",
+    ["android-primary"],
+  ),
+  scenario(
+    "native-bootstrap-abi",
+    "What explains the recovery UI when the selected iOS bundle itself looks healthy?",
+    "bootstrap",
+    {
+      platform: "ios",
+      expectation,
+      manifest: { ...manifest, abi: "rn-host-5" },
+      artifacts: [{ ...primary, id: "ios", platform: "ios" }],
+    },
+    "blocked",
+    "bootstrap-abi",
+    ["bootstrap"],
+  ),
+  scenario(
+    "native-bootstrap-build",
+    "Is the manifest tied to the candidate that just built?",
+    "bootstrap",
+    {
+      platform: "android",
+      expectation,
+      manifest: { ...manifest, build: "app:6" },
+      artifacts: [primary],
+    },
+    "blocked",
+    "bootstrap-build",
+    ["bootstrap"],
+  ),
+  scenario(
+    "native-bootstrap-provider",
+    "Can this platform activate if the build provider identity is absent?",
+    "bootstrap",
+    {
+      platform: "android",
+      expectation,
+      manifest: { ...manifest, provider: null },
+      artifacts: [primary],
+    },
+    "blocked",
+    "bootstrap-provider",
+    ["bootstrap"],
+  ),
+  scenario(
+    "native-bootstrap-integrity",
+    "Why did native finalization refuse the decompressed Android artifact?",
+    "bootstrap",
+    {
+      platform: "android",
+      expectation,
+      manifest,
+      artifacts: [{ ...primary, observedIntegrity: "sha256:wrong" }],
+    },
+    "blocked",
+    "bootstrap-integrity",
+    ["android-primary"],
+  ),
+  scenario(
+    "native-bootstrap-platform",
+    "Is a successfully verified Android primary enough for iOS bootstrap?",
+    "bootstrap",
+    {
+      platform: "ios",
+      expectation,
+      manifest,
+      artifacts: [
+        primary,
+        { ...primary, id: "ios-support", role: "support", platform: "ios" },
+      ],
+    },
+    "blocked",
+    "missing-platform-primary",
+    ["bootstrap"],
+  ),
+  scenario(
+    "native-bootstrap-duplicate",
+    "Can the installer choose an unambiguous Android primary?",
+    "bootstrap",
+    {
+      platform: "android",
+      expectation,
+      manifest,
+      artifacts: [primary, { ...primary, id: "second-primary" }],
+    },
+    "blocked",
+    "ambiguous-platform-primary",
+    ["android-primary", "second-primary"],
+  ),
+  scenario(
+    "native-bootstrap-no-verification",
+    "Is there proof the installed bundle bytes matched the manifest digest?",
+    "bootstrap",
+    {
+      platform: "android",
+      expectation,
+      manifest,
+      artifacts: [{ ...primary, observedIntegrity: null }],
+    },
+    "inconclusive",
+    "unverified-primary",
+    ["android-primary"],
+  ),
+
+  scenario(
+    "android-emulator-current-attempt",
+    "Did the latest emulator install actually become ready in the workspace?",
+    "mobile-probe",
+    {
+      target: "android-emulator",
+      expectedAttempt: "candidate",
+      receipts: [install, launch, ready],
+    },
+    "ready",
+    "mobile-workspace-verified",
+    ["workspace-ready"],
+  ),
+  scenario(
+    "android-prior-workspace-probe",
+    "Can a previous Android attempt's workspace-ready marker certify today's install?",
+    "mobile-probe",
+    {
+      target: "android-device",
+      expectedAttempt: "candidate",
+      receipts: [install, launch, { ...ready, attempt: "previous" }],
+    },
+    "inconclusive",
+    "mobile-attempt-incomplete",
+    ["launched"],
+  ),
+  scenario(
+    "ios-simulator-workspace-refused",
+    "What did the iOS simulator's failed workspace probe establish after launch?",
+    "mobile-probe",
+    {
+      target: "ios-simulator",
+      expectedAttempt: "candidate",
+      receipts: [
+        { ...install, backend: "simctl" },
+        { ...launch, backend: "simctl" },
+        { ...ready, backend: "simctl", outcome: "failed" },
+      ],
+    },
+    "blocked",
+    "mobile-workspace-check-failed",
+    ["workspace-ready"],
+  ),
+  scenario(
+    "ios-physical-invalid-log-stream",
+    "Can this simulator-style log stream prove how the physical iOS attempt behaved?",
+    "mobile-probe",
+    {
+      target: "ios-device",
+      expectedAttempt: "candidate",
+      receipts: [
+        {
+          ...install,
+          id: "simctl-stream",
+          backend: "simctl",
+          kind: "log-stream",
+        },
+      ],
+    },
+    "inconclusive",
+    "unsupported-physical-ios-stream",
+    ["simctl-stream"],
+  ),
+];
 
 export const systemInvestigationWorlds: SystemInvestigationWorld[] = [
   performance(
@@ -818,4 +1186,5 @@ export const systemInvestigationWorlds: SystemInvestigationWorld[] = [
     undefined,
     "model-ready",
   ),
+  ...surfaceCases,
 ];

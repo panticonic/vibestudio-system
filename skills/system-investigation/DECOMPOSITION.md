@@ -12,3 +12,5 @@ This program joins guidance from Client Development, Remote Access, Performance,
 | `readLogs` | Discriminate current failure from routine, recovered, and unrelated lines | Bounded original query, exact boot cursor and timestamps |
 
 Existing model-readiness and host-log brief programs remain available for their original reports. This program adds an evidence-driven investigation over those same services. A result from one stage cannot change a caller's deployed state or broaden its authority.
+
+`auditClientSurface` adds observational audits from the desktop browser and mobile workspace client guides, Mobile Debug, and the React Native build-provider guide. The typed reports distinguish workspace identity over asynchronous operations, invitation lifecycle, platform and ABI checks, and device-scoped readiness. Its TypeScript helpers select exact artifact and receipt identities. The caller's original host surfaces retain all capability ownership.

@@ -4,7 +4,7 @@ import { verifySystemInvestigation } from "./oracle.js";
 import { systemInvestigationWorlds } from "./worlds.js";
 
 describe("authored system-investigation worlds", () => {
-  it("covers the five investigation kinds with distinct goals and private contracts", () => {
+  it("covers the six investigation kinds with distinct goals and private contracts", () => {
     expect(
       new Set(systemInvestigationWorlds.map((world) => world.id)).size,
     ).toBe(systemInvestigationWorlds.length);
@@ -15,7 +15,7 @@ describe("authored system-investigation worlds", () => {
     expect(
       new Set(systemInvestigationWorlds.map((world) => world.request.kind))
         .size,
-    ).toBe(5);
+    ).toBe(6);
     for (const world of systemInvestigationWorlds) {
       expect(world.sourceGroup).toContain(`:${world.request.kind}:`);
       expect(world.request).not.toHaveProperty("expected");
