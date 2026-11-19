@@ -57,6 +57,16 @@ redeems the assigned invite when required, refreshes the route through the hub, 
 verifies the child before reporting success. Links and credentials stay with the host
 caller. A foreign or unusable profile returns its own recovery disposition.
 
+### Assigned commissioning workflow
+
+For a deployment that should also open a device route, use
+`remoteAccess/commissionRemoteWorkspace`. It calls the deployment and device
+workflows in sequence. Between them the host rechecks that the same hub boot
+and workspace are still live, then provides an access assignment for the
+verified workspace. If the deployment changed, observe it again in a fresh
+commissioning run. If the device needs an invite, supply one through the
+trusted host binding and retry with the same assigned profile.
+
 ## Diagnosis and repair
 
 1. Run `remote doctor` with the configured relay URLs.

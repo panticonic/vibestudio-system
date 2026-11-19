@@ -42,3 +42,11 @@ record against hub and child health, and requires a new hub boot after a launch.
 An update also preserves the server and workspace identifiers. The existing CLI
 owns systemd, SSH, package installation, and Iroh doctor operations. The
 deployment program receives bounded public state and never needs a pairing link.
+
+## Commission an assigned remote workspace
+
+| Part | Form | Why |
+| --- | --- | --- |
+| Choose whether deployment evidence permits opening a device route | `commissionRemoteWorkspace` lambda | The operation may install a server, update it, or reuse an already healthy deployment. Their reports determine the next step. |
+| Resolve the deployment receipt to a trusted access assignment | Scoped `bindVerifiedWorkspace` leaf and host adapter | The host checks that the hub and child still match the receipt and binds the caller's device profile. |
+| Pair or resume the profile and verify its route | Existing `openRemoteWorkspace` workflow | The same policy applies to fresh and resumed commissioning. Its own leaves verify exact workspace identity. |

@@ -81,3 +81,14 @@ export type RemoteDeploymentReport = {
   identity: DeploymentIdentity | null;
   evidenceIds: string[];
 };
+
+export type RemoteDeploymentHandoff = {
+  state: "assigned" | "deployment-changed";
+  operationId: string | null;
+};
+
+export type RemoteCommissionReport = {
+  deployment: RemoteDeploymentReport;
+  handoff: RemoteDeploymentHandoff | null;
+  access: RemoteAccessReport | null;
+};

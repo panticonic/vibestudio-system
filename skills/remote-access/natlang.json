@@ -8,6 +8,7 @@
     "remoteDeploymentRead": ["deployRemoteServer/observeBaseline.nl"],
     "remoteDeploymentApply": ["deployRemoteServer/applyDeployment.nl"],
     "remoteDeploymentVerify": ["deployRemoteServer/checkReadiness/observeReadiness.nl"],
+    "remoteDeploymentHandoff": ["commissionRemoteWorkspace/bindVerifiedWorkspace.nl"],
     "remoteAccessRead": ["openRemoteWorkspace/readAssignedProfile.nl"],
     "remoteAccessPair": ["openRemoteWorkspace/pairAssignedProfile.nl"],
     "remoteAccessRoute": ["openRemoteWorkspace/openAssignedRoute/routeThroughHub.nl"],

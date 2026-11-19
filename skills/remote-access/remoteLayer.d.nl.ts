@@ -79,5 +79,14 @@ type RemoteDeploymentReport = {
   identity: DeploymentIdentity | null;
   evidenceIds: string[];
 };
+type RemoteDeploymentHandoff = {
+  state: "assigned" | "deployment-changed";
+  operationId: string | null;
+};
+type RemoteCommissionReport = {
+  deployment: RemoteDeploymentReport;
+  handoff: RemoteDeploymentHandoff | null;
+  access: RemoteAccessReport | null;
+};
 declare const fn: NatlangFunction<[diagnosis: string], RemoteLayer>;
 export default fn;

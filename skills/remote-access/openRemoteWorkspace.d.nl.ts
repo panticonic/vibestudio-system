@@ -79,5 +79,14 @@ type RemoteDeploymentReport = {
   identity: DeploymentIdentity | null;
   evidenceIds: string[];
 };
+type RemoteDeploymentHandoff = {
+  state: "assigned" | "deployment-changed";
+  operationId: string | null;
+};
+type RemoteCommissionReport = {
+  deployment: RemoteDeploymentReport;
+  handoff: RemoteDeploymentHandoff | null;
+  access: RemoteAccessReport | null;
+};
 declare const fn: NatlangFunction<[request: RemoteAccessRequest], RemoteAccessReport> & { readonly decideAdmission: NatlangFunction<[observed: RemoteProfileRead], "pair" | "route" | "invite-required" | "different-profile" | "recover-profile">; readonly openAssignedRoute: NatlangFunction<[priorReceipt: string], RemoteAccessReport> & { readonly interpretChild: NatlangFunction<[child: RemoteChildReceipt], RemoteAccessDisposition>; readonly observeChild: NatlangFunction<[routeReceipt: string], RemoteChildReceipt>; readonly routeThroughHub: NatlangFunction<[priorReceipt: string], RemoteRouteReceipt> }; readonly pairAssignedProfile: NatlangFunction<[profileReceipt: string], RemotePairReceipt>; readonly readAssignedProfile: NatlangFunction<[operationId: string], RemoteProfileRead> };
 export default fn;
