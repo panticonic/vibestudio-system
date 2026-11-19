@@ -1,0 +1,16 @@
+{
+  "name": "@workspace-skills/clientdev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./workflow": "./workflow.ts",
+    "./managed-fixture": "./managed-fixture.ts"
+  },
+  "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/workspace": "workspace:*",
+    "@vibestudio/workspace-contracts": "workspace:*",
+    "@workspace/runtime": "workspace:*"
+  }
+}

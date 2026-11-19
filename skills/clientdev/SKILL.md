@@ -31,6 +31,13 @@ admission applies; on Windows, native processes run with the host OS user's
 permissions. Workspace RPC checks do not imply filesystem or network isolation
 for native code.
 
+To review a candidate against one host contract, call
+`clientDevelopment/reviewClientAdmission` through the shared Natlang workflow
+and bind the assigned System context, client and host with
+`@workspace-skills/clientdev/workflow`. It distinguishes a published build
+from the candidate and reports both required blockers and optional
+degradations.
+
 ## Read by task
 
 | Task                                                          | Reference                                                           |
