@@ -133,6 +133,13 @@ a repeat as a verified cache hit only when the build keys match. Report initial,
 lazy, and total bytes separately, and don't add emitted artifact bytes to sealed
 source bytes.
 
+For an assigned workspace build review, use
+`runWorkflow.domains.performance.reviewBuildPerformance` with the request and
+explicit service from `@workspace-skills/performance-build-bindings`. It
+checks native cache evidence, attributes build time and bundle payload, and
+recommends one follow-up. The service is bound to the current context and the
+exact unit chosen by its caller.
+
 For memory investigations, account for the whole owned process tree, not only
 the Node server: an esbuild service is a child process and may hold most of the
 compiler's RSS. Record parent/child identities, peak memory for the tree (or

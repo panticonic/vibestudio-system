@@ -1,0 +1,10 @@
+{
+  "name": "@workspace-skills/performance-build-bindings",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./index.ts" },
+  "dependencies": {
+    "@workspace/runtime": "workspace:*",
+    "@workspace/testkit": "workspace:*"
+  }
+}

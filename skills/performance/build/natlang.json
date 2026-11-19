@@ -1,0 +1,9 @@
+{
+  "schema": "natlang.package/v2",
+  "name": "vibestudio-build-performance",
+  "version": "0.1.0",
+  "description": "Review native build, cache and panel payload measurements for one assigned workspace unit.",
+  "targets": { "main": { "entry": "reviewBuildPerformance.nl" } },
+  "serviceBinding": "explicit",
+  "serviceScopes": { "buildPerformance": ["reviewBuildPerformance.nl"] }
+}
