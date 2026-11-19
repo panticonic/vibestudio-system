@@ -49,6 +49,13 @@ install-and-pair UX belongs to that desktop service and is not duplicated here.
 `screenshotCaptured`, `screenshotBytes`, and `issues`). It does not include the
 screenshot bytes; call `screenshot` separately when you need the image.
 
+For a read-only device or installed-app task, use the shared Natlang
+[Android runtime audit](../../skills/mobile-runtime-audit/auditAndroidRuntime.nl).
+Bind a specific device and task intent with `bindAndroidRuntimeAudit` from
+`@workspace-skills/mobile-runtime-audit-bindings`. Native status and screenshot capture
+report process and device evidence. Use the workspace shell evidence below to
+establish workspace readiness.
+
 ## Performance receipts
 
 `doctor` reports the selected Android device's ABI and the current internal APK

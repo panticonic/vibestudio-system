@@ -1,0 +1,12 @@
+{
+  "name": "@workspace-skills/mobile-runtime-audit-bindings",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./workflow.ts" },
+  "dependencies": {
+    "@workspace/runtime": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "zod": "3.25.76"
+  }
+}

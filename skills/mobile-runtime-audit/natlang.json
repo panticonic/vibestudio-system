@@ -1,0 +1,13 @@
+{
+  "schema": "natlang.package/v2",
+  "name": "mobile-runtime-audit",
+  "version": "0.1.0",
+  "targets": { "main": { "entry": "auditAndroidRuntime.nl" } },
+  "serviceBinding": "explicit",
+  "serviceScopes": {
+    "androidRuntimeAudit": [
+      "auditAndroidRuntime.nl",
+      "auditAndroidRuntime/reviewRuntime.nl"
+    ]
+  }
+}
