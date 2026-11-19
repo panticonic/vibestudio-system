@@ -11,5 +11,37 @@ type RemoteLayer = | "healthy"
   | "hub-control"
   | "workspace-routing"
   | "child-endpoint";
+type RemoteAccessRequest = { operationId: string };
+type RemoteProfileRead = {
+  receipt: string;
+  state: "unpaired" | "account" | "workspace" | "foreign" | "unusable";
+  inviteAssigned: boolean;
+};
+type RemotePairReceipt = {
+  receipt: string;
+  state: "paired" | "failed";
+};
+type RemoteRouteReceipt = {
+  receipt: string;
+  state: "routed" | "failed";
+};
+type RemoteChildReceipt = {
+  receipt: string;
+  state: "verified" | "unreachable" | "identity-mismatch";
+  workspaceId: string | null;
+};
+type RemoteAccessDisposition = | "workspace-ready"
+  | "invite-required"
+  | "different-profile"
+  | "recover-profile"
+  | "pairing-failed"
+  | "route-unavailable"
+  | "child-unreachable"
+  | "child-identity-mismatch";
+type RemoteAccessReport = {
+  status: RemoteAccessDisposition;
+  workspaceId: string | null;
+  evidenceIds: string[];
+};
 declare const fn: NatlangFunction<[diagnosis: string], RemoteLayer>;
 export default fn;

@@ -1,0 +1,13 @@
+{
+  "schema": "natlang.package/v2",
+  "name": "vibestudio-remote-access",
+  "version": "0.1.0",
+  "targets": { "main": { "entry": "openRemoteWorkspace.nl" } },
+  "serviceBinding": "explicit",
+  "serviceScopes": {
+    "remoteAccessRead": ["openRemoteWorkspace/readAssignedProfile.nl"],
+    "remoteAccessPair": ["openRemoteWorkspace/pairAssignedProfile.nl"],
+    "remoteAccessRoute": ["openRemoteWorkspace/openAssignedRoute/routeThroughHub.nl"],
+    "remoteAccessVerify": ["openRemoteWorkspace/openAssignedRoute/observeChild.nl"]
+  }
+}

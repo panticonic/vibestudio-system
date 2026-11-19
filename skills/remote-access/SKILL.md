@@ -41,6 +41,14 @@ root/admin invitation command to add another person. On mobile, Settings →
 Devices shows the server-minted link. For a phone attached to a paired desktop,
 see [phone setup](../phone-setup/SKILL.md).
 
+### Assigned device workflow
+
+The shared Natlang workflow can run `remoteAccess/openRemoteWorkspace` when a trusted
+host caller supplies an assigned device profile and workspace. It reads the profile,
+redeems the assigned invite when required, refreshes the route through the hub, and
+verifies the child before reporting success. Links and credentials stay with the host
+caller. A foreign or unusable profile returns its own recovery disposition.
+
 ## Diagnosis and repair
 
 1. Run `remote doctor` with the configured relay URLs.
