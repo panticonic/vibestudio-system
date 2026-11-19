@@ -1,0 +1,10 @@
+{
+  "name": "@workspace-skills/server-log-cursor-bindings",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./index.ts" },
+  "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
+    "@workspace/runtime": "workspace:*"
+  }
+}

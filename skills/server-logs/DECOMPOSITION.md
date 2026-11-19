@@ -9,7 +9,7 @@ The function is `briefServerLog`, in `briefServerLog.nl`: `briefServerLog({ sinc
 |---|---|---|
 | Read a bounded window (`tail`, or `query` with `since`/`level`, plus `stats`) | crisp helper `briefServerLog/gather.ts` | The outside world. The bound (300 lines) is the service's own "keep queries bounded" rule, not a deadline. |
 | Collapse repeated lines (a boot prints `[x] Starting` 86 times) | crisp helper `briefServerLog/condense.ts` | Exact counting and grouping. Numbers, identifiers, quoted text and bracketed names are blurred when comparing messages; the group keeps the exact count and first/last `seq`. It also means each distinct message is judged once, not each line. |
-| Judge what a group of lines means: routine, notable or failure | own function `briefServerLog/classify.nl`, `readout: decision` | This is the policy of the skill ("distinguish a concrete incident from normal activity"). The result is a literal union, so it is one scoring pass, and it can be scored against labels. The level is only a hint: a boot prints `warn` lines that are expected, and the sandbox runtime prints an `error`-level experimental-feature notice. |
+| Judge what a group of lines means: routine, notable or failure | own function `classifyHostLogGroup.nl`, `readout: decision` | This is the policy of the skill ("distinguish a concrete incident from normal activity"). The result is a literal union, so it is one scoring pass, and it can be scored against labels. The level is only a hint: a boot prints `warn` lines that are expected, and the sandbox runtime prints an `error`-level experimental-feature notice. |
 | One sentence for the user | crisp, in `briefServerLog/assemble.ts` (a line of counts) | Measured and removed: written by the executor, the headline was the one step that generated text, and on LFM3-1.7B it exhausted its turn budget (6 turns of 1024 tokens, no result) on a case whose decisions all scored. A line of counts carries the same information exactly; the agent writes the prose. |
 | Status (`normal`, `attention`, `incident`) | crisp, in `briefServerLog/assemble.ts` | A consequence of the class decisions (any failure, else any notable). Deciding it again in language would be a second, weaker policy. |
 | Cite `serverBootId`, `latestSeq`, the window and each finding's `seq` range | crisp, in `briefServerLog/assemble.ts` | The old skill warned that a full tail "drops the identity fields from your own answer". Identity and sequence numbers are copied from the service result by code, never retyped by a model. Every `firstSeq`/`lastSeq` comes from a real line. |
@@ -72,3 +72,13 @@ rather than an interactive question.
 
 Reference model (the agent's own): not measured; no agent-class model is available in the harness. The window labels were
 written by the author from the host's own log messages; every incident is an injected line (see Suite).
+
+## Saved cursor review
+
+The shared workflow combines the exact boot and sequence evidence with a
+bounded, fixed-upper-sequence query. The binding checks the server boot and
+retained interval, and detects a query with more matches than the authorized
+window. Nested Natlang stages decide whether to reset, backfill, narrow or
+review the window. The existing log classifier and exact group assembler
+summarize a resumable window. The proposed next cursor names the last
+sequence covered by the read.

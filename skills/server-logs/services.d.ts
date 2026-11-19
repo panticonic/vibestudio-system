@@ -36,4 +36,7 @@ declare module "natlang:services" {
       byTag: { tag: string; count: number }[];
     }>;
   }
+  export const serverLogCursor: {
+    observe(operationId: string): Promise<import("./types.js").ServerLogCursorWindow>;
+  };
 }

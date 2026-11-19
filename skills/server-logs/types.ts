@@ -82,3 +82,32 @@ export type LogBrief = {
   /** The groups that are not routine, failures first. */
   findings: Finding[];
 };
+
+export type ServerLogCursorRequest = { operationId: string; goal: string };
+export type ServerLogCursor = { serverBootId: string; seq: number };
+export type ServerLogCursorWindow = {
+  saved: ServerLogCursor;
+  liveBoot: string;
+  oldestSeq: number | null;
+  latestSeq: number;
+  throughSeq: number;
+  overflow: boolean;
+  snapshot: LogSnapshot | null;
+};
+export type ServerLogCursorStatus =
+  | "review-window"
+  | "reset-for-new-boot"
+  | "backfill"
+  | "future-cursor"
+  | "narrow-window";
+export type ServerLogCursorDecision = {
+  status: ServerLogCursorStatus;
+  reason: string;
+};
+export type ServerLogCursorReport = {
+  decision: ServerLogCursorDecision;
+  liveBoot: string;
+  latestSeq: number;
+  next: ServerLogCursor | null;
+  brief: LogBrief | null;
+};

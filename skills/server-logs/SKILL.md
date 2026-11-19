@@ -82,6 +82,11 @@ question is "is anything wrong?": `level: "warn"` leaves a handful of groups.
 A `normal` brief with warn-level lines is expected: the sandbox runtime prints
 start-up notices at `warn`.
 
+For a caller-assigned saved cursor, the shared Natlang program exposes
+`serverLogs/reviewLogCursor`. It checks the current boot and retained
+sequence range, and proposes a new cursor only after reviewing the bounded
+window. [Workflow design](DECOMPOSITION.md#saved-cursor-review).
+
 ## Live following
 
 For short investigations, repeat bounded queries with `sinceSeq`. A real live

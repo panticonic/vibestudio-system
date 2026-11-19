@@ -68,5 +68,32 @@ type LogBrief = {
   /** The groups that are not routine, failures first. */
   findings: Finding[];
 };
-declare const fn: NatlangFunction<[request: LogRequest], LogBrief> & { readonly assemble: ((snapshot: LogSnapshot, groups: LogGroup[], classes: LogClass[]) => LogBrief) & {  }; readonly classify: NatlangFunction<[group: LogGroup], LogClass>; readonly collect: ((request: LogRequest) => Promise<LogBrief>) & {  }; readonly condense: ((records: LogRecord[]) => LogGroup[]) & {  }; readonly gather: ((request: LogRequest) => Promise<LogSnapshot>) & {  } };
+type ServerLogCursorRequest = { operationId: string; goal: string };
+type ServerLogCursor = { serverBootId: string; seq: number };
+type ServerLogCursorWindow = {
+  saved: ServerLogCursor;
+  liveBoot: string;
+  oldestSeq: number | null;
+  latestSeq: number;
+  throughSeq: number;
+  overflow: boolean;
+  snapshot: LogSnapshot | null;
+};
+type ServerLogCursorStatus = | "review-window"
+  | "reset-for-new-boot"
+  | "backfill"
+  | "future-cursor"
+  | "narrow-window";
+type ServerLogCursorDecision = {
+  status: ServerLogCursorStatus;
+  reason: string;
+};
+type ServerLogCursorReport = {
+  decision: ServerLogCursorDecision;
+  liveBoot: string;
+  latestSeq: number;
+  next: ServerLogCursor | null;
+  brief: LogBrief | null;
+};
+declare const fn: NatlangFunction<[request: LogRequest], LogBrief> & { readonly assemble: ((snapshot: LogSnapshot, groups: LogGroup[], classes: LogClass[]) => LogBrief) & {  }; readonly collect: ((request: LogRequest) => Promise<LogBrief>) & {  }; readonly condense: ((records: LogRecord[]) => LogGroup[]) & {  }; readonly gather: ((request: LogRequest) => Promise<LogSnapshot>) & {  } };
 export default fn;

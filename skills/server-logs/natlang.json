@@ -1,0 +1,20 @@
+{
+  "schema": "natlang.package/v2",
+  "name": "vibestudio-server-logs",
+  "version": "0.1.0",
+  "targets": { "main": { "entry": "briefServerLog.nl" } },
+  "include": [
+    "briefServerLog.nl",
+    "briefServerLog",
+    "classifyHostLogGroup.nl",
+    "reviewLogCursor.nl",
+    "reviewLogCursor",
+    "summarizeLogSnapshot.ts",
+    "types.ts",
+    "services.d.ts"
+  ],
+  "serviceScopes": {
+    "serverLog": ["briefServerLog.nl"],
+    "serverLogCursor": ["reviewLogCursor.nl"]
+  }
+}
