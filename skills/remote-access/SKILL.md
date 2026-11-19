@@ -41,6 +41,14 @@ root/admin invitation command to add another person. On mobile, Settings →
 Devices shows the server-minted link. For a phone attached to a paired desktop,
 see [phone setup](../phone-setup/SKILL.md).
 
+### Assigned deployment workflow
+
+A trusted host caller can bind one explicit deploy or update request to
+`remoteAccess/deployRemoteServer`. The workflow checks the managed service baseline, calls
+the existing installer, and verifies the replacement hub boot and workspace. For updates
+it also verifies the retained server and workspace identities. Its report identifies the
+installation and readiness receipts.
+
 ### Assigned device workflow
 
 The shared Natlang workflow can run `remoteAccess/openRemoteWorkspace` when a trusted

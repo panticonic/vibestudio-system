@@ -31,3 +31,14 @@ checks the independent child connection. Separate leaves own each service call.
 The host retains the invitation and credentials, rejects stale receipts, and
 persists the final assigned selection after the child identifies itself. A device already
 paired to another server remains outside the workflow's assignment.
+
+## Deploy or update an assigned server
+
+The host seals the deployment target, artifact, relays, and operation. The
+workflow observes the managed service before choosing whether an install or
+update is appropriate. It uses separate leaves for the managed installer and
+the subsequent readiness verification. The verifier checks the protected ready
+record against hub and child health, and requires a new hub boot after a launch.
+An update also preserves the server and workspace identifiers. The existing CLI
+owns systemd, SSH, package installation, and Iroh doctor operations. The
+deployment program receives bounded public state and never needs a pairing link.

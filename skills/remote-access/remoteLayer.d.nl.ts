@@ -43,5 +43,41 @@ type RemoteAccessReport = {
   workspaceId: string | null;
   evidenceIds: string[];
 };
+type RemoteDeploymentRequest = { operationId: string };
+type DeploymentIdentity = {
+  serverId: string;
+  bootId: string;
+  buildId: string;
+  workspaceId: string;
+};
+type DeploymentBaseline = {
+  receipt: string;
+  intent: "deploy" | "update";
+  hasPriorIdentity: boolean;
+  state: "inactive" | "ready" | "unverified";
+};
+type DeploymentAction = {
+  receipt: string;
+  state: "applied" | "failed" | "baseline-changed";
+};
+type DeploymentVerification = {
+  receipt: string;
+  state: "verified" | "unready" | "unchanged-boot" | "identity-changed";
+  identity: DeploymentIdentity | null;
+};
+type RemoteDeploymentStatus = | "already-running"
+  | "deployment-ready"
+  | "baseline-unverified"
+  | "update-needs-existing-server"
+  | "installer-failed"
+  | "baseline-changed"
+  | "readiness-unverified"
+  | "boot-unchanged"
+  | "server-identity-changed";
+type RemoteDeploymentReport = {
+  status: RemoteDeploymentStatus;
+  identity: DeploymentIdentity | null;
+  evidenceIds: string[];
+};
 declare const fn: NatlangFunction<[diagnosis: string], RemoteLayer>;
 export default fn;

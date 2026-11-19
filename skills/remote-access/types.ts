@@ -43,3 +43,41 @@ export type RemoteAccessReport = {
   workspaceId: string | null;
   evidenceIds: string[];
 };
+
+export type RemoteDeploymentRequest = { operationId: string };
+export type DeploymentIdentity = {
+  serverId: string;
+  bootId: string;
+  buildId: string;
+  workspaceId: string;
+};
+export type DeploymentBaseline = {
+  receipt: string;
+  intent: "deploy" | "update";
+  hasPriorIdentity: boolean;
+  state: "inactive" | "ready" | "unverified";
+};
+export type DeploymentAction = {
+  receipt: string;
+  state: "applied" | "failed" | "baseline-changed";
+};
+export type DeploymentVerification = {
+  receipt: string;
+  state: "verified" | "unready" | "unchanged-boot" | "identity-changed";
+  identity: DeploymentIdentity | null;
+};
+export type RemoteDeploymentStatus =
+  | "already-running"
+  | "deployment-ready"
+  | "baseline-unverified"
+  | "update-needs-existing-server"
+  | "installer-failed"
+  | "baseline-changed"
+  | "readiness-unverified"
+  | "boot-unchanged"
+  | "server-identity-changed";
+export type RemoteDeploymentReport = {
+  status: RemoteDeploymentStatus;
+  identity: DeploymentIdentity | null;
+  evidenceIds: string[];
+};

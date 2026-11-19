@@ -5,6 +5,9 @@
   "targets": { "main": { "entry": "openRemoteWorkspace.nl" } },
   "serviceBinding": "explicit",
   "serviceScopes": {
+    "remoteDeploymentRead": ["deployRemoteServer/observeBaseline.nl"],
+    "remoteDeploymentApply": ["deployRemoteServer/applyDeployment.nl"],
+    "remoteDeploymentVerify": ["deployRemoteServer/checkReadiness/observeReadiness.nl"],
     "remoteAccessRead": ["openRemoteWorkspace/readAssignedProfile.nl"],
     "remoteAccessPair": ["openRemoteWorkspace/pairAssignedProfile.nl"],
     "remoteAccessRoute": ["openRemoteWorkspace/openAssignedRoute/routeThroughHub.nl"],
