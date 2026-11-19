@@ -44,6 +44,10 @@ artifacts that are served to the Android and iOS hosts.
 
 ## Verification
 
+The [Natlang client-admission review](../../skills/clientdev/natlang/reviewClientAdmission.nl)
+checks a selected React Native client's working and published ABI against the
+Android or iOS host contract and reads its published build entry.
+
 - Run focused build-provider and native delivery tests after changing
   manifests or artifacts.
 - If the change spans build, transport, and activation, run the repository
