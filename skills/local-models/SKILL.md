@@ -90,7 +90,7 @@ Don't delegate to a downloading model and suspend in the hope that the child
 will finish installing it.
 
 For a typed workflow that prepares one selected model, use
-`skills/local-model-task/prepareLocalModel.nl` with the caller-owned bindings
+[`prepareLocalModel.nl`](../local-model-task/prepareLocalModel.nl) with the caller-owned bindings
 from `@workspace-skills/local-model-task-fixtures/binding`. The caller assigns
 the exact model ref and grants installation separately after the user requests
 it. The workflow rechecks inventory after the install and returns a handoff
