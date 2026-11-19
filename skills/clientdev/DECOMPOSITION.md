@@ -8,9 +8,10 @@ a connected device or a launch receipt.
 
 - Source inspection distinguishes a working client contract from the published
   contract and retains exact semantic revisions.
-- Host review branches into runtime/ABI compatibility and required/optional
-  capabilities, preserving the distinction between host support and System
-  trust.
+- Host review branches into runtime and ABI compatibility, then delegates the
+  capability check to separate required and optional functions. Required
+  capability checks report host support and System trust independently.
+  Optional denials stay in their own list for the final admission decision.
 - The final decision combines those reviews with the published build entry.
   A compatible contract and a ready catalog row still do not authorize launch.
 - TypeScript handles exact VCS and build reads, configuration parsing and

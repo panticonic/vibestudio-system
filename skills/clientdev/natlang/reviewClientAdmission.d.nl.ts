@@ -37,9 +37,11 @@ type ClientSourceReview = {
   observation: ClientAdmissionObservation;
   disposition: "working-change" | "published-contract";
 };
-type ClientCapabilityReview = {
+type RequiredClientCapabilityReview = {
   missingRequired: string[];
   untrustedRequired: string[];
+};
+type ClientCapabilityReview = RequiredClientCapabilityReview & {
   deniedOptional: string[];
 };
 type ClientHostReview = {
@@ -60,5 +62,5 @@ type ClientAdmissionReview = {
   host: ClientHostReview;
   decision: ClientDecision;
 };
-declare const fn: NatlangFunction<[request: ClientAdmissionRequest], ClientAdmissionReview> & { readonly chooseNext: NatlangFunction<[source: ClientSourceReview, host: ClientHostReview], ClientDecision>; readonly inspectSource: NatlangFunction<[operationId: string], ClientSourceReview> & { readonly readClient: NatlangFunction<[operationId: string], ClientAdmissionObservation> }; readonly reviewHost: NatlangFunction<[observation: ClientAdmissionObservation], ClientHostReview> & { readonly checkAbi: NatlangFunction<[observation: ClientAdmissionObservation], ClientHostReview["abi"]>; readonly checkCapabilities: NatlangFunction<[observation: ClientAdmissionObservation], ClientCapabilityReview> } };
+declare const fn: NatlangFunction<[request: ClientAdmissionRequest], ClientAdmissionReview> & { readonly chooseNext: NatlangFunction<[source: ClientSourceReview, host: ClientHostReview], ClientDecision>; readonly inspectSource: NatlangFunction<[operationId: string], ClientSourceReview> & { readonly readClient: NatlangFunction<[operationId: string], ClientAdmissionObservation> }; readonly reviewHost: NatlangFunction<[observation: ClientAdmissionObservation], ClientHostReview> & { readonly checkAbi: NatlangFunction<[observation: ClientAdmissionObservation], ClientHostReview["abi"]>; readonly checkCapabilities: NatlangFunction<[observation: ClientAdmissionObservation], ClientCapabilityReview> & { readonly checkOptional: NatlangFunction<[observation: ClientAdmissionObservation], string[]>; readonly checkRequired: NatlangFunction<[observation: ClientAdmissionObservation], RequiredClientCapabilityReview> } } };
 export default fn;

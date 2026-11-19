@@ -9,6 +9,11 @@ description: Develop and diagnose the trusted desktop browser client (runtime `w
 
 It requires `device-session`, `panel-hosting`, `approval-surface` and `hub-control` (so it is listed in `trust.clients`) and may use `native-menus`, `notifications`, `open-external`, `theme`, `devtools` and `integration.install`. Pairing links reach it as the host's `pair` intent, not as a client capability.
 
+The [Natlang client-admission workflow](../../skills/clientdev/natlang/reviewClientAdmission.nl)
+compares the working and published manifests with the desktop host contract.
+It reports the ABI decision, required capability blockers, optional denials,
+and the published build state.
+
 ## Workspace clients
 
 - Workspace UI reads and actions use the client returned by

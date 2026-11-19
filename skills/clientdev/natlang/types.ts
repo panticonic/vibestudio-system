@@ -33,9 +33,11 @@ export type ClientSourceReview = {
   observation: ClientAdmissionObservation;
   disposition: "working-change" | "published-contract";
 };
-export type ClientCapabilityReview = {
+export type RequiredClientCapabilityReview = {
   missingRequired: string[];
   untrustedRequired: string[];
+};
+export type ClientCapabilityReview = RequiredClientCapabilityReview & {
   deniedOptional: string[];
 };
 export type ClientHostReview = {

@@ -11,6 +11,11 @@ the Personal, System, and any other workspaces the account can access over a
 single account connection. Workspaces are isolated from each other; contexts
 stay inside their workspace.
 
+The [Natlang client-admission workflow](../../skills/clientdev/natlang/reviewClientAdmission.nl)
+compares the working and published manifests with the Android or iOS host contract.
+It reports the ABI decision, required capability blockers, optional denials,
+and the published build state.
+
 ## What this client does and doesn't own
 
 - The host runtime owns everything device-level: pairing and re-pairing, the

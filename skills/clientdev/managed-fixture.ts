@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { vcs } from "@workspace/runtime";
-import type { HostKind } from "@vibestudio/workspace-contracts/clients";
+import type { ClientCapability, HostKind } from "@vibestudio/workspace-contracts/clients";
 import type {
   ClientAdmissionObservation,
   ClientAdmissionReview,
@@ -16,6 +16,7 @@ type Assignment = {
   publishedAbi: string;
   workingAbi: string;
   abi: ClientAdmissionReview["host"]["abi"];
+  addedCapability?: { tier: "required" | "optional"; name: ClientCapability };
 };
 
 const catalogDecisions = {
@@ -31,7 +32,9 @@ export async function prepareManagedClientAdmission(
   world: Assignment,
 ) {
   const initial = await vcs.status({ contextId });
-  if (world.workingAbi !== world.publishedAbi) {
+  const { addedCapability } = world;
+  const changed = world.workingAbi !== world.publishedAbi || addedCapability !== undefined;
+  if (changed) {
     const state = initial.workingHead;
     const repo = await vcs.resolveRepository({ state, repoPath: world.source });
     if (!repo) throw new Error("Missing assigned client");
@@ -45,12 +48,20 @@ export async function prepareManagedClientAdmission(
     const manifest = JSON.parse(file.content.text);
     if (manifest.vibestudio?.client?.hostAbi !== world.publishedAbi)
       throw new Error("The assigned client ABI has changed");
-    manifest.vibestudio.client.hostAbi = world.workingAbi;
+    const client = manifest.vibestudio.client;
+    client.hostAbi = world.workingAbi;
+    if (addedCapability) {
+      const { tier, name } = addedCapability;
+      const capabilities = client.capabilities;
+      if (capabilities.required.includes(name) || capabilities.optional.includes(name))
+        throw new Error("The assigned capability already exists in the published manifest");
+      capabilities[tier].push(name);
+    }
     await vcs.edit({
       contextId,
       expectedWorkingHead: state,
       commandId: `client-admission-${crypto.randomUUID()}`,
-      intentSummary: "Stage an incompatible client ABI for review",
+      intentSummary: "Stage the assigned client manifest change for review",
       changes: [
         {
           kind: "content-replace",
@@ -98,10 +109,7 @@ export async function prepareManagedClientAdmission(
           !host.capabilities.includes(capability) || untrusted(capability),
       ),
     };
-    const disposition =
-      world.workingAbi === world.publishedAbi
-        ? "published-contract"
-        : "working-change";
+    const disposition = changed ? "working-change" : "published-contract";
     return {
       source: { observation, disposition },
       host: { abi: world.abi, capabilities },
@@ -124,7 +132,13 @@ export async function prepareManagedClientAdmission(
   async function verify(report: ClientAdmissionReview | null) {
     const [observation] = observations;
     const after = await vcs.status({ contextId });
-    const changed = world.workingAbi !== world.publishedAbi;
+    const capabilityListsMatch = observation && (["required", "optional"] as const).every((tier) => {
+      const published = observation.published[tier];
+      return isDeepStrictEqual(
+        observation.working[tier],
+        addedCapability?.tier === tier ? [...published, addedCapability.name] : published,
+      );
+    });
     const checks = {
       source:
         observations.length === 1 &&
@@ -137,6 +151,7 @@ export async function prepareManagedClientAdmission(
         observation.published.runtime === world.runtime &&
         observation.working.abi === world.workingAbi &&
         observation.published.abi === world.publishedAbi &&
+        capabilityListsMatch &&
         (changed
           ? observation.working.hash !== observation.published.hash &&
             !assigned.clean
@@ -144,6 +159,7 @@ export async function prepareManagedClientAdmission(
       host:
         observation?.host.kind === world.host &&
         observation.trusted &&
+        (!addedCapability || !observation.host.capabilities.includes(addedCapability.name)) &&
         (observation.host.runtimes[world.runtime]
           ? observation.host.runtimes[world.runtime] === world.workingAbi
             ? "compatible"
