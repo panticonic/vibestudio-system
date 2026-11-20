@@ -7,6 +7,6 @@
   "serviceScopes": {
     "diagnosticCatalog": ["workTowardDiagnosticGoal.nl"],
     "diagnosticLog": ["workTowardDiagnosticGoal/readWindow.nl"],
-    "diagnosticHandoff": ["workTowardDiagnosticGoal/stageHandoff.ts"]
+    "diagnosticHandoff": ["workTowardDiagnosticGoal.nl"]
   }
 }
