@@ -51,3 +51,16 @@ deployment program receives bounded public state and never needs a pairing link.
 | Choose whether deployment evidence permits opening a device route | `commissionRemoteWorkspace` lambda | The operation may install a server, update it, or reuse an already healthy deployment. Their reports determine the next step. |
 | Resolve the deployment receipt to a trusted access assignment | Scoped `bindVerifiedWorkspace` leaf and host adapter | The host checks that the hub and child still match the receipt and binds the caller's device profile. |
 | Pair or resume the profile and verify its route | Existing `openRemoteWorkspace` workflow | The same policy applies to fresh and resumed commissioning. Its own leaves verify exact workspace identity. |
+
+## Review an observed workspace route
+
+A caller that already obtained a gateway route can review the identity of
+the workspace it actually reached. This reuses the remote-layer diagnosis
+without issuing a new pairing, refreshing a reach, or changing a profile.
+
+| Responsibility | Implementation |
+| --- | --- |
+| Read the opened gateway | `readGatewayIdentity` calls a scoped read-only port. The receipt carries server, boot and workspace identity. |
+| Compare the authenticated identity with the assignment | `compareGatewayIdentity` uses exact equality. A server mismatch takes precedence over a workspace mismatch. |
+| Interpret the observed route mismatch | `reviewRemoteRoute` calls the existing `remoteLayer` decision using a diagnostic statement derived from the receipt. |
+| Choose the supported next step | `routeHandoff` uses the exact layer and identity verdict. The caller remains responsible for control and transport actions. |

@@ -79,6 +79,11 @@ trusted host binding and retry with the same assigned profile.
    secret is lost or compromised. Clients pinned to the old Endpoint ID will
    need to re-pair.
 
+Use the [Natlang route identity review](reviewRemoteRoute.nl) when the caller
+has already opened a workspace gateway and assigned its expected server and
+workspace IDs. It checks the gateway's authenticated readback and identifies
+the appropriate handoff for an identity mismatch.
+
 The layer that failed says the next check. `remote doctor` names the failing
 check; status and registration logs name the rest.
 

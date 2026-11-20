@@ -5,6 +5,7 @@
   "targets": { "main": { "entry": "openRemoteWorkspace.nl" } },
   "serviceBinding": "explicit",
   "serviceScopes": {
+    "remoteGatewayIdentity": ["reviewRemoteRoute/readGatewayIdentity.nl"],
     "remoteDeploymentRead": ["deployRemoteServer/observeBaseline.nl"],
     "remoteDeploymentApply": ["deployRemoteServer/applyDeployment.nl"],
     "remoteDeploymentVerify": ["deployRemoteServer/checkReadiness/observeReadiness.nl"],

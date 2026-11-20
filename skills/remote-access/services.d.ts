@@ -10,6 +10,12 @@ import type {
 } from "./types.js";
 
 declare module "natlang:services" {
+  import type { RemoteGatewayIdentity } from "./types.js";
+
+  export const remoteGatewayIdentity: {
+    observe(operationId: string): Promise<RemoteGatewayIdentity>;
+  };
+
   export const remoteDeploymentRead: { observe(operationId: string): Promise<DeploymentBaseline> };
   export const remoteDeploymentApply: { apply(baselineReceipt: string): Promise<DeploymentAction> };
   export const remoteDeploymentVerify: { verify(actionReceipt: string): Promise<DeploymentVerification> };

@@ -88,5 +88,23 @@ type RemoteCommissionReport = {
   handoff: RemoteDeploymentHandoff | null;
   access: RemoteAccessReport | null;
 };
+type RemoteRouteReviewRequest = {
+  goal: string;
+  operationId: string;
+  serverId: string;
+  workspaceId: string;
+};
+type RemoteGatewayIdentity = {
+  serverId: string;
+  bootId: string;
+  workspaceId: string;
+};
+type RemoteRouteIdentityVerdict = "verified" | "server-mismatch" | "workspace-mismatch";
+type RemoteRouteReview = {
+  observed: RemoteGatewayIdentity;
+  verdict: RemoteRouteIdentityVerdict;
+  layer: RemoteLayer;
+  next: "accept-identity" | "verify-server-assignment" | "refresh-workspace-reach";
+};
 declare const fn: NatlangFunction<[request: RemoteAccessRequest], RemoteAccessReport> & { readonly decideAdmission: NatlangFunction<[observed: RemoteProfileRead], "pair" | "route" | "invite-required" | "different-profile" | "recover-profile">; readonly openAssignedRoute: NatlangFunction<[priorReceipt: string], RemoteAccessReport> & { readonly interpretChild: NatlangFunction<[child: RemoteChildReceipt], RemoteAccessDisposition>; readonly observeChild: NatlangFunction<[routeReceipt: string], RemoteChildReceipt>; readonly routeThroughHub: NatlangFunction<[priorReceipt: string], RemoteRouteReceipt> }; readonly pairAssignedProfile: NatlangFunction<[profileReceipt: string], RemotePairReceipt>; readonly readAssignedProfile: NatlangFunction<[operationId: string], RemoteProfileRead> };
 export default fn;

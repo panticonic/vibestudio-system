@@ -92,3 +92,24 @@ export type RemoteCommissionReport = {
   handoff: RemoteDeploymentHandoff | null;
   access: RemoteAccessReport | null;
 };
+
+export type RemoteRouteReviewRequest = {
+  goal: string;
+  operationId: string;
+  serverId: string;
+  workspaceId: string;
+};
+
+export type RemoteGatewayIdentity = {
+  serverId: string;
+  bootId: string;
+  workspaceId: string;
+};
+
+export type RemoteRouteIdentityVerdict = "verified" | "server-mismatch" | "workspace-mismatch";
+export type RemoteRouteReview = {
+  observed: RemoteGatewayIdentity;
+  verdict: RemoteRouteIdentityVerdict;
+  layer: RemoteLayer;
+  next: "accept-identity" | "verify-server-assignment" | "refresh-workspace-reach";
+};

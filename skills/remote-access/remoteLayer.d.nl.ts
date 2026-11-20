@@ -88,5 +88,23 @@ type RemoteCommissionReport = {
   handoff: RemoteDeploymentHandoff | null;
   access: RemoteAccessReport | null;
 };
+type RemoteRouteReviewRequest = {
+  goal: string;
+  operationId: string;
+  serverId: string;
+  workspaceId: string;
+};
+type RemoteGatewayIdentity = {
+  serverId: string;
+  bootId: string;
+  workspaceId: string;
+};
+type RemoteRouteIdentityVerdict = "verified" | "server-mismatch" | "workspace-mismatch";
+type RemoteRouteReview = {
+  observed: RemoteGatewayIdentity;
+  verdict: RemoteRouteIdentityVerdict;
+  layer: RemoteLayer;
+  next: "accept-identity" | "verify-server-assignment" | "refresh-workspace-reach";
+};
 declare const fn: NatlangFunction<[diagnosis: string], RemoteLayer>;
 export default fn;

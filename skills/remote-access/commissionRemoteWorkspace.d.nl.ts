@@ -88,5 +88,23 @@ type RemoteCommissionReport = {
   handoff: RemoteDeploymentHandoff | null;
   access: RemoteAccessReport | null;
 };
+type RemoteRouteReviewRequest = {
+  goal: string;
+  operationId: string;
+  serverId: string;
+  workspaceId: string;
+};
+type RemoteGatewayIdentity = {
+  serverId: string;
+  bootId: string;
+  workspaceId: string;
+};
+type RemoteRouteIdentityVerdict = "verified" | "server-mismatch" | "workspace-mismatch";
+type RemoteRouteReview = {
+  observed: RemoteGatewayIdentity;
+  verdict: RemoteRouteIdentityVerdict;
+  layer: RemoteLayer;
+  next: "accept-identity" | "verify-server-assignment" | "refresh-workspace-reach";
+};
 declare const fn: NatlangFunction<[request: RemoteDeploymentRequest], RemoteCommissionReport> & { readonly bindVerifiedWorkspace: NatlangFunction<[deploymentReceipt: string], RemoteDeploymentHandoff>; readonly deployRemoteServer: NatlangFunction<[request: RemoteDeploymentRequest], RemoteDeploymentReport> & { readonly applyDeployment: NatlangFunction<[baselineReceipt: string], DeploymentAction>; readonly checkReadiness: NatlangFunction<[actionReceipt: string], RemoteDeploymentReport> & { readonly interpretReadiness: NatlangFunction<[verified: DeploymentVerification], RemoteDeploymentStatus>; readonly observeReadiness: NatlangFunction<[actionReceipt: string], DeploymentVerification> }; readonly decideDeployment: NatlangFunction<[baseline: DeploymentBaseline], "apply" | "already-running" | "baseline-unverified" | "update-needs-existing-server">; readonly observeBaseline: NatlangFunction<[operationId: string], DeploymentBaseline> }; readonly openRemoteWorkspace: NatlangFunction<[request: RemoteAccessRequest], RemoteAccessReport> & { readonly decideAdmission: NatlangFunction<[observed: RemoteProfileRead], "pair" | "route" | "invite-required" | "different-profile" | "recover-profile">; readonly openAssignedRoute: NatlangFunction<[priorReceipt: string], RemoteAccessReport> & { readonly interpretChild: NatlangFunction<[child: RemoteChildReceipt], RemoteAccessDisposition>; readonly observeChild: NatlangFunction<[routeReceipt: string], RemoteChildReceipt>; readonly routeThroughHub: NatlangFunction<[priorReceipt: string], RemoteRouteReceipt> }; readonly pairAssignedProfile: NatlangFunction<[profileReceipt: string], RemotePairReceipt>; readonly readAssignedProfile: NatlangFunction<[operationId: string], RemoteProfileRead> } };
 export default fn;
