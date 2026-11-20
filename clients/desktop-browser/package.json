@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./update-projection": "./components/desktopUpdateProjection.ts",
+    "./placement": "./layout/placementEngine.ts"
+  },
   "vibestudio": {
     "displayName": "Vibestudio Shell",
     "icon": "🖥️",

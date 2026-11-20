@@ -19,6 +19,8 @@ import type {
   PersistedLayout,
 } from "./types";
 
+export { MIN_COLUMN_WIDTH, PANE_VERTICAL_CHROME_HEIGHT } from "./types";
+
 export type LayoutAction =
   | {
       type: "show-panel";

@@ -16,9 +16,19 @@ import type {
   ClientContract,
 } from "./natlang/types.js";
 
+type AdmissionPorts = {
+  vcs: Pick<typeof vcs, "resolveRepository" | "readFile" | "status">;
+  rpc: Pick<typeof rpc, "call">;
+};
+
 type State = Awaited<ReturnType<typeof vcs.status>>["workingHead"];
 
-async function readText(state: State, repoPath: string, path: string) {
+async function readText(
+  vcs: AdmissionPorts["vcs"],
+  state: State,
+  repoPath: string,
+  path: string,
+) {
   const repository = await vcs.resolveRepository({ state, repoPath });
   if (!repository) throw new Error(`Missing assigned repository ${repoPath}`);
   const file = await vcs.readFile({
@@ -32,10 +42,11 @@ async function readText(state: State, repoPath: string, path: string) {
 }
 
 async function readContract(
+  vcs: AdmissionPorts["vcs"],
   state: State,
   source: string,
 ): Promise<ClientContract> {
-  const file = await readText(state, source, "package.json");
+  const file = await readText(vcs, state, source, "package.json");
   const manifest = JSON.parse(file.text);
   const client = manifest.vibestudio?.client;
   const required: unknown = client?.capabilities?.required ?? [];
@@ -60,12 +71,16 @@ async function readContract(
   };
 }
 
-export function bindClientAdmission(assignment: {
-  contextId: string;
-  source: string;
-  host: HostKind;
-  goal: string;
-}) {
+export function bindClientAdmission(
+  assignment: {
+    contextId: string;
+    source: string;
+    host: HostKind;
+    goal: string;
+  },
+  ports: AdmissionPorts = { rpc, vcs },
+) {
+  const { rpc, vcs } = ports;
   const { contextId, source, host, goal } = assignment;
   const operationId = crypto.randomUUID();
   return {
@@ -77,13 +92,13 @@ export function bindClientAdmission(assignment: {
             throw new Error("Read only the assigned System client");
           const { workingHead, mainEventId } = await vcs.status({ contextId });
           const main = { kind: "event", eventId: mainEventId } as const;
-          const publishedRead = readContract(main, source);
+          const publishedRead = readContract(vcs, main, source);
           const [working, published, meta, units] = await Promise.all([
             workingHead.kind === "event" && workingHead.eventId === mainEventId
               ? publishedRead
-              : readContract(workingHead, source),
+              : readContract(vcs, workingHead, source),
             publishedRead,
-            readText(main, "meta", "vibestudio.yml"),
+            readText(vcs, main, "meta", "vibestudio.yml"),
             rpc.call("main", mainRpcMethods["build.listUnits"], []),
           ]);
           const config = parseTemplateManifestContent(

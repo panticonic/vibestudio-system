@@ -3,10 +3,10 @@ import { ClientUpdatePrompt } from "@workspace/client-kit-web";
 import {
   createClientUpdateModel,
   type ClientUpdateModel,
-  type PendingClientUpdate,
 } from "@workspace/client-update-core";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useShellEvent } from "../shell/useShellEvent";
+import { applyDesktopUpdateNotice, projectRetainedDesktopUpdates } from "./desktopUpdateProjection";
 
 const ClientUpdatesContext = createContext<ClientUpdateModel | null>(null);
 
@@ -45,25 +45,8 @@ export function DesktopClientUpdates({ children }: { children: ReactNode }) {
   );
   const seed = useCallback(async () => {
     const [pending, units] = await Promise.all([app.listPendingUpdates(), supervisedUnits.list()]);
-    const updates: PendingClientUpdate[] = [];
-    for (const update of pending) {
-      const unit = units.find(
-        (candidate) =>
-          candidate.identity.kind === "client" && candidate.identity.entityId === update.appId,
-      );
-      if (!unit) continue;
-      const versions = await supervisedUnits.versions(update.appId);
-      updates.push({
-        clientId: update.appId,
-        source: unit.source,
-        runtime: "web",
-        buildKey: update.buildKey ?? null,
-        toVersion: update.effectiveVersion?.trim() || null,
-        fromVersion: update.previousEffectiveVersion?.trim() || null,
-        canRollback: versions.previous.length > 0,
-      });
-    }
-    model.seed(updates);
+    model.seed(await projectRetainedDesktopUpdates(pending, units, async (id) =>
+      (await supervisedUnits.versions(id)).previous.length));
   }, [app, supervisedUnits, model]);
   // Updates the host kept across a restart are on offer from the start.
   useEffect(() => {
@@ -85,7 +68,7 @@ export function DesktopClientUpdates({ children }: { children: ReactNode }) {
     "supervision:changed",
     useCallback(
       (change) => {
-        if (change.change !== "adopted") model.handleChange(change);
+        applyDesktopUpdateNotice(model, change);
       },
       [model],
     ),
