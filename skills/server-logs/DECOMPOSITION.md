@@ -13,7 +13,7 @@ The function is `briefServerLog`, in `briefServerLog.nl`: `briefServerLog({ sinc
 | One sentence for the user | crisp, in `briefServerLog/assemble.ts` (a line of counts) | Measured and removed: written by the executor, the headline was the one step that generated text, and on LFM3-1.7B it exhausted its turn budget (6 turns of 1024 tokens, no result) on a case whose decisions all scored. A line of counts carries the same information exactly; the agent writes the prose. |
 | Status (`normal`, `attention`, `incident`) | crisp, in `briefServerLog/assemble.ts` | A consequence of the class decisions (any failure, else any notable). Deciding it again in language would be a second, weaker policy. |
 | Cite `serverBootId`, `latestSeq`, the window and each finding's `seq` range | crisp, in `briefServerLog/assemble.ts` | The old skill warned that a full tail "drops the identity fields from your own answer". Identity and sequence numbers are copied from the service result by code, never retyped by a model. Every `firstSeq`/`lastSeq` comes from a real line. |
-| The fixed order read, condense, judge each, assemble | crisp helper `briefServerLog/collect.ts` | A fixed sequence is a function, not a model-run step. The root `briefServerLog.nl` only calls `collect` and returns its value from eval; a 1.7B executor spends one turn on it. |
+| The order read, condense, judge each, assemble | one eval in `briefServerLog.nl` | A workflow can call this brief directly and the classifier calls stay visible in its call tree. The existing `collect` helper supports direct inspection from the skill. |
 | Live following (`server-log:append`), offline JSONL logs, the viewer panel | stays in `SKILL.md` | Subscriptions and teardown are not a one-shot brief. |
 | `runtime.supervision.logs(identity)` for a panel, app, extension, worker or DO | stays in `SKILL.md` | A different service. |
 
@@ -82,3 +82,12 @@ window. Nested Natlang stages decide whether to reset, backfill, narrow or
 review the window. The existing log classifier and exact group assembler
 summarize a resumable window. The proposed next cursor names the last
 sequence covered by the read.
+
+## Incident handoff across two windows
+
+| Part | Decision | Why |
+|---|---|---|
+| Verify sequence bounds, order and boot identity | crisp companions of `reviewHostLogHandoff` | These are exact preconditions for comparisons. The bounded reader rejects a truncated or evicted window. |
+| Read and brief each window | call `briefServerLog` twice | Both windows use the same independent classification and citation machinery as a one-window brief. |
+| Compare what failed and decide what to hand off | nested `interpretLogProgress` decision | Distinguishing recurrence from a different failure requires understanding the messages. A quiet window supplies limited evidence. |
+| Preserve both windows in the report | crisp assembly | The handoff retains the actual outputs of both calls for follow-up and verification. |

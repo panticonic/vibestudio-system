@@ -19,6 +19,8 @@ type LogRequest = {
   since?: number;
   /** Lowest level to read. Omit to read every level. */
   level?: "verbose" | "info" | "warn" | "error";
+  bounds?: LogSequenceRange;
+  tag?: string;
 };
 type LogSnapshot = {
   /** Identifies this server boot; any cursor from an earlier boot is invalid. */
@@ -95,5 +97,29 @@ type ServerLogCursorReport = {
   next: ServerLogCursor | null;
   brief: LogBrief | null;
 };
-declare const fn: NatlangFunction<[request: LogRequest], LogBrief> & { readonly assemble: ((snapshot: LogSnapshot, groups: LogGroup[], classes: LogClass[]) => LogBrief) & {  }; readonly collect: ((request: LogRequest) => Promise<LogBrief>) & {  }; readonly condense: ((records: LogRecord[]) => LogGroup[]) & {  }; readonly gather: ((request: LogRequest) => Promise<LogSnapshot>) & {  } };
+type LogSequenceRange = {
+  /** Last sequence before this window (exclusive). */
+  after: number;
+  /** Last sequence in this window (inclusive). */
+  through: number;
+};
+type HostLogHandoffRequest = {
+  goal: string;
+  serverBootId: string;
+  earlier: LogSequenceRange;
+  later: LogSequenceRange;
+  tag?: string;
+};
+type HostLogProgress = | "recurring-failure"
+  | "new-failure"
+  | "quiet-after-failure"
+  | "needs-attention"
+  | "steady"
+  | "insufficient-evidence";
+type HostLogHandoffReport = {
+  status: HostLogProgress;
+  earlier: LogBrief;
+  later: LogBrief;
+};
+declare const fn: NatlangFunction<[request: LogRequest], LogBrief> & { readonly assemble: ((snapshot: LogSnapshot, groups: LogGroup[], classes: LogClass[]) => LogBrief) & {  }; readonly collect: ((request: LogRequest) => Promise<LogBrief>) & {  }; readonly condense: ((records: LogRecord[]) => LogGroup[]) & {  }; readonly gather: ((request: LogRequest) => Promise<LogSnapshot>) & {  }; readonly classifyHostLogGroup: NatlangFunction<[group: LogGroup], LogClass> };
 export default fn;

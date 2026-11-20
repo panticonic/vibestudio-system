@@ -12,12 +12,14 @@ export type LogRecord = {
   pid: number;
 };
 
-/** A query over the log: either input may be omitted. */
+/** A query over the log. Supply both sequence bounds for a fixed window. */
 export type LogRequest = {
   /** Epoch milliseconds: only lines captured at or after this time. Omit for the newest lines. */
   since?: number;
   /** Lowest level to read. Omit to read every level. */
   level?: "verbose" | "info" | "warn" | "error";
+  bounds?: LogSequenceRange;
+  tag?: string;
 };
 
 /** What the service returned for one request, trimmed to what the brief needs. */
@@ -110,4 +112,33 @@ export type ServerLogCursorReport = {
   latestSeq: number;
   next: ServerLogCursor | null;
   brief: LogBrief | null;
+};
+
+export type LogSequenceRange = {
+  /** Last sequence before this window (exclusive). */
+  after: number;
+  /** Last sequence in this window (inclusive). */
+  through: number;
+};
+
+export type HostLogHandoffRequest = {
+  goal: string;
+  serverBootId: string;
+  earlier: LogSequenceRange;
+  later: LogSequenceRange;
+  tag?: string;
+};
+
+export type HostLogProgress =
+  | "recurring-failure"
+  | "new-failure"
+  | "quiet-after-failure"
+  | "needs-attention"
+  | "steady"
+  | "insufficient-evidence";
+
+export type HostLogHandoffReport = {
+  status: HostLogProgress;
+  earlier: LogBrief;
+  later: LogBrief;
 };

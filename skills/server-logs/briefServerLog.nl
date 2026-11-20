@@ -3,8 +3,9 @@ description: Brief the user on the workspace server's host log, citing the serve
 args:
   request: LogRequest
 returns: LogBrief
+uses: [classifyHostLogGroup]
 budget: { maxTurns: 4, maxTokens: 6144 }
 ---
-Call collect with request and return its result. It reads one bounded window of the host log, collapses repeated lines,
-judges each group and assembles the brief. Return the value exactly as collect gave it, from eval, so the boot
-identity and sequence numbers stay exact.
+Call gather with request and condense the snapshot's records. In the same eval call
+classifyHostLogGroup once for each group using Promise.all in group order. Return
+assemble(snapshot, groups, classes) from eval so the boot and sequence evidence stays exact.

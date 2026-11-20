@@ -8,6 +8,8 @@
     "briefServerLog",
     "classifyHostLogGroup.nl",
     "reviewLogCursor.nl",
+    "reviewHostLogHandoff.nl",
+    "reviewHostLogHandoff",
     "reviewLogCursor",
     "summarizeLogSnapshot.ts",
     "types.ts",

@@ -109,3 +109,12 @@ The in-memory ring buffer only covers the current boot; it is not an archive.
 Keep queries bounded. In every report, include the snapshot's `serverBootId`
 and `latestSeq` so the evidence can be found again, and quote only the records
 needed to explain the incident.
+
+## Follow up on a previous incident
+
+Use `reviewHostLogHandoff.nl` to compare two ordered, non-overlapping windows
+from the same boot. Each request gives an exclusive `after` and inclusive
+`through` sequence and may select a subsystem tag. The program reads and
+classifies each bounded window separately and retains both briefs. A quiet
+later window is evidence about that window only. If a window has expired or
+has more than 300 matches, choose narrower retained bounds.
