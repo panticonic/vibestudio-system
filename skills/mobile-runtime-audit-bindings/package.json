@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./workflow.ts" },
+  "exports": { ".": "./workflow.ts", "./managed": "./managed.ts" },
   "dependencies": {
     "@workspace/runtime": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
