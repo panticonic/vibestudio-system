@@ -1,0 +1,8 @@
+{
+  "schema": "natlang.package/v2",
+  "name": "vibestudio-local-model-readiness",
+  "version": "0.1.0",
+  "targets": { "main": { "entry": "localModelReadiness.nl" } },
+  "include": ["localModelReadiness.nl", "localModelReadiness", "types.ts", "services.d.ts"],
+  "serviceScopes": { "localModels": ["localModelReadiness.nl"] }
+}
