@@ -107,6 +107,29 @@ export type RemoteGatewayIdentity = {
 };
 
 export type RemoteRouteIdentityVerdict = "verified" | "server-mismatch" | "workspace-mismatch";
+export type CliContextSource = "session" | "context" | "ambient" | "binding" | "default";
+export type CliContextCoordinate = { serverId?: string; workspaceId?: string; contextId: string };
+export type CliContextEvidence = {
+  gateway: RemoteGatewayIdentity;
+  credential: { kind: "device" } | { kind: "agent"; contextId: string };
+  operation: "inspect" | "eval" | "edit";
+  selectors: {
+    session?: CliContextCoordinate;
+    context?: CliContextCoordinate;
+    ambient?: CliContextCoordinate;
+    binding?: CliContextCoordinate;
+    default?: CliContextCoordinate;
+  };
+};
+export type CliContextChoice = { source: CliContextSource; coordinate: CliContextCoordinate | null };
+export type CliContextStatus = "usable" | "unattached" | "foreign-workspace" | "foreign-context";
+export type CliContinuation = {
+  source: CliContextSource;
+  contextId: string | null;
+  status: CliContextStatus;
+  action: "run-assigned-command" | "ask-parent" | "repair-scope";
+  gateway: RemoteGatewayIdentity;
+};
 export type RemoteRouteReview = {
   observed: RemoteGatewayIdentity;
   verdict: RemoteRouteIdentityVerdict;

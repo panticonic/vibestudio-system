@@ -6,6 +6,7 @@
   "serviceBinding": "explicit",
   "serviceScopes": {
     "remoteGatewayIdentity": ["reviewRemoteRoute/readGatewayIdentity.nl"],
+    "remoteCliScope": ["planCliContinuation.nl"],
     "remoteDeploymentRead": ["deployRemoteServer/observeBaseline.nl"],
     "remoteDeploymentApply": ["deployRemoteServer/applyDeployment.nl"],
     "remoteDeploymentVerify": ["deployRemoteServer/checkReadiness/observeReadiness.nl"],

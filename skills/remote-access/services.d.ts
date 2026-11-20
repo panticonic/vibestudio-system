@@ -15,6 +15,9 @@ declare module "natlang:services" {
   export const remoteGatewayIdentity: {
     observe(operationId: string): Promise<RemoteGatewayIdentity>;
   };
+  export const remoteCliScope: {
+    evidence(operationId: string): Promise<import("./types.js").CliContextEvidence>;
+  };
 
   export const remoteDeploymentRead: { observe(operationId: string): Promise<DeploymentBaseline> };
   export const remoteDeploymentApply: { apply(baselineReceipt: string): Promise<DeploymentAction> };

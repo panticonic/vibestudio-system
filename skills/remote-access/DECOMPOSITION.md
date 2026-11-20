@@ -64,3 +64,11 @@ without issuing a new pairing, refreshing a reach, or changing a profile.
 | Compare the authenticated identity with the assignment | `compareGatewayIdentity` uses exact equality. A server mismatch takes precedence over a workspace mismatch. |
 | Interpret the observed route mismatch | `reviewRemoteRoute` calls the existing `remoteLayer` decision using a diagnostic statement derived from the receipt. |
 | Choose the supported next step | `routeHandoff` uses the exact layer and identity verdict. The caller remains responsible for control and transport actions. |
+## CLI continuation after route verification
+
+`planCliContinuation` reads the authenticated gateway observed by the route
+review and the assigned CLI invocation. `selectContextSource` applies CLI
+selector precedence. `assessCliContext` checks the selected identity against
+the credential. `chooseCliAction` determines whether to continue with the
+paired device, ask the parent agent, or repair the selected scope. The caller
+supplies redacted coordinates and independently verifies the recommendation.
