@@ -72,3 +72,14 @@ selector precedence. `assessCliContext` checks the selected identity against
 the credential. `chooseCliAction` determines whether to continue with the
 paired device, ask the parent agent, or repair the selected scope. The caller
 supplies redacted coordinates and independently verifies the recommendation.
+
+## Commissioning task bank
+
+The shared workflow uses the same deployment, handoff, and device-access
+lambdas for fresh installs, resumed profiles, and holds. The scoped corpus
+assigns each attempt a single operation and device profile. The adapter admits
+each effect only after the preceding observation and requires the receipt
+from that attempt. The independent oracle checks the exact receipt order,
+identity, and whether the workflow stopped before a disallowed effect. The
+host smoke uses a disposable VibeStudio hub and profile to check the native
+binding, including actual pairing and verification through the child gateway.
