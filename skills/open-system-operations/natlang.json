@@ -1,0 +1,17 @@
+{
+  "schema": "natlang.package/v2",
+  "name": "vibestudio-open-system-operations",
+  "version": "0.1.0",
+  "serviceBinding": "explicit",
+  "targets": { "main": { "entry": "workOnSystemGoal.nl" } },
+  "serviceScopes": {
+    "operatorDiscovery": ["workOnSystemGoal.nl"],
+    "operatorDeployment": [
+      "workOnSystemGoal/handleDeployment/applyAndVerify.nl"
+    ],
+    "operatorProfile": [
+      "workOnSystemGoal/handleProfile.nl",
+      "workOnSystemGoal/handleProfile/pairAndOpen.nl"
+    ]
+  }
+}
