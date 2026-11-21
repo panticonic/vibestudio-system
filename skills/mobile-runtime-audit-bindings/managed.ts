@@ -3,6 +3,7 @@ import type {
   AndroidAuditReport,
   AndroidAuditRequest,
   AndroidRuntimeObservation,
+  AndroidRuntimeStatus,
   AndroidTargetObservation,
 } from "../mobile-runtime-audit/types.js";
 
@@ -11,6 +12,7 @@ type World = {
   id: string;
   goal: string;
   mode: "target" | "application" | "foreign";
+  expectedStatus?: AndroidRuntimeStatus;
 };
 type Device = { serial: string; state: "device" | "unauthorized" | "offline" };
 type Binder = (assignment: Omit<AndroidAuditRequest, "operationId">) => {
@@ -70,6 +72,11 @@ export async function prepareManagedAndroidAudit(
   const targetReview =
     world.mode === "foreign" ? "target-absent" : "target-ready";
   const shouldObserveApp = world.mode === "application";
+  const expectedStatus = world.expectedStatus ?? "app-absent";
+  const hasApp = expectedStatus !== "app-absent";
+  const hasProcess = hasApp && expectedStatus !== "process-absent";
+  const hasImage = expectedStatus === "workspace-unverified";
+  const image = hasImage ? "captured" as const : "unavailable" as const;
 
   async function verify(report: AndroidAuditReport | null) {
     const after = await listDevices();
@@ -91,15 +98,15 @@ export async function prepareManagedAndroidAudit(
         ? applications.length === 1 &&
           application?.target === owned &&
           application.packageName === "app.vibestudio.mobile.internal" &&
-          !application.installed &&
-          !application.processObserved &&
-          !application.screenshotCaptured &&
-          application.screenshotBytes === 0 &&
-          application.issues.length > 0
+          application.installed === hasApp &&
+          application.processObserved === hasProcess &&
+          application.screenshotCaptured === hasImage &&
+          (hasImage ? application.screenshotBytes > 0 : application.screenshotBytes === 0) &&
+          (hasApp || application.issues.length > 0)
         : applications.length === 0,
       report: shouldObserveApp
-        ? report?.runtime?.status === "app-absent" &&
-          report.runtime.image === "unavailable" &&
+        ? report?.runtime?.status === expectedStatus &&
+          report.runtime.image === image &&
           isDeepStrictEqual(report.runtime.observation, application)
         : report?.runtime === null,
     };
@@ -123,11 +130,66 @@ export async function prepareManagedAndroidAudit(
           observation: await services.androidRuntimeAudit.observeApplication(
             bound.request.operationId,
           ),
-          status: "app-absent" as const,
-          image: "unavailable" as const,
+          status: expectedStatus,
+          image,
         }
       : null;
     return verify({ targetObservation, targetReview, runtime });
   }
   return { request: bound.request, services, qualify, verify };
+}
+
+export async function prepareOpenAndroidAudit(
+  input: AndroidAuditInput & { goal: string },
+  world: World,
+  listDevices: () => Promise<Device[]>,
+  bind: Binder,
+) {
+  if (input.goal !== world.goal) throw new Error("Use the original Android audit goal");
+  const nativeAudit = await prepareManagedAndroidAudit(input, world, listDevices, bind);
+  const { operationId, target } = nativeAudit.request;
+  const scope = { operationId, target };
+  let observedScope = false;
+  const androidGoalAudit = {
+    async readScope(goal: string) {
+      if (observedScope || goal !== world.goal) {
+        throw new Error("Read only the exact assigned Android audit scope");
+      }
+      observedScope = true;
+      return structuredClone(scope);
+    },
+  };
+
+  type Envelope = {
+    status?: string;
+    skill?: string;
+    outcome?: { scope: typeof scope; request: AndroidAuditRequest; report: AndroidAuditReport };
+  };
+
+  function evidence(native: Awaited<ReturnType<typeof nativeAudit.verify>>, exactReport: boolean) {
+    const checks = {
+      boundExactAndroidAudit: observedScope && exactReport,
+      verifiedNativeAndroidTarget: native.checks.target && native.checks.lineage,
+      verifiedNativeAndroidRuntime: native.checks.application && native.checks.report,
+    };
+    return { ...input, passed: Object.values(checks).every(Boolean), checks, scope, native };
+  }
+
+  async function verify(result: unknown) {
+    const envelope = result as Envelope | null;
+    const outcome = envelope?.outcome;
+    const native = await nativeAudit.verify(outcome?.report ?? null);
+    const exactReport = envelope?.status === "workspace-skill-reviewed" &&
+      envelope.skill === "androidGoalAudit" &&
+      isDeepStrictEqual(outcome?.scope, scope) &&
+      isDeepStrictEqual(outcome?.request, nativeAudit.request);
+    return { ...evidence(native, exactReport), outcome };
+  }
+
+  async function qualify() {
+    await androidGoalAudit.readScope(input.goal);
+    return evidence(await nativeAudit.qualify(), true);
+  }
+
+  return { services: { ...nativeAudit.services, androidGoalAudit }, verify, qualify };
 }
