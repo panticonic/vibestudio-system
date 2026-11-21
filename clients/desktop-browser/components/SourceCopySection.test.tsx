@@ -11,7 +11,7 @@ import { Provider, createStore } from "jotai";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   list: vi.fn(),
-  route: vi.fn(),
+  openWorkspace: vi.fn(),
   owner: vi.fn(),
   prepare: vi.fn(),
   execute: vi.fn(),
@@ -26,10 +26,10 @@ const api = vi.hoisted(() => ({
 }));
 const control = vi.hoisted(() => ({
   listWorkspaces: api.list,
-  routeWorkspace: api.route,
 }));
 vi.mock("../shell/workspaceContext", () => ({
   useShellWorkspaceClient: () => ({ hubControl: control }),
+  useWorkspaceDesktopHost: () => ({ openWorkspace: api.openWorkspace }),
 }));
 vi.mock("../shell/client", () => ({ createWorkspaceShellClient: api.owner }));
 vi.mock("@workspace/workspace-transfer", () => ({
@@ -66,7 +66,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   Element.prototype.scrollIntoView = vi.fn();
   api.list.mockResolvedValue(rows);
-  api.route.mockResolvedValue(undefined);
+  api.openWorkspace.mockResolvedValue(undefined);
   api.main.mockResolvedValue(state);
   api.status.mockResolvedValue({ workingHead: state });
   api.create.mockImplementation(async ({ contextId }) => ({ contextId }));
@@ -169,13 +169,13 @@ it("retries opening the same destination review panel without creating another",
   const open = await screen.findByRole("button", {
     name: "Review with an agent",
   });
-  api.route.mockRejectedValueOnce(new Error("Route interrupted"));
+  api.openWorkspace.mockRejectedValueOnce(new Error("Opening the workspace failed"));
   fireEvent.click(open);
-  await screen.findByText("Route interrupted");
+  await screen.findByText("Opening the workspace failed");
   fireEvent.click(screen.getByRole("button", { name: "Review with an agent" }));
   await waitFor(() => expect(api.focus).toHaveBeenCalledWith("review-panel"));
   expect(api.panel).toHaveBeenCalledTimes(1);
-  expect(api.route).toHaveBeenLastCalledWith({ workspaceId: "garden" });
+  expect(api.openWorkspace).toHaveBeenLastCalledWith("garden");
   expect(api.panel.mock.calls[0]![1]).toMatchObject({
     contextId: api.create.mock.calls[0]![0].contextId,
     isRoot: true,

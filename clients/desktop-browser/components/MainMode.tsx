@@ -138,33 +138,33 @@ export default function MainMode() {
             </button>
             <WorkspaceChooser />
           </AppDialog>
-        </WorkspaceDesktop>
 
-        <ConnectionSettingsDialog
-          section={settingsTarget?.section ?? null}
-          workspaceId={settingsTarget?.workspaceId}
-          browserDataSection={settingsTarget?.browserDataSection}
-          onBrowserDataSectionChange={(browserDataSection) =>
-            setSettingsTarget((current) =>
-              current ? { ...current, browserDataSection } : null,
-            )
-          }
-          onBrowserDataWorkspaceChange={(workspaceId) =>
-            setSettingsTarget((current) =>
-              current ? { ...current, workspaceId } : null,
-            )
-          }
-          onSectionChange={(section) =>
-            setSettingsTarget(
-              section
-                ? section === "browser-data" &&
-                  settingsTarget?.section !== "browser-data"
-                  ? { section }
-                  : { ...settingsTarget, section }
-                : null,
-            )
-          }
-        />
+          <ConnectionSettingsDialog
+            section={settingsTarget?.section ?? null}
+            workspaceId={settingsTarget?.workspaceId}
+            browserDataSection={settingsTarget?.browserDataSection}
+            onBrowserDataSectionChange={(browserDataSection) =>
+              setSettingsTarget((current) =>
+                current ? { ...current, browserDataSection } : null,
+              )
+            }
+            onBrowserDataWorkspaceChange={(workspaceId) =>
+              setSettingsTarget((current) =>
+                current ? { ...current, workspaceId } : null,
+              )
+            }
+            onSectionChange={(section) =>
+              setSettingsTarget(
+                section
+                  ? section === "browser-data" &&
+                    settingsTarget?.section !== "browser-data"
+                    ? { section }
+                    : { ...settingsTarget, section }
+                  : null,
+              )
+            }
+          />
+        </WorkspaceDesktop>
       </DesktopClientUpdates>
     </ApprovalPresentationContext.Provider>
   );
