@@ -13,7 +13,7 @@ interface ExtensionContextLike {
   fs: {
     /** Materialize the given workspace path(s)/repo(s) into the (sparse) context
      *  folder so they can be read from disk. */
-    ensureMaterialized(scope: string | string[] | "all"): Promise<void>;
+    ensureMaterialized(scope: string | string[] | "all"): Promise<string>;
   };
   rpc: {
     call: import("@vibestudio/rpc").RpcCaller["call"];
@@ -67,62 +67,28 @@ function resolveWithin(root: string, relativePath: string): string {
   return resolved;
 }
 
-async function resolvePanelPath(
-  ctx: ExtensionContextLike,
-  panelPath: string,
-  contextId: string | undefined
-): Promise<string> {
-  const info = await ctx.workspace.getInfo();
-  if (!contextId)
-    return path.isAbsolute(panelPath) ? panelPath : resolveWithin(info.path, panelPath);
-  validateContextId(contextId);
-  return resolveWithin(path.join(info.contextProjectionsPath, contextId), panelPath);
+function resolvePanelPath(root: string, panelPath: string, contextId: string | undefined): string {
+  return !contextId && path.isAbsolute(panelPath) ? panelPath : resolveWithin(root, panelPath);
 }
 
-async function validateFilePath(
-  ctx: ExtensionContextLike,
-  filePath: string | undefined,
-  contextId: string | undefined
-): Promise<void> {
-  if (!filePath) return;
-  const info = await ctx.workspace.getInfo();
-  if (!contextId) {
-    if (!path.isAbsolute(filePath)) resolveWithin(info.path, filePath);
-    return;
-  }
-  validateContextId(contextId);
-  resolveWithin(path.join(info.contextProjectionsPath, contextId), filePath);
+function validateFilePath(root: string, filePath: string | undefined, contextId: string | undefined): void {
+  if (filePath && (contextId || !path.isAbsolute(filePath))) resolveWithin(root, filePath);
 }
 
-async function buildContextWorkspaceContext(
-  ctx: ExtensionContextLike,
-  contextId: string | undefined
-): Promise<WorkspaceContext | undefined> {
-  const info = await ctx.workspace.getInfo();
-  if (!contextId) {
-    // Live userland is its own package universe. The host checkout's pnpm
-    // manifest deliberately does not enumerate these units, so package
-    // discovery must follow the semantic workspace roots just like exact
-    // context discovery below.
-    return discoverWorkspaceSourceContext(info.path) ?? undefined;
-  }
+async function typecheckRoot(ctx: ExtensionContextLike, contextId: string | undefined): Promise<string> {
+  if (!contextId) return (await ctx.workspace.getInfo()).path;
   validateContextId(contextId);
-
-  // A context working head is the complete dependency universe for a context-bound
-  // typecheck. Project it in full before discovery; consulting the live source
-  // tree for missing packages would silently combine two different revisions.
-  await ctx.fs.ensureMaterialized("all");
-  const contextRoot = path.join(info.contextProjectionsPath, contextId);
+  // Dependency discovery needs the complete participant projection. The
+  // materialization receipt identifies its physical location.
+  const root = await ctx.fs.ensureMaterialized("all");
   let stat: fs.Stats;
   try {
-    stat = fs.statSync(contextRoot);
+    stat = fs.statSync(root);
   } catch (error) {
-    throw new Error(`Materialized context root is unavailable: ${contextRoot}`, { cause: error });
+    throw new Error(`Materialized context root is unavailable: ${root}`, { cause: error });
   }
-  if (!stat.isDirectory())
-    throw new Error(`Materialized context root is not a directory: ${contextRoot}`);
-
-  return discoverExactContextWorkspaceContext(contextRoot);
+  if (!stat.isDirectory()) throw new Error(`Materialized context root is not a directory: ${root}`);
+  return root;
 }
 
 /**
@@ -203,12 +169,13 @@ function packageDirsUnder(root: string): string[] {
  * Installation and resource admission belong to the host, never this child. */
 async function typecheckOptions(
   ctx: ExtensionContextLike,
+  root: string,
   panelPath: string,
   contextId: string | undefined
 ): Promise<TypeCheckRpcOptions> {
-  const workspaceContext = await buildContextWorkspaceContext(ctx, contextId);
-  const info = await ctx.workspace.getInfo();
-  const root = contextId ? path.join(info.contextProjectionsPath, contextId) : info.path;
+  const workspaceContext = contextId
+    ? discoverExactContextWorkspaceContext(root)
+    : discoverWorkspaceSourceContext(root);
   const unit = path.relative(root, panelPath).split(path.sep).join("/");
   resolveWithin(root, unit);
   const environment = await ctx.rpc.call("main", mainRpcMethods["build.prepareTypecheck"], [unit, contextId ? `ctx:${contextId}` : undefined]);
@@ -274,12 +241,13 @@ export async function activate(ctx: ExtensionContextLike) {
         );
       }
       const contextId = invocationContextId(ctx, normalizeCheckPanelOptions(options).contextId);
-      const resolvedPath = await resolvePanelPath(ctx, source, contextId);
+      const root = await typecheckRoot(ctx, contextId);
+      const resolvedPath = resolvePanelPath(root, source, contextId);
       const result = await typeCheckRpcMethods["typecheck.check"](
         resolvedPath,
         undefined,
         undefined,
-        await typecheckOptions(ctx, resolvedPath, contextId)
+        await typecheckOptions(ctx, root, resolvedPath, contextId)
       );
       return {
         diagnostics: result.diagnostics,
@@ -297,13 +265,14 @@ export async function activate(ctx: ExtensionContextLike) {
         );
       }
       const effectiveContextId = invocationContextId(ctx, contextId);
-      const resolvedPanelPath = await resolvePanelPath(ctx, source, effectiveContextId);
-      await validateFilePath(ctx, filePath, effectiveContextId);
+      const root = await typecheckRoot(ctx, effectiveContextId);
+      const resolvedPanelPath = resolvePanelPath(root, source, effectiveContextId);
+      validateFilePath(root, filePath, effectiveContextId);
       return typeCheckRpcMethods["typecheck.check"](
         resolvedPanelPath,
         filePath,
         fileContent,
-        await typecheckOptions(ctx, resolvedPanelPath, effectiveContextId)
+        await typecheckOptions(ctx, root, resolvedPanelPath, effectiveContextId)
       );
     },
 
@@ -316,15 +285,16 @@ export async function activate(ctx: ExtensionContextLike) {
       contextId?: string
     ) {
       const effectiveContextId = invocationContextId(ctx, contextId);
-      const resolvedPanelPath = await resolvePanelPath(ctx, panelPath, effectiveContextId);
-      await validateFilePath(ctx, filePath, effectiveContextId);
+      const root = await typecheckRoot(ctx, effectiveContextId);
+      const resolvedPanelPath = resolvePanelPath(root, panelPath, effectiveContextId);
+      validateFilePath(root, filePath, effectiveContextId);
       return typeCheckRpcMethods["typecheck.getTypeInfo"](
         resolvedPanelPath,
         filePath,
         line,
         column,
         fileContent,
-        await typecheckOptions(ctx, resolvedPanelPath, effectiveContextId)
+        await typecheckOptions(ctx, root, resolvedPanelPath, effectiveContextId)
       );
     },
 
@@ -337,15 +307,16 @@ export async function activate(ctx: ExtensionContextLike) {
       contextId?: string
     ) {
       const effectiveContextId = invocationContextId(ctx, contextId);
-      const resolvedPanelPath = await resolvePanelPath(ctx, panelPath, effectiveContextId);
-      await validateFilePath(ctx, filePath, effectiveContextId);
+      const root = await typecheckRoot(ctx, effectiveContextId);
+      const resolvedPanelPath = resolvePanelPath(root, panelPath, effectiveContextId);
+      validateFilePath(root, filePath, effectiveContextId);
       return typeCheckRpcMethods["typecheck.getCompletions"](
         resolvedPanelPath,
         filePath,
         line,
         column,
         fileContent,
-        await typecheckOptions(ctx, resolvedPanelPath, effectiveContextId)
+        await typecheckOptions(ctx, root, resolvedPanelPath, effectiveContextId)
       );
     },
 
@@ -360,11 +331,12 @@ export async function activate(ctx: ExtensionContextLike) {
         return typeCheckRpcMethods["typecheck.getBrowserTypeDefinitions"](undefined, packageNames);
       }
 
-      const resolvedPanelPath = await resolvePanelPath(ctx, source, effectiveContextId);
+      const root = await typecheckRoot(ctx, effectiveContextId);
+      const resolvedPanelPath = resolvePanelPath(root, source, effectiveContextId);
       return typeCheckRpcMethods["typecheck.getBrowserTypeDefinitions"](
         resolvedPanelPath,
         packageNames,
-        await typecheckOptions(ctx, resolvedPanelPath, effectiveContextId)
+        await typecheckOptions(ctx, root, resolvedPanelPath, effectiveContextId)
       );
     },
   };

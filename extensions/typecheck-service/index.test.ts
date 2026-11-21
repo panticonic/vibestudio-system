@@ -43,7 +43,10 @@ async function api(
   workspaceRoot = os.tmpdir(),
   ensureMaterialized: (
     scope: string | string[] | "all",
-  ) => Promise<void> = async () => {},
+  ) => Promise<string> = async () => path.join(
+    contextProjectionsPath,
+    (typeof caller === "object" ? caller.chainContextId ?? caller.contextId : undefined) ?? "",
+  ),
 ) {
   const callerInfo = typeof caller === "string" ? { callerId: caller } : caller;
   return activate({
@@ -216,16 +219,12 @@ describe("@workspace-extensions/typecheck-service", () => {
       await expect(attempt()).rejects.toThrow("scoped to the caller's context");
   });
 
-  it("infers checkPanel context from the current extension invocation", async () => {
+  it("checks the projection returned for the authenticated participant", async () => {
     const contextProjectionsPath = fs.mkdtempSync(
       path.join(os.tmpdir(), "vibestudio-typecheck-context-projections-"),
     );
-    const panelPath = path.join(
-      contextProjectionsPath,
-      "ctx-auto",
-      "panels",
-      "my-app",
-    );
+    const projection = path.join(contextProjectionsPath, "participant-a", "ctx-auto");
+    const panelPath = path.join(projection, "panels", "my-app");
     fs.mkdirSync(panelPath, { recursive: true });
     fs.writeFileSync(
       path.join(panelPath, "package.json"),
@@ -238,6 +237,11 @@ describe("@workspace-extensions/typecheck-service", () => {
     const service = await api(
       { callerId: "worker:agent", chainContextId: "ctx-auto" },
       contextProjectionsPath,
+      os.tmpdir(),
+      async (scope) => {
+        expect(scope).toBe("all");
+        return projection;
+      },
     );
 
     try {
@@ -245,7 +249,7 @@ describe("@workspace-extensions/typecheck-service", () => {
       expect(result.errorCount).toBeGreaterThan(0);
       expect(
         result.diagnostics.some((diagnostic) =>
-          diagnostic.file.includes("ctx-auto"),
+          diagnostic.file.startsWith(projection),
         ),
       ).toBe(true);
     } finally {
@@ -328,7 +332,7 @@ describe("@workspace-extensions/typecheck-service", () => {
           return { path: workspaceRoot, contextProjectionsPath };
         },
       },
-      fs: { ensureMaterialized: async () => {} },
+      fs: { ensureMaterialized: async () => contextRoot },
       rpc: schemaRpcMock({
         async call(_target: string, method: string): Promise<unknown> {
           expect(method).toBe("build.prepareTypecheck");
@@ -520,7 +524,7 @@ describe("@workspace-extensions/typecheck-service", () => {
           return { path: workspaceRoot, contextProjectionsPath };
         },
       },
-      fs: { ensureMaterialized: async () => {} },
+      fs: { ensureMaterialized: async () => contextRoot },
       rpc: schemaRpcMock({
         async call(_target: string, method: string): Promise<unknown> {
           expect(method).toBe("build.prepareTypecheck");
