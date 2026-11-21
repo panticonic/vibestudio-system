@@ -5,6 +5,7 @@ import {
 } from "@vibestudio/service-schemas/clients/workspaceCreationClient";
 import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import { clearWorkspaceCookies } from "./workspaceBrowserProfile";
+import { workspacePhoneReadiness } from "./phoneReadiness.js";
 import {
   resolvePanelWorkspace,
   type PanelLocation,
@@ -576,36 +577,16 @@ export class MobileWorkspaceDirectory {
     const session = this.activeWorkspaceId
       ? this.sessions.get(this.activeWorkspaceId)
       : undefined;
-    if (!session)
-      return {
-        status: "opening",
-        message: "Opening your workspace on the phone…",
-      };
-    const readiness = session.store.get(workspaceReadinessAtom);
-    if (session.state === "failed" || readiness === "failed") {
-      return {
-        status: "failed",
-        message:
-          session.error ??
-          "The phone could not prepare the workspace. Check the message on your phone.",
-      };
-    }
-    if (
-      session.state === "ready" &&
-      session.store.get(connectionStatusAtom) === "connected" &&
-      readiness === "reconciled"
-    ) {
-      return {
-        status: "ready",
-        message:
-          "Your workspace is ready on the phone. You can unplug the USB cable.",
-      };
-    }
-    return {
-      status: "opening",
-      message:
-        "Preparing your workspace. Keep the phone open and respond to any approval shown there.",
-    };
+    return workspacePhoneReadiness(
+      session
+        ? {
+            state: session.state,
+            readiness: session.store.get(workspaceReadinessAtom),
+            transport: session.store.get(connectionStatusAtom),
+            error: session.error,
+          }
+        : undefined,
+    );
   }
 
   open(workspaceId: string): Promise<MobileWorkspaceSession> {
