@@ -1,0 +1,35 @@
+{
+  "name": "@workspace-workers/development-audit-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./contract": "./contract.ts"
+  },
+  "vibestudio": {
+    "kind": "worker",
+    "entry": "index.ts",
+    "agentVisible": false,
+    "title": "Owned development run audit fixture",
+    "durable": {
+      "classes": [
+        {
+          "className": "DevelopmentAuditFixtureDO"
+        }
+      ]
+    },
+    "authority": {
+      "requests": [],
+      "provides": [],
+      "serviceRequests": []
+    }
+  },
+  "dependencies": {
+    "@vibestudio/shared": "workspace:*",
+    "@vibestudio/content-addressing": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "@workspace-workers/development": "workspace:*"
+  }
+}
