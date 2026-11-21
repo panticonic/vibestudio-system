@@ -574,26 +574,36 @@ export function QuickfireOwner() {
   }, [conversationBinding, quickfireSlotId]);
   const quickfireSession = useQuickfireSession(quickfireSource);
 
-  // A send can create the first durable conversation after the open-time
-  // snapshot. Keep the live binding across a list refresh and dismissal.
+  const {
+    connecting,
+    hasConversation,
+    promoted,
+    slotId: boundSlotId,
+    transcript,
+  } = quickfireSession.view;
+  const hasQueuedPrompt =
+    connecting &&
+    transcript.some((entry) => entry.kind === "message" && entry.pending === true);
+
+  // Reopening the palette must preserve a queued send until the slot's
+  // conversation is ready. Only durable conversations belong in the index.
   useEffect(() => {
     const retainedSlot =
-      quickfireSlotId === quickfireSession.view.slotId &&
-      quickfireSession.view.hasConversation &&
-      !quickfireSession.view.promoted
+      quickfireSlotId === boundSlotId &&
+      (hasConversation || hasQueuedPrompt) &&
+      !promoted
         ? quickfireSlotId
         : null;
     retainedConversationSlotRef.current = retainedSlot;
-    if (retainedSlot && !conversationSlotsRef.current.has(retainedSlot)) {
+    if (
+      retainedSlot &&
+      hasConversation &&
+      !conversationSlotsRef.current.has(retainedSlot)
+    ) {
       conversationIndexEpochRef.current += 1;
       conversationSlotsRef.current.add(retainedSlot);
     }
-  }, [
-    quickfireSession.view.hasConversation,
-    quickfireSession.view.promoted,
-    quickfireSession.view.slotId,
-    quickfireSlotId,
-  ]);
+  }, [boundSlotId, hasConversation, hasQueuedPrompt, promoted, quickfireSlotId]);
 
   const searchQuery = state.argSession
     ? state.query
