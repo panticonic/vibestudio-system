@@ -289,6 +289,7 @@ export function QuickfireOwner() {
    * scope without waiting for a round trip. Refreshed on every open.
    */
   const conversationSlotsRef = useRef<Set<string>>(new Set());
+  const retainedConversationSlotRef = useRef<string | null>(null);
   /** Invalidates an in-flight list snapshot when a local clear changes truth. */
   const conversationIndexEpochRef = useRef(0);
 
@@ -308,7 +309,7 @@ export function QuickfireOwner() {
       } catch {
         return null;
       }
-    }, []);
+    }, [quickfire]);
 
   // Warm the resume index before the first accelerator press. Opening the
   // palette must not be the operation that first discovers durable state.
@@ -381,7 +382,10 @@ export function QuickfireOwner() {
         setPanelLost(false);
         const target = options?.panelId ?? focused ?? stateRef.current.panelId;
         const resolvedMode =
-          mode === "all" && target && conversationSlotsRef.current.has(target)
+          mode === "all" &&
+          target &&
+          (retainedConversationSlotRef.current === target ||
+            conversationSlotsRef.current.has(target))
             ? "quickfire"
             : mode;
         returnFocusPanelIdRef.current = focused ?? target;
@@ -571,21 +575,23 @@ export function QuickfireOwner() {
   const quickfireSession = useQuickfireSession(quickfireSource);
 
   // A send can create the first durable conversation after the open-time
-  // snapshot. Remember it immediately so the next open resumes synchronously.
+  // snapshot. Keep the live binding across a list refresh and dismissal.
   useEffect(() => {
-    if (!quickfireSlotId) return;
-    if (
+    const retainedSlot =
+      quickfireSlotId === quickfireSession.view.slotId &&
       quickfireSession.view.hasConversation &&
       !quickfireSession.view.promoted
-    ) {
-      if (!conversationSlotsRef.current.has(quickfireSlotId)) {
-        conversationIndexEpochRef.current += 1;
-        conversationSlotsRef.current.add(quickfireSlotId);
-      }
+        ? quickfireSlotId
+        : null;
+    retainedConversationSlotRef.current = retainedSlot;
+    if (retainedSlot && !conversationSlotsRef.current.has(retainedSlot)) {
+      conversationIndexEpochRef.current += 1;
+      conversationSlotsRef.current.add(retainedSlot);
     }
   }, [
     quickfireSession.view.hasConversation,
     quickfireSession.view.promoted,
+    quickfireSession.view.slotId,
     quickfireSlotId,
   ]);
 
@@ -1376,6 +1382,8 @@ export function QuickfireOwner() {
               conversationIndexEpochRef.current += 1;
               if (quickfireSlotId)
                 conversationSlotsRef.current.delete(quickfireSlotId);
+              if (retainedConversationSlotRef.current === quickfireSlotId)
+                retainedConversationSlotRef.current = null;
               setQuickfireConversations(null);
               setState((current) => ({
                 ...current,

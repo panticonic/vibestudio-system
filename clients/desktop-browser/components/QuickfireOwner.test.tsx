@@ -26,6 +26,7 @@ vi.mock("../shell/workspaceContext", () => {
       focus: api.focus,
       listPinnedPanelIds: async () => [],
       getRootGroups: async () => ({ groups: [] }),
+      getBrowserAddressOptions: async () => ({ suggestions: [] }),
     },
     quickfire: { list: api.list },
     hostCommands: { list: async () => [] },
@@ -78,6 +79,7 @@ vi.mock("./useQuickfireSession", () => ({
     api.bindings.push(source?.slotId ?? null);
     return {
       view: {
+        slotId: source?.slotId ?? null,
         hasConversation: Boolean(source),
         promoted: false,
         transcript: [],
@@ -153,6 +155,14 @@ describe("Quickfire opening ownership", () => {
     expect(api.bindings.at(-1)).toBe("panel-a");
     await act(async () => {
       emitShellEventFixture(api.events, "open-command-palette", );
+    });
+    await waitFor(() => expect(api.surface?.props.mode).toBe("quickfire"));
+    expect(api.bindings.at(-1)).toBe("panel-a");
+
+    // The cached list can omit the conversation this shell still has bound.
+    dismiss();
+    await act(async () => {
+      emitShellEventFixture(api.events, "open-command-palette");
     });
     await waitFor(() => expect(api.surface?.props.mode).toBe("quickfire"));
     expect(api.bindings.at(-1)).toBe("panel-a");
