@@ -3,7 +3,7 @@ import { profileBuild } from "@workspace/testkit";
 import type {
   BuildPerformanceObservation,
   BuildPerformanceRequest,
-} from "../performance/build/types.js";
+} from "@workspace-skills/performance/build-types";
 
 type Assignment = {
   source: string;
