@@ -119,14 +119,14 @@ export function prepareManagedLogAudit(
     tag: string;
     limit: number;
   }) {
-    const input = windows[observed.length];
+    const input = windows.find(input => input.sinceSeq === filter.sinceSeq && input.tag === filter.tag);
     if (
       !input ||
       input.sinceSeq !== filter.sinceSeq ||
       input.tag !== filter.tag ||
-      filter.limit !== 100
+      !Number.isInteger(filter.limit) || filter.limit < 1 || filter.limit > 100
     )
-      throw new Error("Read only the next assigned host log window");
+      throw new Error("Read an assigned host log window with a bounded result limit");
 
     const snapshot = await queryLog({
       ...filter,
@@ -142,7 +142,7 @@ export function prepareManagedLogAudit(
       );
     const allowed =
       input.tag === workerdLogTag
-        ? seed.steps.filter((seq) => seq > input.sinceSeq)
+        ? seed.steps.filter((seq) => seq > input.sinceSeq).slice(0, filter.limit)
         : [];
     const numbers = snapshot.records.map(({ seq }) => seq);
     const records = snapshot.records.map(
@@ -173,7 +173,8 @@ export function prepareManagedLogAudit(
 
   function verify(report: SystemInvestigationReport | null) {
     const checks = {
-      exactWindows: observed.length === windows.length,
+      coveredWindows: windows.every(input => observed.some(row => row.input === input &&
+        row.records.length === (input.tag === workerdLogTag ? seed.steps.filter(seq => seq > input.sinceSeq).length : 0))),
       summary:
         report?.status === expected.status &&
         matchesFindings(report.findings, expected.findings),

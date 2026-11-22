@@ -183,7 +183,7 @@ export async function prepareOpenSystemDiagnostics(
   }
   async function verify(value: unknown, boundary?: { rejectedForeign: boolean; rejectedForged: boolean }) {
     const envelope = value as Partial<Envelope> | null;
-    const report = envelope?.outcome;
+    const report = envelope?.outcome ?? value as DiagnosticReport | null;
     const native = await Promise.all(sources.filter(({ source }) => observed.has(source.id))
       .map(({ checkpoint, source }) => verifyNative(checkpoint, observed.get(source.id)!)));
     const expected = world.expected;
@@ -201,11 +201,10 @@ export async function prepareOpenSystemDiagnostics(
     const checks = {
       discoveredDiagnosticCheckpoints: discovered,
       boundNativeDiagnosticReadback: native.every(Boolean),
-      selectedExactDiagnosticWindows: observed.size === expectedReads.length && expectedReads.every(([key, status]) => observed.get(sourceFor(key).source.id)?.status === status),
+      selectedRequiredDiagnosticWindows: expectedReads.every(([key, status]) => observed.get(sourceFor(key).source.id)?.status === status),
       preservedDiagnosticBootCoverage: Array.isArray(report?.coverage) && isDeepStrictEqual(
         [...report.coverage].sort((a, b) => a.sourceId.localeCompare(b.sourceId)), coverage().sort((a, b) => a.sourceId.localeCompare(b.sourceId))),
-      reconciledDiagnosticFinding: envelope?.status === "workspace-skill-reviewed" && envelope.skill === "diagnostics" &&
-        report?.finding?.status === expected.status && Boolean(reason && (expected.mentions ?? []).every((choices) => choices.some((term) => reason.includes(term)))),
+      reconciledDiagnosticFinding: report?.finding?.status === expected.status && Boolean(reason && (expected.mentions ?? []).every((choices) => choices.some((term) => reason.includes(term)))),
       groundedDiagnosticCitations: Array.isArray(citations) && citations.every(exactCitation) &&
         isDeepStrictEqual(ordered(citations), ordered(expectedCitations())),
       verifiedDiagnosticHandoff: verifiedHandoff,

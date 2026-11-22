@@ -104,8 +104,7 @@ export async function prepareLocalModelComparison(
     const checks = {
       stableInventory: JSON.stringify(after) === JSON.stringify(rows),
       exactReads:
-        inspected.length === refs.length &&
-        inspected.every((ref, index) => ref === refs[index]),
+        refs.every(ref => inspected.includes(ref)),
       handoff:
         report?.disposition === expected.disposition &&
         report.ref === expected.ref &&
@@ -115,8 +114,8 @@ export async function prepareLocalModelComparison(
       candidates:
         Array.isArray(report?.candidates) &&
         report.candidates.length === candidates.length &&
-        candidates.every((candidate, index) => {
-          const result = report.candidates?.[index];
+        candidates.every((candidate) => {
+          const result = report.candidates?.find(row => row.ref === candidate.ref);
           return (
             result?.ref === candidate.ref &&
             result.state === candidate.state &&

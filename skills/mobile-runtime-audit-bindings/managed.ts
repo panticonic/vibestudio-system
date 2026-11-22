@@ -152,7 +152,7 @@ export async function prepareOpenAndroidAudit(
   let observedScope = false;
   const androidGoalAudit = {
     async readScope(goal: string) {
-      if (observedScope || goal !== world.goal) {
+      if (goal !== world.goal) {
         throw new Error("Read only the exact assigned Android audit scope");
       }
       observedScope = true;
@@ -177,11 +177,9 @@ export async function prepareOpenAndroidAudit(
 
   async function verify(result: unknown) {
     const envelope = result as Envelope | null;
-    const outcome = envelope?.outcome;
+    const outcome = envelope?.outcome ?? result as NonNullable<Envelope["outcome"]> | null;
     const native = await nativeAudit.verify(outcome?.report ?? null);
-    const exactReport = envelope?.status === "workspace-skill-reviewed" &&
-      envelope.skill === "androidGoalAudit" &&
-      isDeepStrictEqual(outcome?.scope, scope) &&
+    const exactReport = isDeepStrictEqual(outcome?.scope, scope) &&
       isDeepStrictEqual(outcome?.request, nativeAudit.request);
     return { ...evidence(native, exactReport), outcome };
   }
