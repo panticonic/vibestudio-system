@@ -1,0 +1,59 @@
+[
+  {
+    "template": "system",
+    "entry": "skills/open-system-diagnostics/workTowardDiagnosticGoal.nl",
+    "resultType": "DiagnosticReport",
+    "decision": "retain requested domain value",
+    "fields": {
+      "finding": "requested incident diagnosis with exact log citations",
+      "coverage": "requested incident source coverage/gaps",
+      "artifact": "actual retained diagnostic handoff"
+    },
+    "evidence": [
+      "skills/open-system-diagnostics/workTowardDiagnosticGoal.nl",
+      "skills/open-system-diagnostics/types.ts"
+    ],
+    "consumers": [
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/natlang.json:5:  \"targets\": { \"main\": { \"entry\": \"workTowardDiagnosticGoal.nl\" } },",
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/natlang.json:8:    \"diagnosticCatalog\": [\"workTowardDiagnosticGoal.nl\"],",
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/natlang.json:9:    \"diagnosticLog\": [\"workTowardDiagnosticGoal/readWindow.nl\"],",
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/natlang.json:10:    \"diagnosticHandoff\": [\"workTowardDiagnosticGoal.nl\"]"
+    ],
+    "nativeConsumers": [
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics-runtime/managed.ts:7:  DiagnosticArtifact, DiagnosticFinding, DiagnosticRecord, DiagnosticReport, DiagnosticSource,",
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics-runtime/managed.ts:30:type Envelope = DiagnosticReport;",
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics-runtime/managed.ts:186:    const report = envelope?.outcome ?? value as DiagnosticReport | null;",
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/workTowardDiagnosticGoal/bindReport.ts:1:import type { DiagnosticDecision, DiagnosticReport, Inspection } from \"../types.js\";",
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/workTowardDiagnosticGoal/bindReport.ts:3:export default function bindReport(decision: DiagnosticDecision, inspected: Inspection[]): DiagnosticReport {",
+      "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/types.ts:35:export type DiagnosticReport = {"
+    ]
+  },
+  {
+    "template": "system",
+    "entry": "skills/open-system-operations/workOnSystemGoal.nl",
+    "resultType": "OperatorReport",
+    "decision": "retain requested domain value",
+    "fields": {
+      "status": "requested application value",
+      "reason": "requested application value",
+      "targetId": "actual operated target handle",
+      "identity": "actual public deployment/profile identity",
+      "evidenceIds": "native receipt/citation handles for requested operational result"
+    },
+    "evidence": [
+      "skills/open-system-operations/workOnSystemGoal.nl",
+      "skills/open-system-operations/types.ts"
+    ],
+    "consumers": [
+      "/home/werg/vibe-app-values-system/skills/open-system-operations/natlang.json:6:  \"targets\": { \"main\": { \"entry\": \"workOnSystemGoal.nl\" } },",
+      "/home/werg/vibe-app-values-system/skills/open-system-operations/natlang.json:8:    \"operatorDiscovery\": [\"workOnSystemGoal.nl\"],",
+      "/home/werg/vibe-app-values-system/skills/open-system-operations/natlang.json:10:      \"workOnSystemGoal/handleDeployment/applyAndVerify.nl\"",
+      "/home/werg/vibe-app-values-system/skills/open-system-operations/natlang.json:13:      \"workOnSystemGoal/handleProfile.nl\",",
+      "/home/werg/vibe-app-values-system/skills/open-system-operations/natlang.json:14:      \"workOnSystemGoal/handleProfile/pairAndOpen.nl\"",
+      "/home/werg/vibe-app-values-system/skills/open-system-operations/SKILL.md:6:Use `workOnSystemGoal.nl` with the live terminal authority for the current"
+    ],
+    "nativeConsumers": [
+      "/home/werg/vibe-app-values-system/skills/open-system-operations/types.ts:69:export type OperatorReport = {"
+    ]
+  }
+]
