@@ -183,7 +183,7 @@ export async function prepareOpenSystemDiagnostics(
   function coverage() {
     return [...observed.values()].map(({ source, status, liveBoot, through }) => ({ sourceId: source.id, status, liveBoot, through }));
   }
-  async function verify(value: unknown, boundary?: { rejectedForeign: boolean; rejectedForged: boolean }|InvocationObservations) {
+  async function verifyEvidence(value: unknown, boundary?: { rejectedForeign: boolean; rejectedForged: boolean },invocation?:InvocationObservations) {
     const envelope = value as Partial<Envelope> | null;
     const report = envelope?.outcome ?? value as DiagnosticReport | null;
     const native = await Promise.all(sources.filter(({ source }) => observed.has(source.id))
@@ -213,7 +213,6 @@ export async function prepareOpenSystemDiagnostics(
       ...(boundary && "rejectedForeign" in boundary ? { rejectedForeignDiagnosticCheckpoint: boundary.rejectedForeign, rejectedForgedDiagnosticCitation: boundary.rejectedForged } : {}),
     };
     const contract:SemanticOutcomeContract={effects:{checks:["discoveredDiagnosticCheckpoints", "boundNativeDiagnosticReadback", "selectedRequiredDiagnosticWindows", "verifiedDiagnosticHandoff"] .concat(boundary && "rejectedForeign" in boundary ? ["rejectedForeignDiagnosticCheckpoint","rejectedForgedDiagnosticCitation"] : []),rationale:"Independent native observations, authority and persisted state establish application effects."},returnedValue:{checks:["preservedDiagnosticBootCoverage", "reconciledDiagnosticFinding", "groundedDiagnosticCitations"],required:true,rationale:"These are the actual requested domain findings or query values; mutation-only calls retain their separately observed effects."},incidentalValues:{checks:["returnedDiagnosticArtifact"],rationale:"Optional incorrect mutation returns are recorded against the actual invocation, without invalidating correct native effects."}};
-    const invocation=boundary&&"returns" in boundary?boundary:undefined;
     const incorrectReturnValues=contract.incidentalValues!.checks.some(name=>!(checks as Record<string,boolean>)[name])&&invocation ? (await invocation.returns(call=>call.parentCallId===null)).filter(row=>isDeepStrictEqual(row.value,value)).map(({definition,value})=>({definition,value,required:contract.returnedValue.required&&contract.returnedValue.checks.some(name=>!(checks as Record<string,boolean>)[name])})) : [];
     return assessSemanticOutcome({incorrectReturnValues,
       caseId, contextId, goal: world.goal, catalog, windows: [...observed.values()],
@@ -222,6 +221,7 @@ export async function prepareOpenSystemDiagnostics(
     },contract);
   }
 
+  async function verify(value:unknown,invocation?:InvocationObservations){return verifyEvidence(value,undefined,invocation);}
   return {
     goal: world.goal, services, verify,
     async qualify() {
@@ -239,7 +239,7 @@ export async function prepareOpenSystemDiagnostics(
       const finding = { status: world.expected.status, reason: (world.expected.mentions ?? []).map(([term]) => term).join("; ") || "Owned diagnostic interval verified", citations: expectedCitations() };
       const artifact = world.expected.stage ? await services.diagnosticHandoff.stage(finding) : null;
       const report: Envelope = { finding, coverage: coverage(), artifact };
-      return verify(report, { rejectedForeign, rejectedForged });
+      return verifyEvidence(report, { rejectedForeign, rejectedForged });
     },
   };
 }
