@@ -1,0 +1,35 @@
+{
+  "scope": "All supplied candidates in this template classified; explicit once/issued-state guards additionally inspected. This does not claim an arbitrary text scan proves absence of every semantic guard.",
+  "candidates": [
+    {
+      "file": "system/packages/approvals-core/src/cardModel.ts",
+      "line": 57,
+      "text": "  const breadcrumbs = approval.requester?.breadcrumbs ?? [];\n  if (breadcrumbs.length <= 1) return null;\n  return (\n    breadcrumbs\n      .map((breadcrumb) => {\n        if (breadcrumb.category === \"unknown\") return breadcrumb.label;\n        const kind = getRequesterCategoryLabel(breadcrumb.category);",
+      "classification": "native-business-payload-or-seed-cardinality; not-teacher-read-count"
+    },
+    {
+      "file": "system/workers/development-audit-fixture/index.ts",
+      "line": 44,
+      "text": "    if (!input.scope.startsWith(\"owned-development-\") || input.entries.length > 3 || input.sessions.length > 3 ||\n      input.entries.some(({ journal }) => journal.length > 8)) throw new Error(\"Invalid development audit seed\");\n    this.ctx.storage.transactionSync(() => {\n      const store = new DevelopmentStore(this.sql, operation => operation());\n      for (const session of input.sessions) store.putSession(session);\n      for (const { run, journal } of input.entries) {\n        const accepted = { ...run, state: \"accepted\" as const, commitPoint: \"none\" as const, updatedAt: run.createdAt,",
+      "classification": "native-business-payload-or-seed-cardinality; not-teacher-read-count"
+    },
+    {
+      "file": "system/skills/mobile-runtime-audit-bindings/managed.ts",
+      "line": 110,
+      "text": "          report.runtime.image === image &&\n          isDeepStrictEqual(report.runtime.observation, application)\n        : report?.runtime === null,\n    };\n    return {\n      ...input,\n      request: bound.request,",
+      "classification": "typed-domain-result-or-native-protected-state; not-teacher-read-count"
+    },
+    {
+      "file": "system/skills/clientdev/managed-fixture.ts",
+      "line": 144,
+      "text": "      source:\n        observations.length === 1 &&\n        observation?.operationId === bound.request.operationId &&\n        observation.contextId === contextId &&\n        observation.source === world.source &&\n        observation.mainRevision === initial.mainEventId &&\n        observation.workingRevision === assignedRevision &&",
+      "classification": "fix-issued-observation-membership"
+    },
+    {
+      "file": "system/skills/clientdev/managed-fixture.ts",
+      "line": 173,
+      "text": "      report: Boolean(\n        observation && isDeepStrictEqual(report, expected(observation)),\n      ),\n    };\n    return {\n      passed: Object.values(checks).every(Boolean),\n      contextId,",
+      "classification": "fix-issued-observation-membership"
+    }
+  ]
+}

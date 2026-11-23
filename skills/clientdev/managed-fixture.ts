@@ -130,7 +130,7 @@ export async function prepareManagedClientAdmission(
   }
 
   async function verify(report: ClientAdmissionReview | null) {
-    const [observation] = observations;
+    const observation = observations.find(value => isDeepStrictEqual(value, report?.source?.observation));
     const after = await vcs.status({ contextId });
     const capabilityListsMatch = observation && (["required", "optional"] as const).every((tier) => {
       const published = observation.published[tier];
@@ -141,7 +141,6 @@ export async function prepareManagedClientAdmission(
     });
     const checks = {
       source:
-        observations.length === 1 &&
         observation?.operationId === bound.request.operationId &&
         observation.contextId === contextId &&
         observation.source === world.source &&
