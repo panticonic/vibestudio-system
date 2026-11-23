@@ -1,3 +1,5 @@
+import type {InvocationObservations} from "@workspace-skills/system-testing/observed-invocation";
+import {assessSemanticOutcome,type SemanticOutcomeContract} from "@workspace-skills/system-testing/semantic-outcome-contract";
 import { isDeepStrictEqual } from "node:util";
 import { sha256HexSyncText } from "@vibestudio/content-addressing";
 import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
@@ -181,7 +183,7 @@ export async function prepareOpenSystemDiagnostics(
   function coverage() {
     return [...observed.values()].map(({ source, status, liveBoot, through }) => ({ sourceId: source.id, status, liveBoot, through }));
   }
-  async function verify(value: unknown, boundary?: { rejectedForeign: boolean; rejectedForged: boolean }) {
+  async function verify(value: unknown, boundary?: { rejectedForeign: boolean; rejectedForged: boolean }|InvocationObservations) {
     const envelope = value as Partial<Envelope> | null;
     const report = envelope?.outcome ?? value as DiagnosticReport | null;
     const native = await Promise.all(sources.filter(({ source }) => observed.has(source.id))
@@ -193,12 +195,12 @@ export async function prepareOpenSystemDiagnostics(
     const ordered = (values: readonly ExactDiagnosticCitation[]) => [...values].sort((left, right) => left.seq - right.seq || left.sourceId.localeCompare(right.sourceId));
     const handoffReadback = savedHandoff ? await fs.readFile(savedHandoff.receipt.path, "utf8") : null;
     const verifiedHandoff = !expected.stage
-      ? savedHandoff === null && report?.artifact === null
-      : Boolean(savedHandoff && isDeepStrictEqual(savedHandoff.finding, report?.finding) &&
-          isDeepStrictEqual(savedHandoff.receipt, report?.artifact) &&
+      ? savedHandoff === null
+      : Boolean(savedHandoff &&
           handoffReadback === format(savedHandoff.finding) &&
           savedHandoff.receipt.sha256 === sha256HexSyncText(format(savedHandoff.finding)));
     const checks = {
+      returnedDiagnosticArtifact:isDeepStrictEqual(report?.artifact,savedHandoff?.receipt??null),
       discoveredDiagnosticCheckpoints: discovered,
       boundNativeDiagnosticReadback: native.every(Boolean),
       selectedRequiredDiagnosticWindows: expectedReads.every(([key, status]) => observed.get(sourceFor(key).source.id)?.status === status),
@@ -208,13 +210,16 @@ export async function prepareOpenSystemDiagnostics(
       groundedDiagnosticCitations: Array.isArray(citations) && citations.every(exactCitation) &&
         isDeepStrictEqual(ordered(citations), ordered(expectedCitations())),
       verifiedDiagnosticHandoff: verifiedHandoff,
-      ...(boundary ? { rejectedForeignDiagnosticCheckpoint: boundary.rejectedForeign, rejectedForgedDiagnosticCitation: boundary.rejectedForged } : {}),
+      ...(boundary && "rejectedForeign" in boundary ? { rejectedForeignDiagnosticCheckpoint: boundary.rejectedForeign, rejectedForgedDiagnosticCitation: boundary.rejectedForged } : {}),
     };
-    return {
+    const contract:SemanticOutcomeContract={effects:{checks:["discoveredDiagnosticCheckpoints", "boundNativeDiagnosticReadback", "selectedRequiredDiagnosticWindows", "verifiedDiagnosticHandoff"] .concat(boundary && "rejectedForeign" in boundary ? ["rejectedForeignDiagnosticCheckpoint","rejectedForgedDiagnosticCitation"] : []),rationale:"Independent native observations, authority and persisted state establish application effects."},returnedValue:{checks:["preservedDiagnosticBootCoverage", "reconciledDiagnosticFinding", "groundedDiagnosticCitations"],required:true,rationale:"These are the actual requested domain findings or query values; mutation-only calls retain their separately observed effects."},incidentalValues:{checks:["returnedDiagnosticArtifact"],rationale:"Optional incorrect mutation returns are recorded against the actual invocation, without invalidating correct native effects."}};
+    const invocation=boundary&&"returns" in boundary?boundary:undefined;
+    const incorrectReturnValues=contract.incidentalValues!.checks.some(name=>!(checks as Record<string,boolean>)[name])&&invocation ? (await invocation.returns(call=>call.parentCallId===null)).filter(row=>isDeepStrictEqual(row.value,value)).map(({definition,value})=>({definition,value,required:contract.returnedValue.required&&contract.returnedValue.checks.some(name=>!(checks as Record<string,boolean>)[name])})) : [];
+    return assessSemanticOutcome({incorrectReturnValues,
       caseId, contextId, goal: world.goal, catalog, windows: [...observed.values()],
       handoff: savedHandoff?.receipt ?? null, handoffReadback,
       checks, passed: Object.values(checks).every(Boolean),
-    };
+    },contract);
   }
 
   return {
