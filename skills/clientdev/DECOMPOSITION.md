@@ -16,3 +16,10 @@ a connected device or a launch receipt.
   A compatible contract and a ready catalog row still do not authorize launch.
 - TypeScript handles exact VCS and build reads, configuration parsing and
   projection of the canonical host profile. No client or device effect is bound.
+
+The native admission policy remains the typed natural-language `chooseNext`
+function. Catalog `effectiveVersion` is the installed unit's version identity;
+contract `hash` is the manifest bytes identity. They are different namespaces
+and must not be equated. A crisp `matchesClientDeclaration` checks only exact
+source identity; it does not select an action. Joint desktop and standalone
+admission use the same policy. Compatibility is not launch/install approval.

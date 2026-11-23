@@ -4,6 +4,7 @@ import type { NatlangFunction, Folder as FolderStore, FolderHandle } from "@natl
 type Folder = FolderStore | FolderHandle;
 type ClientAdmissionRequest = { goal: string; operationId: string };
 type ClientContract = {
+  /** Digest of contract manifest bytes, not the installed unit version. */
   hash: string;
   id: string;
   runtime: string;
@@ -29,6 +30,7 @@ type ClientAdmissionObservation = {
   catalog: {
     status: "available" | "building" | "ready" | "approval-required" | "error";
     source: string;
+    /** Installed unit version identity; unrelated to ClientContract.hash. */
     effectiveVersion: string | null;
     activeBuildKey: string | null;
   } | null;
@@ -62,5 +64,5 @@ type ClientAdmissionReview = {
   host: ClientHostReview;
   decision: ClientDecision;
 };
-declare const fn: NatlangFunction<[request: ClientAdmissionRequest], ClientAdmissionReview> & { readonly chooseNext: NatlangFunction<[source: ClientSourceReview, host: ClientHostReview], ClientDecision>; readonly inspectSource: NatlangFunction<[operationId: string], ClientSourceReview> & { readonly readClient: NatlangFunction<[operationId: string], ClientAdmissionObservation> }; readonly reviewHost: NatlangFunction<[observation: ClientAdmissionObservation], ClientHostReview> & { readonly checkAbi: NatlangFunction<[observation: ClientAdmissionObservation], ClientHostReview["abi"]>; readonly checkCapabilities: NatlangFunction<[observation: ClientAdmissionObservation], ClientCapabilityReview> & { readonly checkOptional: NatlangFunction<[observation: ClientAdmissionObservation], string[]>; readonly checkRequired: NatlangFunction<[observation: ClientAdmissionObservation], RequiredClientCapabilityReview> } } };
+declare const fn: NatlangFunction<[request: ClientAdmissionRequest], ClientAdmissionReview> & { readonly chooseNext: NatlangFunction<[source: ClientSourceReview, host: ClientHostReview], ClientDecision> & { readonly matchesClientDeclaration: ((source: ClientSourceReview) => boolean) & {  } }; readonly inspectSource: NatlangFunction<[operationId: string], ClientSourceReview> & { readonly readClient: NatlangFunction<[operationId: string], ClientAdmissionObservation> }; readonly reviewHost: NatlangFunction<[observation: ClientAdmissionObservation], ClientHostReview> & { readonly checkAbi: NatlangFunction<[observation: ClientAdmissionObservation], ClientHostReview["abi"]>; readonly checkCapabilities: NatlangFunction<[observation: ClientAdmissionObservation], ClientCapabilityReview> & { readonly checkOptional: NatlangFunction<[observation: ClientAdmissionObservation], string[]>; readonly checkRequired: NatlangFunction<[observation: ClientAdmissionObservation], RequiredClientCapabilityReview> } } };
 export default fn;

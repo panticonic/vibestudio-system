@@ -1,5 +1,6 @@
 export type ClientAdmissionRequest = { goal: string; operationId: string };
 export type ClientContract = {
+  /** Digest of contract manifest bytes, not the installed unit version. */
   hash: string;
   id: string;
   runtime: string;
@@ -25,6 +26,7 @@ export type ClientAdmissionObservation = {
   catalog: {
     status: "available" | "building" | "ready" | "approval-required" | "error";
     source: string;
+    /** Installed unit version identity; unrelated to ClientContract.hash. */
     effectiveVersion: string | null;
     activeBuildKey: string | null;
   } | null;
