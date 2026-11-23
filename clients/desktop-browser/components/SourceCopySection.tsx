@@ -30,7 +30,10 @@ import {
   type SelectedTransferResult,
 } from "@workspace/workspace-transfer";
 import { createWorkspaceShellClient } from "../shell/client";
-import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import {
+  useShellWorkspaceClient,
+  useWorkspaceDesktopHost,
+} from "../shell/workspaceContext";
 import { workspaceLabel } from "../shell/workspaceLabel";
 import { settingsDialogAtom } from "../state/appModeAtoms";
 import "./sourceCopy.css";
@@ -65,6 +68,7 @@ export function SourceCopySection({
   initialWorkspaceId?: string;
 }) {
   const { hubControl } = useShellWorkspaceClient();
+  const { openWorkspace } = useWorkspaceDesktopHost();
   const closeSettings = useSetAtom(settingsDialogAtom);
   const owners = useRef(new Map<string, Promise<Owner>>());
   const closed = useRef(false);
@@ -256,9 +260,7 @@ export function SourceCopySection({
         id = result.id;
         setReviewPanelId(id);
       }
-      await hubControl.routeWorkspace({
-        workspaceId: review.target.workspaceId,
-      });
+      await openWorkspace(review.target.workspaceId);
       await client.panel.focus(id);
       closeSettings(null);
     });

@@ -1,4 +1,5 @@
 {
+  "name": "@workspace-skills/server-logs",
   "private": true,
   "type": "module"
 }

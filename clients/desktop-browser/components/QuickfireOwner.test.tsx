@@ -15,6 +15,8 @@ const api = vi.hoisted(() => ({
   reportFailure: vi.fn(),
   list: vi.fn(async () => [] as Array<{ slotId: string; promotedAt: null }>),
   focus: vi.fn(async () => {}),
+  starting: false,
+  queued: false,
   surface: null as null | { props: { mode: string; inputValue: string } },
 }));
 vi.mock("../shell/workspaceContext", () => {
@@ -26,6 +28,7 @@ vi.mock("../shell/workspaceContext", () => {
       focus: api.focus,
       listPinnedPanelIds: async () => [],
       getRootGroups: async () => ({ groups: [] }),
+      getBrowserAddressOptions: async () => ({ suggestions: [] }),
     },
     quickfire: { list: api.list },
     hostCommands: { list: async () => [] },
@@ -78,13 +81,16 @@ vi.mock("./useQuickfireSession", () => ({
     api.bindings.push(source?.slotId ?? null);
     return {
       view: {
-        hasConversation: Boolean(source),
+        slotId: source?.slotId ?? null,
+        hasConversation: Boolean(source) && !api.starting,
         promoted: false,
-        transcript: [],
+        transcript: source && api.queued
+          ? [{ kind: "message", author: "you", text: "First question", pending: true }]
+          : [],
         modelSelection: { choices: [] },
         resume: null,
         olderCount: 0,
-        connecting: false,
+        connecting: Boolean(source) && api.starting,
         streaming: false,
         error: null,
       },
@@ -141,6 +147,8 @@ beforeEach(() => {
   api.reportFailure.mockReset();
   api.focus.mockClear();
   api.surface = null;
+  api.starting = false;
+  api.queued = false;
 });
 afterEach(cleanup);
 
@@ -156,7 +164,42 @@ describe("Quickfire opening ownership", () => {
     });
     await waitFor(() => expect(api.surface?.props.mode).toBe("quickfire"));
     expect(api.bindings.at(-1)).toBe("panel-a");
+
+    // The cached list can omit the conversation this shell still has bound.
+    dismiss();
+    await act(async () => {
+      emitShellEventFixture(api.events, "open-command-palette");
+    });
+    await waitFor(() => expect(api.surface?.props.mode).toBe("quickfire"));
+    expect(api.bindings.at(-1)).toBe("panel-a");
     host.remove();
+  });
+
+  it.each([
+    { focused: "panel-a", queued: true, mode: "quickfire", binding: "panel-a" },
+    { focused: "panel-b", queued: true, mode: "all", binding: null },
+    { focused: "panel-a", queued: false, mode: "all", binding: null },
+  ])("reopens on $focused in $mode with a queued prompt of $queued", async ({
+    focused, queued, mode, binding,
+  }) => {
+    api.starting = true;
+    api.queued = queued;
+    const host = renderOwnerWithHost();
+    try {
+      await open();
+      await waitFor(() => expect(api.bindings.at(-1)).toBe("panel-a"));
+      dismiss();
+      api.focused = focused;
+      api.bindings = [];
+      await act(async () => {
+        emitShellEventFixture(api.events, "open-command-palette");
+      });
+      await waitFor(() => expect(api.surface?.props.mode).toBe(mode));
+      expect(api.bindings.at(-1)).toBe(binding);
+      if (binding) expect(api.bindings).not.toContain(null);
+    } finally {
+      host.remove();
+    }
   });
 
   it("reopens the bound conversation when the overlay or window has no focused panel", async () => {

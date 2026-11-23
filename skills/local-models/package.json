@@ -1,4 +1,5 @@
 {
+  "name": "@workspace-skills/local-models",
   "private": true,
   "type": "module"
 }
