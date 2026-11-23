@@ -1,7 +1,7 @@
 [
   {
     "template": "system",
-    "entry": "skills/open-system-diagnostics/workTowardDiagnosticGoal.nl",
+    "entry": "skills/open-system-diagnostics/workTowardDiagnosticGoal.ts",
     "resultType": "DiagnosticReport",
     "decision": "retain requested domain value",
     "fields": {
@@ -10,7 +10,7 @@
       "artifact": "actual retained diagnostic handoff"
     },
     "evidence": [
-      "skills/open-system-diagnostics/workTowardDiagnosticGoal.nl",
+      "skills/open-system-diagnostics/workTowardDiagnosticGoal.ts",
       "skills/open-system-diagnostics/types.ts"
     ],
     "consumers": [
@@ -26,11 +26,12 @@
       "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/workTowardDiagnosticGoal/bindReport.ts:1:import type { DiagnosticDecision, DiagnosticReport, Inspection } from \"../types.js\";",
       "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/workTowardDiagnosticGoal/bindReport.ts:3:export default function bindReport(decision: DiagnosticDecision, inspected: Inspection[]): DiagnosticReport {",
       "/home/werg/vibe-app-values-system/skills/open-system-diagnostics/types.ts:35:export type DiagnosticReport = {"
-    ]
+    ],
+    "functionalStructure": "typed composition"
   },
   {
     "template": "system",
-    "entry": "skills/open-system-operations/workOnSystemGoal.nl",
+    "entry": "skills/open-system-operations/workOnSystemGoal.ts",
     "resultType": "OperatorReport",
     "decision": "retain requested domain value",
     "fields": {
@@ -41,7 +42,7 @@
       "evidenceIds": "native receipt/citation handles for requested operational result"
     },
     "evidence": [
-      "skills/open-system-operations/workOnSystemGoal.nl",
+      "skills/open-system-operations/workOnSystemGoal.ts",
       "skills/open-system-operations/types.ts"
     ],
     "consumers": [
@@ -54,6 +55,7 @@
     ],
     "nativeConsumers": [
       "/home/werg/vibe-app-values-system/skills/open-system-operations/types.ts:69:export type OperatorReport = {"
-    ]
+    ],
+    "functionalStructure": "typed composition"
   }
 ]

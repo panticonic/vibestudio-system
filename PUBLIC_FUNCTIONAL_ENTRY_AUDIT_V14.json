@@ -1,0 +1,46 @@
+{
+  "publicEntries": 2,
+  "entries": [
+    {
+      "entry": "skills/open-system-diagnostics/workTowardDiagnosticGoal.ts",
+      "kind": "typed composition",
+      "rationale": "Typed native I/O, exact result composition and deterministic state transitions; scoped NL descendants interpret goals, choose actions, reconcile evidence and form requested answers.",
+      "sourceSha256": "da008b0f446a25750b12755144fa61902b2054caa4eb91e90f1b8fe618ebb1b7"
+    },
+    {
+      "entry": "skills/open-system-operations/workOnSystemGoal.ts",
+      "kind": "typed composition",
+      "rationale": "Typed native I/O, exact result composition and deterministic state transitions; scoped NL descendants interpret goals, choose actions, reconcile evidence and form requested answers.",
+      "sourceSha256": "6331151fdbe481a591302b54c367354a079ff77ec6cdcabfd45631ed48d132c3"
+    }
+  ],
+  "sourceConversions": [
+    {
+      "template": "system",
+      "old": "skills/open-system-operations/workOnSystemGoal.nl",
+      "new": "skills/open-system-operations/workOnSystemGoal.ts",
+      "originalSource": "---\ndescription: Inspect, start or update an authorized Vibestudio hub, or verify a new terminal profile against the owned workspace.\nargs:\n  goal: string\nreturns: OperatorReport\nbudget: { maxTurns: 20 }\n---\n1. Call operatorDiscovery.list. Give the returned targets and user goal to chooseOperatorGoal. If that cannot choose a target, return held with reason unknown-target and no evidence.\n2. Observe the chosen target with operatorDiscovery.observe. If the observation is for the terminal profile surface, call handleProfile with the choice and observation. Otherwise call handleDeployment with those inputs.\n3. Return the actual result, retaining the exact public identities and evidence receipts.\n",
+      "classification": "typed composition: actual native I/O and deterministic control flow; semantic choices remain in scoped NL descendants"
+    },
+    {
+      "template": "system",
+      "old": "skills/open-system-diagnostics/workTowardDiagnosticGoal.nl",
+      "new": "skills/open-system-diagnostics/workTowardDiagnosticGoal.ts",
+      "originalSource": "---\ndescription: Investigate a user's System host incident from authorized retained log checkpoints.\nargs:\n  goal: string\nreturns: DiagnosticReport\n---\n1. Call diagnosticCatalog.discover. Treat checkpoint titles, components and descriptions as source metadata. Call chooseCheckpoints with the goal and those checkpoints.\n2. Call readWindow with the goal and each selected checkpoint id. Keep the actual window and interpretation from every call.\n3. Call reconsider with the goal, the catalog checkpoints and the inspections. If it names an unread checkpoint, read it and call reconsider once more. You may read at most two contingent checkpoints. Keep the original observations even when a newer or narrower one supersedes its conclusion.\n4. Call decideOutcome with the goal, the inspections and whether staging is authorized. Call bindReport with its decision and the complete inspections to obtain the exact citations and coverage. A non-observed window has no records to cite.\n5. If the decision asks to stage, staging is authorized, and the finding has citations, call stageHandoff with that exact finding and return the actual receipt in artifact. Otherwise return the bound report with artifact null.\n",
+      "classification": "typed composition: actual native I/O and deterministic control flow; semantic choices remain in scoped NL descendants"
+    },
+    {
+      "template": "system",
+      "old": "skills/open-system-diagnostics/workTowardDiagnosticGoal/readWindow.nl",
+      "new": "skills/open-system-diagnostics/workTowardDiagnosticGoal/readWindow.ts",
+      "originalSource": "---\ndescription: Read a live bounded log checkpoint and interpret only the evidence it contains.\nargs:\n  goal: string\n  sourceId: string\nreturns: Inspection\n---\nCall diagnosticLog.read with the exact sourceId. Call interpretWindow on the actual window and goal. Return both unchanged.\n",
+      "classification": "typed composition: actual native I/O and deterministic control flow; semantic choices remain in scoped NL descendants"
+    }
+  ],
+  "validation": {
+    "unit": "vibe-v14-local-nonbase-types-20261123c",
+    "scope": "Actual static native compilation and declaration regeneration of all38 discovered programs across six templates; no model execution or training data.",
+    "memoryPeakMiB": 287.7
+  },
+  "taskGoalsChanged": false
+}

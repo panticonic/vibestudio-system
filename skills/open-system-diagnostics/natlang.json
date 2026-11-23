@@ -2,11 +2,11 @@
   "schema": "natlang.package/v2",
   "name": "vibestudio-open-system-diagnostics",
   "version": "0.1.0",
-  "targets": { "main": { "entry": "workTowardDiagnosticGoal.nl" } },
+  "targets": { "main": { "entry": "workTowardDiagnosticGoal.ts" } },
   "serviceBinding": "explicit",
   "serviceScopes": {
-    "diagnosticCatalog": ["workTowardDiagnosticGoal.nl"],
-    "diagnosticLog": ["workTowardDiagnosticGoal/readWindow.nl"],
-    "diagnosticHandoff": ["workTowardDiagnosticGoal.nl"]
+    "diagnosticCatalog": ["workTowardDiagnosticGoal.ts"],
+    "diagnosticLog": ["workTowardDiagnosticGoal/readWindow.ts"],
+    "diagnosticHandoff": ["workTowardDiagnosticGoal.ts"]
   }
 }

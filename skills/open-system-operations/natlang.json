@@ -3,9 +3,9 @@
   "name": "vibestudio-open-system-operations",
   "version": "0.1.0",
   "serviceBinding": "explicit",
-  "targets": { "main": { "entry": "workOnSystemGoal.nl" } },
+  "targets": { "main": { "entry": "workOnSystemGoal.ts" } },
   "serviceScopes": {
-    "operatorDiscovery": ["workOnSystemGoal.nl"],
+    "operatorDiscovery": ["workOnSystemGoal.ts"],
     "operatorDeployment": [
       "workOnSystemGoal/handleDeployment/applyAndVerify.nl"
     ],
