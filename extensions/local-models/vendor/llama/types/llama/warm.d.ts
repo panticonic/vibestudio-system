@@ -1,6 +1,7 @@
 import type { WarmPrefix } from '../package/warm.js';
 import type { LlamaHost } from './host.js';
 export type { WarmPrefix } from '../package/warm.js';
+export { sharedPrefix } from './warm-opening.js';
 export type Opening = {
     system: {
         role: 'system';
@@ -9,16 +10,11 @@ export type Opening = {
     tools: unknown[];
     key: string;
 };
-/** A request's opening: its system prompt and tools, keyed by their exact content. */
+/** A request's opening: its system prompt and tools, keyed by their exact content (warm-opening.ts). */
 export declare function openingOf(request: {
     messages: readonly unknown[];
     tools?: readonly unknown[];
 }): Opening | undefined;
-/**
- * The longest text every conversation with this opening starts with, cut just after a special token so that the rest
- * of any prompt tokenizes on from it.
- */
-export declare function sharedPrefix(first: string, second: string): string;
 /** The rendered opening up to its last tool line (the shared base of openings that differ only there), if it has two
  * or more tools in a `<tools>` block. */
 export declare function baseOf(prefix: string): string | undefined;

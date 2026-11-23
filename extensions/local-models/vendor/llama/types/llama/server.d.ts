@@ -56,6 +56,9 @@ export type LlamaServerOptions = {
     }[];
     /** Called when no compatible runtime is found; may install one and return it (a host's consent decides). */
     ensureRuntime?: (discovery: LlamaRuntimeDiscovery) => Promise<LlamaServerInspection | null>;
+    /** Called when the stock model file is not downloaded; true lets the server download it (the host may have done so
+     * already), false declines. Without it a missing model is an error: a library never downloads gigabytes unasked. */
+    ensureModel?: (release: LocalModelRelease) => Promise<boolean>;
     /** Sent with the package's own requests to the server (health, slots, warm states). */
     headers?: Record<string, string>;
     /** Use (or start) the server shared by natlang processes on this machine that need the same model, settings, adapters

@@ -1,30 +1,31 @@
 {
   "schema": "natlang.vendor-pin/1",
-  "commit": "5b79c0fda510cb7a4e3adadf1fcb74060bffc014",
+  "commit": "3b30c78820b04d0d4120fb89a2297a5e98023c06",
   "dirty": false,
   "targets": [
     "llama"
   ],
   "toolchain": {
-    "node": "v22.22.1",
+    "node": "v24.22.1",
     "esbuild": "0.28.2",
     "typescript": "5.9.3"
   },
   "files": {
     "llama/natlang-llama.d.ts": "68ca219111b8f05cb743d20ac08200fbef47d8aea6db1a0134b09c90eaf97244",
-    "llama/natlang-llama.js": "78f31bbcef6aabdc7a046a22bab42b6ee7d4d68ba41f8b8d5ab539137ae9377d",
-    "llama/types/contracts.d.ts": "fbac7bb9a5f0309502e9c3bd06df83abd784cf4dd19d49bad9da9e07de9b8b9d",
-    "llama/types/llama-fork-source.d.ts": "9e7b099d3a2eac5c0c88a6250e2d3d3812dc9628f6df6f5feb7610fac5bbc39f",
+    "llama/natlang-llama.js": "13e4efe560d5631256c7a698a70c672458a5b527edf81ee6bd4c4b0c79afbc78",
+    "llama/types/contracts.d.ts": "a540ba8f82f94e6e64b85104e88f236860b241ee8f155b4f160fc1491213acea",
+    "llama/types/llama-fork-source.d.ts": "c79705cac18c732b3c0388bee7e66d2eefa39424f90f54420e36718d4accf833",
     "llama/types/llama-runtime-release.d.ts": "211ea845a5fc5d2d065b1584383e1fba3e37d343957e317f1ff279c514b56ab7",
     "llama/types/llama/host.d.ts": "0cff4ce0e3869552a719d4b92c3185c542b9082d2686d6dbaa1ddafab315bf12",
     "llama/types/llama/index.d.ts": "7a43ff7ee4f0674495b8b4af1dc8e412a2d14a0a2dd820ae7f12572ff575e745",
     "llama/types/llama/models.d.ts": "231b73d1f0feebee38c8c9384966c6762397f607cac7b53c203fdb6ff2c20249",
     "llama/types/llama/node.d.ts": "c463978db183a66cdad467775241985ebffcd0bcbc9c780bd3526074e864bc8e",
     "llama/types/llama/runtime.d.ts": "47c34efc7cc58a91593ccd9fdfa3d66c4b193bc952f5186cd8ee7d4c896adda5",
-    "llama/types/llama/server.d.ts": "de54b8292c06e9bd029153a29610a4d191f32dbdb3a2f86648505ff9a6f7b4f3",
+    "llama/types/llama/server.d.ts": "5abb8799c58c3e1a907d6076f28e08b7bbda56791b5df1167cec2feeef80418f",
     "llama/types/llama/shared.d.ts": "fe284de85a4387cca02fcd33178adbe8e9ba47375fd73a8241b2e29d401d31cc",
     "llama/types/llama/slots.d.ts": "3777ed744fa8ad3fa024f2eb39049ce4e352bbdf80bccafe64089aec99542bfa",
-    "llama/types/llama/warm.d.ts": "8556fce132bf4eadb63610f49267b6c5cf592aeac6423751299f7aaaa9d25486",
+    "llama/types/llama/warm-opening.d.ts": "8879b585ef67b62aff73c68cefc77001d792457919cf5e5b7d773f90c09dea54",
+    "llama/types/llama/warm.d.ts": "68c4af82028028c06b8901f18eeebe07bcd40287fb88acb182020b4a9e3ffba6",
     "llama/types/model-catalog.d.ts": "578c0e1559d66f82036fda478b1708f9dc5c51aac5df5d1ab6b1fc05c6ec74a1",
     "llama/types/package/warm.d.ts": "f0359c40578b2a773b1755b3a31d5ab25a989413e43ff35e4331e32d47b38406"
   }

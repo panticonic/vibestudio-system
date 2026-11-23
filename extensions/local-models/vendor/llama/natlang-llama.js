@@ -151,12 +151,12 @@ import { pipeline } from "node:stream/promises";
 // src/llama-runtime-release.ts
 var LLAMA_RUNTIME_RELEASE = Object.freeze({
   "version": "0.8.0",
-  "build": 12071,
-  "commit": "ff6e734e3",
+  "build": 12081,
+  "commit": "cb03daee7",
   "compatible": {
     "minimumVersion": "0.8.0",
     "maximumVersionExclusive": "0.9.0",
-    "minimumBuild": 12071
+    "minimumBuild": 12081
   },
   "artifacts": [
     {
@@ -165,9 +165,9 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
       "arch": "arm64",
       "backend": "metal",
       "archive": "tar.gz",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12071/llama-natlang-bin-macos-arm64.tar.gz",
-      "bytes": 11332263,
-      "sha256": "b145bc46dcb98b469ed56cb62704758bee899e7dd2e2d9432cfd1681bd9f4c9e"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12081/llama-natlang-bin-macos-arm64.tar.gz",
+      "bytes": 11249957,
+      "sha256": "0f0d9e73e772431415505bb816dbd4fe865afb4c591d1eda6f07579e34d348e5"
     },
     {
       "key": "darwin-x64-cpu",
@@ -175,9 +175,9 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
       "arch": "x64",
       "backend": "cpu",
       "archive": "tar.gz",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12071/llama-natlang-bin-macos-x64.tar.gz",
-      "bytes": 10746118,
-      "sha256": "4ebf76d7d6d0ca09c7212df78be5386ac51ce6c4420afa150494239a5d45fc18"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12081/llama-natlang-bin-macos-x64.tar.gz",
+      "bytes": 10663665,
+      "sha256": "f6f3f9e224f7c78a45b4f0404f1ddddd169fd83f6f811f0c3a78ea1f06f0457c"
     },
     {
       "key": "linux-arm64-cpu",
@@ -185,9 +185,9 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
       "arch": "arm64",
       "backend": "cpu",
       "archive": "tar.gz",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12071/llama-natlang-bin-ubuntu-arm64.tar.gz",
-      "bytes": 15059296,
-      "sha256": "8261fbf03aeee813f455bdb25d3258809977615d895942f14f01f8eac46f4b34"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12081/llama-natlang-bin-ubuntu-arm64.tar.gz",
+      "bytes": 14995930,
+      "sha256": "8bf19e2dd53eeddfdfdb2a33ac1482621bba1972e5c15fa037a1c1f14fbd0a6f"
     },
     {
       "key": "linux-x64-cpu",
@@ -195,9 +195,9 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
       "arch": "x64",
       "backend": "cpu",
       "archive": "tar.gz",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12071/llama-natlang-bin-ubuntu-x64.tar.gz",
-      "bytes": 19066916,
-      "sha256": "4ebd8f101b03093dea9f3bb2d6b51b261f2a16a5f3ef7a41b576c1df7b6f8add"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12081/llama-natlang-bin-ubuntu-x64.tar.gz",
+      "bytes": 19005423,
+      "sha256": "389645a6cf2b7e1ee20154c40fecab31b1ae504758ee5e11e1b07d21ade215e1"
     },
     {
       "key": "win32-arm64-cpu",
@@ -205,9 +205,9 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
       "arch": "arm64",
       "backend": "cpu",
       "archive": "zip",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12071/llama-natlang-bin-win-cpu-arm64.zip",
-      "bytes": 11032157,
-      "sha256": "0bef6f3ea740997a47ead7ead22708e2878b4a60466e1858e383328c14ffb0e4"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12081/llama-natlang-bin-win-cpu-arm64.zip",
+      "bytes": 10948077,
+      "sha256": "21bda024f1460bcebf34cc24dee036767ab31e3a2fa3969caeeb97188108cefc"
     },
     {
       "key": "win32-x64-cpu",
@@ -215,9 +215,9 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
       "arch": "x64",
       "backend": "cpu",
       "archive": "zip",
-      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12071/llama-natlang-bin-win-cpu-x64.zip",
-      "bytes": 18063922,
-      "sha256": "7de6a58d4027ffba5d5b94ccf336090efd46538a77ac75e29f872953510edc0f"
+      "url": "https://github.com/werg/llama.cpp-neuralese/releases/download/natlang-b12081/llama-natlang-bin-win-cpu-x64.zip",
+      "bytes": 17980814,
+      "sha256": "5acda3346f708d708cb51d23f98ace73722ab6b926521776b82527ec7ca15057"
     }
   ]
 });
@@ -226,7 +226,7 @@ var LLAMA_RUNTIME_RELEASE = Object.freeze({
 var LLAMA_FORK_SOURCE = Object.freeze({
   repository: "werg/llama.cpp-neuralese",
   branch: "neuralese",
-  commit: "a6401bbd37529eda6b94e38d8ab63a35647c5204"
+  commit: "cb03daee7b0e8792c714ebdf4d5e9dc714b89208"
 });
 
 // src/llama/runtime.ts
@@ -773,15 +773,13 @@ var warmTag = (modelSha256, runtime, plan) => `${modelSha256.slice(0, 12)}-${run
 import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync3, rmSync as rmSync4, statSync as statSync2, utimesSync, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join5 } from "node:path";
-function openingOf(request) {
+
+// src/llama/warm-opening.ts
+function openingParts(request) {
   const system = request.messages[0];
   if (system?.role !== "system" || typeof system.content !== "string" || system.content.length < 256) return void 0;
   const tools = [...request.tools ?? []];
-  return {
-    system: { role: "system", content: system.content },
-    tools,
-    key: createHash3("sha256").update(JSON.stringify([system.content, tools])).digest("hex")
-  };
+  return { system: { role: "system", content: system.content }, tools, text: JSON.stringify([system.content, tools]) };
 }
 function sharedPrefix(first, second) {
   let length = 0;
@@ -790,6 +788,13 @@ function sharedPrefix(first, second) {
   let cut = 0;
   for (const match of common.matchAll(/<\|[^|<>\s]{1,40}\|>|<\/?[a-z_]{2,24}>/g)) cut = match.index + match[0].length;
   return common.slice(0, cut);
+}
+var OPENING_PROBES = ["\u2063A", "\u2063B"];
+
+// src/llama/warm.ts
+function openingOf(request) {
+  const parts = openingParts(request);
+  return parts && { system: parts.system, tools: parts.tools, key: createHash3("sha256").update(parts.text).digest("hex") };
 }
 function baseOf(prefix) {
   const open = prefix.indexOf("<tools>\n"), close = prefix.lastIndexOf("\n</tools>");
@@ -854,7 +859,7 @@ async function warmOpening(host, server, directory, opening, tag, slots) {
       "/apply-template",
       { messages: [opening.system, { role: "user", content }], ...opening.tools.length ? { tools: opening.tools } : {} }
     )).prompt ?? "");
-    const prefix = sharedPrefix(await render("\u2063A"), await render("\u2063B"));
+    const prefix = sharedPrefix(await render(OPENING_PROBES[0]), await render(OPENING_PROBES[1]));
     if (prefix.length < 256) return void 0;
     const tokens = await tokenize(prefix);
     await post(host, endpoint, headers, "/slots/0?action=erase", {}).catch(() => void 0);
@@ -1217,6 +1222,11 @@ function createLlamaServer(host, options = {}) {
       if (explicit) throw new Error(`NATLANG_LLAMA_SERVER is incompatible: ${describeLlamaRuntime(prerequisites.runtime)}`);
       throw new Error(`managed model server is unavailable: ${describeLlamaRuntime(prerequisites.runtime)}; run natlang setup --yes to install it, or select a hosted model with --provider ID`);
     }
+    const modelFile = async () => {
+      if (!environment.NATLANG_MODEL_PATH && !prerequisites.modelPath && !localModelPrerequisites(host, release).modelPath && !stockModelDownload(host, release) && !(options.ensureModel && await options.ensureModel(release)))
+        throw new Error(`model-unavailable: the ${release.label} model (${Math.ceil(release.bytes / 1e6)} MB) is not downloaded; run natlang setup --yes to download it, or select a hosted model with --provider ID`);
+      return ensureModel(host, release);
+    };
     const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     const adapters = [...options.loraAdapters?.() ?? []].sort(byId), states = [...options.nativeStates?.() ?? []].sort(byId);
     const tuned = adapters.length > 0 || states.length > 0;
@@ -1292,7 +1302,7 @@ function createLlamaServer(host, options = {}) {
       const startTimeoutMs = Number(environment.NATLANG_MODEL_START_TIMEOUT_MS ?? 12e4);
       const idleSeconds = tuned ? Math.min(30, sharedIdleSeconds(environment)) : sharedIdleSeconds(environment);
       const spec = async () => {
-        const modelPath2 = await ensureModel(host, release), port2 = await host.processes.freePort();
+        const modelPath2 = await modelFile(), port2 = await host.processes.freePort();
         const slotPlan = localSlotPlan(host, options.local, modelPath2, release);
         if (warmAllowed) mkdirSync5(host.directories.warmPrefixes, { recursive: true });
         log.write(`natlang: starting managed model ${basename3(modelPath2)}${tuned ? ` with ${adapters.length} adapter${adapters.length === 1 ? "" : "s"} and ${states.length} native state${states.length === 1 ? "" : "s"}` : ""}, ${slotPlan.slots} slot${slotPlan.slots === 1 ? "" : "s"} (${slotPlan.contextPerSlot} tokens each), shared by natlang runs on this machine
@@ -1351,7 +1361,7 @@ function createLlamaServer(host, options = {}) {
         return shared.endpoint;
       }
     }
-    const modelPath = await ensureModel(host, release);
+    const modelPath = await modelFile();
     if (closed) throw new Error("model session is closed");
     const port = await host.processes.freePort();
     const base = `http://127.0.0.1:${port}`;
