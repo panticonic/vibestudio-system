@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
+import {assessObservedApplicationOutcome} from "@workspace-skills/system-testing/observed-application-outcome";
+import type {InvocationObservations} from "@workspace-skills/system-testing/observed-invocation";
 import type {
   AndroidAuditReport,
   AndroidAuditRequest,
@@ -86,10 +88,7 @@ export async function prepareManagedAndroidAudit(
       target:
         targets.length === 1 &&
         observed?.target === target &&
-        observed.state === (world.mode === "foreign" ? null : "device") &&
-        report?.targetObservation?.target === observed.target &&
-        report.targetObservation.state === observed.state &&
-        report.targetReview === targetReview,
+        observed.state === (world.mode === "foreign" ? null : "device"),
       lineage:
         after.some(
           ({ serial, state }) => serial === owned && state === "device",
@@ -104,11 +103,11 @@ export async function prepareManagedAndroidAudit(
           (hasImage ? application.screenshotBytes > 0 : application.screenshotBytes === 0) &&
           (hasApp || application.issues.length > 0)
         : applications.length === 0,
-      report: shouldObserveApp
-        ? report?.runtime?.status === expectedStatus &&
-          report.runtime.image === image &&
-          isDeepStrictEqual(report.runtime.observation, application)
-        : report?.runtime === null,
+      report: report?.targetObservation?.target === observed?.target &&
+        report?.targetObservation?.state === observed?.state && report?.targetReview === targetReview && (shouldObserveApp
+          ? report?.runtime?.status === expectedStatus && report.runtime.image === image &&
+            isDeepStrictEqual(report.runtime.observation, application)
+          : report?.runtime === null),
     };
     return {
       ...input,
@@ -177,11 +176,12 @@ export async function prepareOpenAndroidAudit(
     };
     return { ...input, passed: Object.values(checks).every(Boolean), checks, scope, native, outcomeContract };
   }
-  async function verify(result: unknown, invocation?:{calls:readonly {parentCallId:string|null;definition:{name:string;source:string}}[]}) {
+  async function verify(result: unknown, invocation?:InvocationObservations) {
     const native=await nativeAudit.verify(result as AndroidAuditReport|null);
-    return {...evidence(native),outcome:result,incorrectReturnValues:result!==undefined&&!native.checks.report?[{
-      required:true,definition:invocation?.calls.find(call=>call.parentCallId===null)?.definition??{name:"auditAndroidGoal",source:"auditAndroidGoal.nl"},value:result,
-    }]:[]};
+    const observed=evidence(native);
+    return assessObservedApplicationOutcome({...observed,outcome:result},observed.outcomeContract,result,invocation,[{
+      checks:["returnedAndroidAudit"],rootPath:[],producerSourceSuffix:"auditAndroidGoal/installed/auditAndroidRuntime.nl",
+    }]);
   }
 
   async function qualify() {

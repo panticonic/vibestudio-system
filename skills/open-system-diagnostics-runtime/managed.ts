@@ -1,5 +1,6 @@
+import {assessObservedApplicationOutcome} from "@workspace-skills/system-testing/observed-application-outcome";
 import type {InvocationObservations} from "@workspace-skills/system-testing/observed-invocation";
-import {assessSemanticOutcome,type SemanticOutcomeContract} from "@workspace-skills/system-testing/semantic-outcome-contract";
+import type {SemanticOutcomeContract} from "@workspace-skills/system-testing/semantic-outcome-contract";
 import { isDeepStrictEqual } from "node:util";
 import { sha256HexSyncText } from "@vibestudio/content-addressing";
 import { mainRpcMethods } from "@vibestudio/service-schemas/mainRpc";
@@ -213,12 +214,14 @@ export async function prepareOpenSystemDiagnostics(
       ...(boundary && "rejectedForeign" in boundary ? { rejectedForeignDiagnosticCheckpoint: boundary.rejectedForeign, rejectedForgedDiagnosticCitation: boundary.rejectedForged } : {}),
     };
     const contract:SemanticOutcomeContract={effects:{checks:["discoveredDiagnosticCheckpoints", "boundNativeDiagnosticReadback", "selectedRequiredDiagnosticWindows", "verifiedDiagnosticHandoff"] .concat(boundary && "rejectedForeign" in boundary ? ["rejectedForeignDiagnosticCheckpoint","rejectedForgedDiagnosticCitation"] : []),rationale:"Independent native observations, authority and persisted state establish application effects."},returnedValue:{checks:["preservedDiagnosticBootCoverage", "reconciledDiagnosticFinding", "groundedDiagnosticCitations"],required:true,rationale:"These are the actual requested domain findings or query values; mutation-only calls retain their separately observed effects."},incidentalValues:{checks:["returnedDiagnosticArtifact"],rationale:"Optional incorrect mutation returns are recorded against the actual invocation, without invalidating correct native effects."}};
-    const incorrectReturnValues=contract.incidentalValues!.checks.some(name=>!(checks as Record<string,boolean>)[name])&&invocation ? (await invocation.returns(call=>call.parentCallId===null)).filter(row=>isDeepStrictEqual(row.value,value)).map(({definition,value})=>({definition,value,required:contract.returnedValue.required&&contract.returnedValue.checks.some(name=>!(checks as Record<string,boolean>)[name])})) : [];
-    return assessSemanticOutcome({incorrectReturnValues,
+
+    const assessed=await assessObservedApplicationOutcome({
       caseId, contextId, goal: world.goal, catalog, windows: [...observed.values()],
       handoff: savedHandoff?.receipt ?? null, handoffReadback,
       checks, passed: Object.values(checks).every(Boolean),
-    },contract);
+    },contract,value,invocation,[]);
+    const {observedChecks,...dimensions}=assessed;
+    return {...dimensions,checks:observedChecks};
   }
 
   async function verify(value:unknown,invocation?:InvocationObservations){return verifyEvidence(value,undefined,invocation);}
