@@ -1,6 +1,6 @@
 {
   "schema": "natlang.vendor-pin/1",
-  "commit": "a87d41d495270a4271c7e548a45ad2083dd8bb7f",
+  "commit": "85b4f70169fb95ae8f7489e1dae9c43998847887",
   "dirty": false,
   "targets": [
     "llama"
@@ -12,7 +12,7 @@
   },
   "files": {
     "llama/natlang-llama.d.ts": "68ca219111b8f05cb743d20ac08200fbef47d8aea6db1a0134b09c90eaf97244",
-    "llama/natlang-llama.js": "a881b34a2b724a78449e111d47c84191bdebfd01afb575e13ae8889ae02f7de6",
+    "llama/natlang-llama.js": "6d6e261ace5111a2c0f9ae296deb19d639bd0904e4e0bee854aba6802332ca4b",
     "llama/types/contracts.d.ts": "e058c2399e4ec64605545741e86f65a536d87887cc140c8cea260b27f9900db4",
     "llama/types/llama-fork-source.d.ts": "c79705cac18c732b3c0388bee7e66d2eefa39424f90f54420e36718d4accf833",
     "llama/types/llama-runtime-release.d.ts": "211ea845a5fc5d2d065b1584383e1fba3e37d343957e317f1ff279c514b56ab7",
