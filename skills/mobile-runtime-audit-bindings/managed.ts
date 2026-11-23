@@ -160,33 +160,33 @@ export async function prepareOpenAndroidAudit(
     },
   };
 
-  type Envelope = {
-    status?: string;
-    skill?: string;
-    outcome?: { scope: typeof scope; request: AndroidAuditRequest; report: AndroidAuditReport };
-  };
-
-  function evidence(native: Awaited<ReturnType<typeof nativeAudit.verify>>, exactReport: boolean) {
+  // The public value is the actual requested audit, rather than a copy of its input scope.
+  function evidence(native: Awaited<ReturnType<typeof nativeAudit.verify>>) {
     const checks = {
-      boundExactAndroidAudit: observedScope && exactReport,
+      boundExactAndroidAudit: observedScope,
       verifiedNativeAndroidTarget: native.checks.target && native.checks.lineage,
-      verifiedNativeAndroidRuntime: native.checks.application && native.checks.report,
+      verifiedNativeAndroidRuntime: native.checks.application,
+      returnedAndroidAudit: native.checks.report,
     };
-    return { ...input, passed: Object.values(checks).every(Boolean), checks, scope, native };
+    const outcomeContract={
+      effects:{checks:["boundExactAndroidAudit","verifiedNativeAndroidTarget","verifiedNativeAndroidRuntime"],
+        rationale:"Actual device and application observations establish target, lineage and runtime independently of a copied public envelope."},
+      returnedValue:{checks:["returnedAndroidAudit"],required:true,
+        rationale:"The user's read-only request asks for the actual Android audit findings."},
+      incidentalValues:{checks:[],rationale:"Known incorrect emitted audit values are excluded with their actual root definition."},
+    };
+    return { ...input, passed: Object.values(checks).every(Boolean), checks, scope, native, outcomeContract };
   }
-
-  async function verify(result: unknown) {
-    const envelope = result as Envelope | null;
-    const outcome = envelope?.outcome ?? result as NonNullable<Envelope["outcome"]> | null;
-    const native = await nativeAudit.verify(outcome?.report ?? null);
-    const exactReport = isDeepStrictEqual(outcome?.scope, scope) &&
-      isDeepStrictEqual(outcome?.request, nativeAudit.request);
-    return { ...evidence(native, exactReport), outcome };
+  async function verify(result: unknown, invocation?:{calls:readonly {parentCallId:string|null;definition:{name:string;source:string}}[]}) {
+    const native=await nativeAudit.verify(result as AndroidAuditReport|null);
+    return {...evidence(native),outcome:result,incorrectReturnValues:result!==undefined&&!native.checks.report?[{
+      required:true,definition:invocation?.calls.find(call=>call.parentCallId===null)?.definition??{name:"auditAndroidGoal",source:"auditAndroidGoal.nl"},value:result,
+    }]:[]};
   }
 
   async function qualify() {
     await androidGoalAudit.readScope(input.goal);
-    return evidence(await nativeAudit.qualify(), true);
+    return evidence(await nativeAudit.qualify());
   }
 
   return { services: { ...nativeAudit.services, androidGoalAudit }, verify, qualify };
