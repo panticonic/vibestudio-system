@@ -109,3 +109,7 @@ export declare const supportsNativeStates: (host: LlamaHost, executable: string)
  */
 export declare function spawnLauncher(host: LlamaHost): LlamaLauncher;
 export declare function createLlamaServer(host: LlamaHost, options?: LlamaServerOptions): LlamaServer;
+/** A release's chat-template keyword arguments (its `request.chat_template_kwargs`), or null when it declares none. */
+export declare function templateKwargs(release: {
+    readonly request?: Readonly<Record<string, unknown>>;
+}): Record<string, unknown> | null;

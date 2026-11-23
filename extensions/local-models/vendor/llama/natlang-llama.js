@@ -968,13 +968,13 @@ function listSharedServers(host) {
     return [];
   });
 }
-async function healthy(host, directory, key) {
+async function published(host, directory, key) {
   const record = readSharedServerAt(sharedPaths(directory, key).record);
   if (!record || !alive(record.pid)) return void 0;
   try {
-    return (await host.fetch(record.endpoint + "/health")).ok ? record : void 0;
+    return { server: record, ready: (await host.fetch(record.endpoint + "/health")).ok };
   } catch {
-    return void 0;
+    return { server: record, ready: false };
   }
 }
 var leaseCounter = 0;
@@ -1019,9 +1019,10 @@ async function acquireSharedServer(host, key, spec, options = {}) {
     let supervisor;
     for (; ; ) {
       options.signal?.throwIfAborted();
-      const server = await healthy(host, directory, key);
-      if (server) return { server, started: supervisor !== void 0, release };
-      if (supervisor === void 0) {
+      const found = await published(host, directory, key);
+      if (found?.ready) return { server: found.server, started: supervisor !== void 0, release };
+      if (found) {
+      } else if (supervisor === void 0) {
         if (!host.supervise) {
           release();
           return null;
@@ -1234,6 +1235,7 @@ function createLlamaServer(host, options = {}) {
     if (states.length && !supportsNativeStates(host, executable))
       throw new Error(`weights-unavailable: ${executable} cannot import native state spans (tuned soft states need the llama.cpp fork's --native-state)`);
     const warmAllowed = environment.NATLANG_WARM_PREFIXES !== "off" && !tuned;
+    const kwargs = templateKwargs(release);
     const command = (modelPath2, port2, slotPlan) => {
       const template = templatePath(host, release);
       const args2 = [
@@ -1254,6 +1256,7 @@ function createLlamaServer(host, options = {}) {
         "--no-webui",
         "--jinja",
         ...template ? ["--chat-template-file", template] : [],
+        ...kwargs ? ["--chat-template-kwargs", JSON.stringify(kwargs)] : [],
         // The stock file's sliding-window layers need the full cache for a warm opening or earlier prompt to be reused.
         ...release.fullSlidingWindowCache && !environment.NATLANG_MODEL_PATH ? ["--swa-full"] : [],
         ...options.local?.args ?? [],
@@ -1286,6 +1289,7 @@ function createLlamaServer(host, options = {}) {
         model: sha,
         runtime: label,
         template: template ? createHash5("sha256").update(readFileSync5(template)).digest("hex") : null,
+        templateKwargs: kwargs,
         swaFull: !!release.fullSlidingWindowCache && !environment.NATLANG_MODEL_PATH,
         gpuLayers: local.gpuLayers ?? null,
         cacheRamMiB: local.cacheRamMiB ?? null,
@@ -1430,6 +1434,10 @@ function createLlamaServer(host, options = {}) {
       endpoint = null;
     }
   };
+}
+function templateKwargs(release) {
+  const kwargs = release.request?.chat_template_kwargs;
+  return kwargs && typeof kwargs === "object" && !Array.isArray(kwargs) && Object.keys(kwargs).length ? { ...kwargs } : null;
 }
 export {
   DEFAULT_KV_BUDGET_CAP_BYTES,
