@@ -27,7 +27,7 @@ type World = {
 };
 type Seed = { marker: string; boot: string; workspaceId: string; start: number; steps: number[] };
 type Source = { checkpoint: Checkpoint; source: DiagnosticSource };
-type Envelope = { status: "workspace-skill-reviewed"; skill: "diagnostics"; outcome: DiagnosticReport };
+type Envelope = DiagnosticReport;
 const tag = "WorkerdManager";
 const sequence = (record: DiagnosticRecord) => record.seq;
 const format = (finding: DiagnosticFinding) => JSON.stringify({ schema: "vibestudio.diagnostic-handoff/1", finding }, null, 2) + "\n";
@@ -233,7 +233,7 @@ export async function prepareOpenSystemDiagnostics(
       } catch { rejectedForged = true; }
       const finding = { status: world.expected.status, reason: (world.expected.mentions ?? []).map(([term]) => term).join("; ") || "Owned diagnostic interval verified", citations: expectedCitations() };
       const artifact = world.expected.stage ? await services.diagnosticHandoff.stage(finding) : null;
-      const report: Envelope = { status: "workspace-skill-reviewed", skill: "diagnostics", outcome: { finding, coverage: coverage(), artifact } };
+      const report: Envelope = { finding, coverage: coverage(), artifact };
       return verify(report, { rejectedForeign, rejectedForged });
     },
   };
