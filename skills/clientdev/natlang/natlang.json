@@ -2,9 +2,13 @@
   "schema": "natlang.package/v2",
   "name": "vibestudio-client-admission",
   "version": "0.1.0",
-  "targets": { "main": { "entry": "reviewClientAdmission.nl" } },
+  "targets": {
+    "main": {
+      "entry": "reviewClientAdmission.nl"
+    }
+  },
   "serviceBinding": "explicit",
   "serviceScopes": {
-    "clientAdmissionRead": ["reviewClientAdmission/inspectSource/readClient.nl"]
+    "clientAdmissionRead": []
   }
 }

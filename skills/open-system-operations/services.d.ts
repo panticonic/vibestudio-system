@@ -1,30 +1,19 @@
-import type {
-  OperatorAttempt,
-  OperatorBaseline,
-  OperatorChild,
-  OperatorPair,
-  OperatorProfile,
-  OperatorReadback,
-  OperatorRoute,
-  OperatorTarget,
-} from "./types.js";
-
 declare module "natlang:services" {
   export const operatorDiscovery: {
-    list(): Promise<OperatorTarget[]>;
-    observe(targetId: string): Promise<OperatorBaseline>;
+    list(): Promise<import("./types.js").OperatorTarget[]>;
+    observe(targetId: string): Promise<import("./types.js").OperatorBaseline>;
   };
   export const operatorDeployment: {
     apply(
       observationReceipt: string,
       operation: "start" | "restart",
-    ): Promise<OperatorAttempt>;
-    verify(installationReceipt: string): Promise<OperatorReadback>;
+    ): Promise<import("./types.js").OperatorAttempt>;
+    verify(installationReceipt: string): Promise<import("./types.js").OperatorReadback>;
   };
   export const operatorProfile: {
-    inspect(observationReceipt: string): Promise<OperatorProfile>;
-    pair(profileReceipt: string): Promise<OperatorPair>;
-    open(pairReceipt: string): Promise<OperatorRoute>;
-    verify(routeReceipt: string): Promise<OperatorChild>;
+    inspect(observationReceipt: string): Promise<import("./types.js").OperatorProfile>;
+    pair(profileReceipt: string): Promise<import("./types.js").OperatorPair>;
+    open(pairReceipt: string): Promise<import("./types.js").OperatorRoute>;
+    verify(routeReceipt: string): Promise<import("./types.js").OperatorChild>;
   };
 }

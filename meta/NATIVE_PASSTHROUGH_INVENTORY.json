@@ -1,0 +1,234 @@
+{
+  "schema": "natlang.native-passthrough-inventory/1",
+  "root": "/home/werg/data/vibestudio-open-goal-live/full-luna-campaign-yci2LB1N/rejection-audit/native-passthrough-system",
+  "rows": [
+    {
+      "path": "skills/clientdev/natlang/reviewClientAdmission/inspectSource/readClient.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "bced31e93b40f79deaa9199dea6e5ef3123196c2c16257edfd62eae39bdbb4a1",
+      "service": "clientAdmissionRead",
+      "method": "observe",
+      "arguments": "operationId",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/clientdev/natlang",
+      "metadata": {
+        "description": "Get the assigned client's semantic source, published System trust, host profile and build entry.",
+        "args": {
+          "operationId": "string"
+        },
+        "returns": "ClientAdmissionObservation"
+      },
+      "output": "skills/clientdev/natlang/reviewClientAdmission/inspectSource/readClient.ts",
+      "generated": "import {clientAdmissionRead} from \"natlang:services\";\nimport type {ClientAdmissionObservation} from \"../../types.js\";\n/** Get the assigned client's semantic source, published System trust, host profile and build entry. */\nexport default async function readClient(operationId: string):Promise<ClientAdmissionObservation>{\n return clientAdmissionRead.observe(operationId);\n}\n",
+      "source_body": "Return clientAdmissionRead.observe(operationId) unchanged."
+    },
+    {
+      "path": "skills/remote-access/commissionRemoteWorkspace/bindVerifiedWorkspace.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "0f36fe6242721fc2c07ab5664b85d22e61c60e25ba206470e321a26419798348",
+      "service": "remoteDeploymentHandoff",
+      "method": "open",
+      "arguments": "deploymentReceipt",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Bind the assigned device profile to the workspace verified by the deployment run.",
+        "args": {
+          "deploymentReceipt": "string"
+        },
+        "returns": "RemoteDeploymentHandoff"
+      },
+      "output": "skills/remote-access/commissionRemoteWorkspace/bindVerifiedWorkspace.ts",
+      "generated": "import {remoteDeploymentHandoff} from \"natlang:services\";\nimport type {RemoteDeploymentHandoff} from \"../types.js\";\n/** Bind the assigned device profile to the workspace verified by the deployment run. */\nexport default async function bindVerifiedWorkspace(deploymentReceipt: string):Promise<RemoteDeploymentHandoff>{\n return remoteDeploymentHandoff.open(deploymentReceipt);\n}\n",
+      "source_body": "Call remoteDeploymentHandoff.open with the exact deployment receipt and return its result unchanged."
+    },
+    {
+      "path": "skills/remote-access/deployRemoteServer/applyDeployment.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "7d04eb9ecff6687532c1a0db09500037eed7f5ab8cc6ff0c44adcee1a8d93086",
+      "service": "remoteDeploymentApply",
+      "method": "apply",
+      "arguments": "baselineReceipt",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Run the caller-authorized installer using the observed baseline receipt.",
+        "args": {
+          "baselineReceipt": "string"
+        },
+        "returns": "DeploymentAction"
+      },
+      "output": "skills/remote-access/deployRemoteServer/applyDeployment.ts",
+      "generated": "import {remoteDeploymentApply} from \"natlang:services\";\nimport type {DeploymentAction} from \"../types.js\";\n/** Run the caller-authorized installer using the observed baseline receipt. */\nexport default async function applyDeployment(baselineReceipt: string):Promise<DeploymentAction>{\n return remoteDeploymentApply.apply(baselineReceipt);\n}\n",
+      "source_body": "Call remoteDeploymentApply.apply(baselineReceipt). Return the receipt unchanged."
+    },
+    {
+      "path": "skills/remote-access/deployRemoteServer/checkReadiness/observeReadiness.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "fd5a60c26484fbd933083967b032c3c03ea767180b10bb635ff3ab9dad6ebe7d",
+      "service": "remoteDeploymentVerify",
+      "method": "verify",
+      "arguments": "actionReceipt",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Read independent readiness and identity evidence for the assigned installer attempt.",
+        "args": {
+          "actionReceipt": "string"
+        },
+        "returns": "DeploymentVerification"
+      },
+      "output": "skills/remote-access/deployRemoteServer/checkReadiness/observeReadiness.ts",
+      "generated": "import {remoteDeploymentVerify} from \"natlang:services\";\nimport type {DeploymentVerification} from \"../../types.js\";\n/** Read independent readiness and identity evidence for the assigned installer attempt. */\nexport default async function observeReadiness(actionReceipt: string):Promise<DeploymentVerification>{\n return remoteDeploymentVerify.verify(actionReceipt);\n}\n",
+      "source_body": "Call remoteDeploymentVerify.verify(actionReceipt). Return its receipt unchanged."
+    },
+    {
+      "path": "skills/remote-access/deployRemoteServer/observeBaseline.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "acbd4b64bf21b6eaadb23188103a995b0170407a156e125d6489de398abe6c25",
+      "service": "remoteDeploymentRead",
+      "method": "observe",
+      "arguments": "operationId",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Read the assigned managed deployment baseline and requested operation.",
+        "args": {
+          "operationId": "string"
+        },
+        "returns": "DeploymentBaseline"
+      },
+      "output": "skills/remote-access/deployRemoteServer/observeBaseline.ts",
+      "generated": "import {remoteDeploymentRead} from \"natlang:services\";\nimport type {DeploymentBaseline} from \"../types.js\";\n/** Read the assigned managed deployment baseline and requested operation. */\nexport default async function observeBaseline(operationId: string):Promise<DeploymentBaseline>{\n return remoteDeploymentRead.observe(operationId);\n}\n",
+      "source_body": "Call remoteDeploymentRead.observe(operationId). Return the receipt unchanged."
+    },
+    {
+      "path": "skills/remote-access/openRemoteWorkspace/openAssignedRoute/observeChild.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "958ca2418ba3aa58839c28fb38083fb846d746ed14635c9daef1c3ce02aea865",
+      "service": "remoteAccessVerify",
+      "method": "verify",
+      "arguments": "routeReceipt",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Independently verify the child reached through the selected route.",
+        "args": {
+          "routeReceipt": "string"
+        },
+        "returns": "RemoteChildReceipt"
+      },
+      "output": "skills/remote-access/openRemoteWorkspace/openAssignedRoute/observeChild.ts",
+      "generated": "import {remoteAccessVerify} from \"natlang:services\";\nimport type {RemoteChildReceipt} from \"../../types.js\";\n/** Independently verify the child reached through the selected route. */\nexport default async function observeChild(routeReceipt: string):Promise<RemoteChildReceipt>{\n return remoteAccessVerify.verify(routeReceipt);\n}\n",
+      "source_body": "Call remoteAccessVerify.verify with the exact route receipt."
+    },
+    {
+      "path": "skills/remote-access/openRemoteWorkspace/openAssignedRoute/routeThroughHub.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "192678dd7ebbf20baa736c0126d892d626288eab0b3467d3e2103f13db9595f2",
+      "service": "remoteAccessRoute",
+      "method": "select",
+      "arguments": "priorReceipt",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Ask the hub to route the explicitly assigned workspace identity.",
+        "args": {
+          "priorReceipt": "string"
+        },
+        "returns": "RemoteRouteReceipt"
+      },
+      "output": "skills/remote-access/openRemoteWorkspace/openAssignedRoute/routeThroughHub.ts",
+      "generated": "import {remoteAccessRoute} from \"natlang:services\";\nimport type {RemoteRouteReceipt} from \"../../types.js\";\n/** Ask the hub to route the explicitly assigned workspace identity. */\nexport default async function routeThroughHub(priorReceipt: string):Promise<RemoteRouteReceipt>{\n return remoteAccessRoute.select(priorReceipt);\n}\n",
+      "source_body": "Call remoteAccessRoute.select with the exact prerequisite receipt."
+    },
+    {
+      "path": "skills/remote-access/openRemoteWorkspace/pairAssignedProfile.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "ea43bb4fe76ab16f21ce6af6cabb6e1940c46242df10949f8cd8c3b658769030",
+      "service": "remoteAccessPair",
+      "method": "pair",
+      "arguments": "profileReceipt",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Redeem the caller's assigned invitation for the assigned profile.",
+        "args": {
+          "profileReceipt": "string"
+        },
+        "returns": "RemotePairReceipt"
+      },
+      "output": "skills/remote-access/openRemoteWorkspace/pairAssignedProfile.ts",
+      "generated": "import {remoteAccessPair} from \"natlang:services\";\nimport type {RemotePairReceipt} from \"../types.js\";\n/** Redeem the caller's assigned invitation for the assigned profile. */\nexport default async function pairAssignedProfile(profileReceipt: string):Promise<RemotePairReceipt>{\n return remoteAccessPair.pair(profileReceipt);\n}\n",
+      "source_body": "Call remoteAccessPair.pair with the supplied receipt. Return its result unchanged."
+    },
+    {
+      "path": "skills/remote-access/openRemoteWorkspace/readAssignedProfile.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "108c6804ebdade4ef289208e23bf5468203411e9cd2e78bc5163d9288615b3c2",
+      "service": "remoteAccessRead",
+      "method": "observe",
+      "arguments": "operationId",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Read the current state of the caller-assigned device profile.",
+        "args": {
+          "operationId": "string"
+        },
+        "returns": "RemoteProfileRead"
+      },
+      "output": "skills/remote-access/openRemoteWorkspace/readAssignedProfile.ts",
+      "generated": "import {remoteAccessRead} from \"natlang:services\";\nimport type {RemoteProfileRead} from \"../types.js\";\n/** Read the current state of the caller-assigned device profile. */\nexport default async function readAssignedProfile(operationId: string):Promise<RemoteProfileRead>{\n return remoteAccessRead.observe(operationId);\n}\n",
+      "source_body": "Call remoteAccessRead.observe with this operationId and return its receipt unchanged."
+    },
+    {
+      "path": "skills/remote-access/reviewRemoteRoute/readGatewayIdentity.nl",
+      "line": 1,
+      "body_line": 7,
+      "source_sha256": "af3b9d9022464a949ea521f99b657d93162d48ffeb7cc9c4b1494c24d5a1a569",
+      "service": "remoteGatewayIdentity",
+      "method": "observe",
+      "arguments": "operationId",
+      "status": "converted",
+      "reason": "Exact native service call, typed signature, no semantic judgment or child subtree",
+      "package": "skills/remote-access",
+      "metadata": {
+        "description": "Read the authenticated gateway identity behind the assigned route.",
+        "args": {
+          "operationId": "string"
+        },
+        "returns": "RemoteGatewayIdentity"
+      },
+      "output": "skills/remote-access/reviewRemoteRoute/readGatewayIdentity.ts",
+      "generated": "import {remoteGatewayIdentity} from \"natlang:services\";\nimport type {RemoteGatewayIdentity} from \"../types.js\";\n/** Read the authenticated gateway identity behind the assigned route. */\nexport default async function readGatewayIdentity(operationId: string):Promise<RemoteGatewayIdentity>{\n return remoteGatewayIdentity.observe(operationId);\n}\n",
+      "source_body": "Call remoteGatewayIdentity.observe once with operationId and return the resulting identity unchanged."
+    }
+  ],
+  "verification": {
+    "compiler": "actual VibeStudio compileProgram and workspaceModules, all affected packages plus every public entry root",
+    "packages": 81,
+    "aggregate_linked_files": 3708,
+    "ledger_unit": "native-passthrough-compile-20261123c",
+    "teacher_calls": 0,
+    "runtime_capture_dependency": "Deploy with Core native-service frame recording fix; raw service frame binding is insufficient."
+  }
+}

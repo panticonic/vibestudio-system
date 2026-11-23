@@ -2,18 +2,24 @@
   "schema": "natlang.package/v2",
   "name": "vibestudio-remote-access",
   "version": "0.1.0",
-  "targets": { "main": { "entry": "openRemoteWorkspace.nl" } },
+  "targets": {
+    "main": {
+      "entry": "openRemoteWorkspace.nl"
+    }
+  },
   "serviceBinding": "explicit",
   "serviceScopes": {
-    "remoteGatewayIdentity": ["reviewRemoteRoute/readGatewayIdentity.nl"],
-    "remoteCliScope": ["planCliContinuation.nl"],
-    "remoteDeploymentRead": ["deployRemoteServer/observeBaseline.nl"],
-    "remoteDeploymentApply": ["deployRemoteServer/applyDeployment.nl"],
-    "remoteDeploymentVerify": ["deployRemoteServer/checkReadiness/observeReadiness.nl"],
-    "remoteDeploymentHandoff": ["commissionRemoteWorkspace/bindVerifiedWorkspace.nl"],
-    "remoteAccessRead": ["openRemoteWorkspace/readAssignedProfile.nl"],
-    "remoteAccessPair": ["openRemoteWorkspace/pairAssignedProfile.nl"],
-    "remoteAccessRoute": ["openRemoteWorkspace/openAssignedRoute/routeThroughHub.nl"],
-    "remoteAccessVerify": ["openRemoteWorkspace/openAssignedRoute/observeChild.nl"]
+    "remoteGatewayIdentity": [],
+    "remoteCliScope": [
+      "planCliContinuation.nl"
+    ],
+    "remoteDeploymentRead": [],
+    "remoteDeploymentApply": [],
+    "remoteDeploymentVerify": [],
+    "remoteDeploymentHandoff": [],
+    "remoteAccessRead": [],
+    "remoteAccessPair": [],
+    "remoteAccessRoute": [],
+    "remoteAccessVerify": []
   }
 }
