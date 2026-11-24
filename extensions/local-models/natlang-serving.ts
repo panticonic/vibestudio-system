@@ -12,6 +12,7 @@ import {
   type LlamaServer,
   type WarmPrefix,
 } from "./vendor/llama/natlang-llama.js";
+import type { DecisionRequest, DecisionScores } from "./vendor/llama/types/contracts.js";
 import type { ModelRecord } from "@workspace/model-catalog/localModels";
 import { ROOT_LAYOUT } from "./constants.js";
 import { stockSlotPlan } from "./runtime-profiles.js";
@@ -23,7 +24,11 @@ export interface OpeningRequest {
   tools?: readonly unknown[];
 }
 
-export interface ScoreItem {
+/** The native score endpoint's item fields; decisions use continuations on the wire. */
+export interface ScoreItem extends Partial<Pick<DecisionRequest,
+  | "adapters" | "native_state_modes" | "native_recording" | "cache_messages" | "open_reply"
+  | "reasoning" | "reasoning_ids" | "split_tokenization"
+>> {
   messages: readonly unknown[];
   continuations: readonly string[];
   tools?: readonly unknown[];
@@ -37,6 +42,11 @@ export type ScoreResult =
        * (the fork reports it): the decision's input for usage accounting, not a measure of the server's work. */
       prompt_tokens?: number;
       native_state_imports?: unknown[];
+      /** Native endpoint acknowledgments; callers validate requested scoring modes. */
+      open_reply?: boolean;
+      reasoning?: boolean;
+      split_tokenization?: boolean;
+      native_decision_capture?: DecisionScores["native_decision_capture"];
     }
   | { error: string };
 

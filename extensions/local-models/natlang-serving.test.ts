@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ModelRecord } from "@workspace/model-catalog/localModels";
 import { LFM3_MODEL, ROOT_LAYOUT } from "./constants.js";
-import { createNatlangServing } from "./natlang-serving.js";
+import { createNatlangServing, type ScoreItem, type ScoreResult } from "./natlang-serving.js";
 import type { LoadedModel } from "./supervisor.js";
 
 const SLUG = LFM3_MODEL.slug;
@@ -22,11 +22,12 @@ interface Seen {
   method: string;
   path: string;
   authorization: string | null;
+  signal: AbortSignal | null;
   body: Record<string, unknown> | null;
 }
 
 /** A router serving one model: it answers a request only if it is for that model, as llama-server's router does. */
-function fakeRouter(slotCount: number) {
+function fakeRouter(slotCount: number, scoreResult: ScoreResult = { log_probs: [-0.5, -2], tokens: [1, 1], prompt_tokens: 412 }) {
   const seen: Seen[] = [];
   const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
@@ -36,6 +37,7 @@ function fakeRouter(slotCount: number) {
       method: init?.method ?? "GET",
       path: url.pathname + url.search,
       authorization: headers.get("authorization"),
+      signal: init?.signal ?? null,
       body,
     });
     const routedTo = body?.["model"] ?? url.searchParams.get("model");
@@ -62,7 +64,7 @@ function fakeRouter(slotCount: number) {
     if (url.pathname.startsWith("/slots/")) return Response.json({});
     if (url.pathname === "/v1/natlang/score") {
       const items = body?.["items"] as unknown[];
-      return Response.json({ results: items.map(() => ({ log_probs: [-0.5, -2], tokens: [1, 1], prompt_tokens: 412 })) });
+      return Response.json({ results: items.map(() => scoreResult) });
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
@@ -168,6 +170,43 @@ describe("natlang serving", () => {
       authorization: "Bearer key",
       body: { model: SLUG, items },
     });
+  });
+
+  it("forwards the native decision transport fields without changing sampled reasoning ids", async () => {
+    const scored: ScoreResult = {
+      log_probs: [-0.5, -2], tokens: [1, 1], prompt_tokens: 412,
+      open_reply: true, reasoning: true, split_tokenization: true,
+      native_decision_capture: { request_id: "mock-native-score" },
+    };
+    const router = fakeRouter(1, scored);
+    const api = serving(router.fetchFn, () => "i1");
+    const controller = new AbortController();
+    const item: ScoreItem = {
+      messages: [{ role: "user", content: "Choose the saved value." }],
+      continuations: ["first", "second"],
+      adapters: [{ id: "active-adapter", scale: 0.75 }],
+      native_state_modes: { input: "same-base-adapter-state" },
+      native_recording: true,
+      cache_messages: 1,
+      open_reply: true,
+      reasoning: "The saved value is the first one.",
+      reasoning_ids: [0, 17, 65535],
+      split_tokenization: true,
+    };
+    const before = structuredClone(item);
+    try {
+      await expect(api.scoreContinuations(SLUG, [item], controller.signal)).resolves.toEqual([scored]);
+      expect(router.seen.at(-1)).toEqual({
+        method: "POST",
+        path: "/v1/natlang/score",
+        authorization: "Bearer key",
+        signal: controller.signal,
+        body: { model: SLUG, items: [before] },
+      });
+      expect(item).toEqual(before);
+    } finally {
+      await api.close();
+    }
   });
 
   it("warms the opening of the prompts it scores before scoring them", async () => {
