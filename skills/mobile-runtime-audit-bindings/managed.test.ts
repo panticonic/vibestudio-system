@@ -1,7 +1,7 @@
 import {createHash} from "node:crypto";
 import {expect,it,vi} from "vitest";
 import {prepareOpenAndroidAudit} from "./managed.js";
-import {observeInvocation} from "@workspace-skills/system-testing/observed-invocation";
+import {observeInvocation} from "@workspace/application-outcomes/observed-invocation";
 vi.mock("@vibestudio/content-addressing",()=>({sha256HexSyncText:(text:string)=>createHash("sha256").update(text).digest("hex")}));
 const world={id:"target-check",goal:"Inspect the assigned disposable device",mode:"target" as const};
 async function prepared(){

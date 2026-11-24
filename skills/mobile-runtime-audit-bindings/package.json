@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./workflow.ts", "./managed": "./managed.ts" },
+  "exports": {
+    ".": "./workflow.ts",
+    "./managed": "./managed.ts"
+  },
   "dependencies": {
     "@workspace/runtime": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "@workspace/application-outcomes": "workspace:*"
   }
 }

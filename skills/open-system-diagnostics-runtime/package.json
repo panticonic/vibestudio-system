@@ -2,11 +2,14 @@
   "name": "@workspace-skills/open-system-diagnostics-runtime",
   "version": "0.1.0",
   "type": "module",
-  "exports": { ".": "./managed.ts" },
+  "exports": {
+    ".": "./managed.ts"
+  },
   "dependencies": {
     "@vibestudio/content-addressing": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
     "@workspace/runtime": "workspace:*",
-    "@workspace-skills/server-log-cursor-bindings": "workspace:*"
+    "@workspace-skills/server-log-cursor-bindings": "workspace:*",
+    "@workspace/application-outcomes": "workspace:*"
   }
 }
