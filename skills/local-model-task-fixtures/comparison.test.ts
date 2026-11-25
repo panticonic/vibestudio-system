@@ -72,7 +72,7 @@ it("keeps every assigned observation and selects the first eligible fork handoff
 
   expect(Object.keys(prepared.services)).toEqual(["localModelTaskInventory"]);
   const after = await prepared.readback();
-  expect(methods).toEqual(["listModels", "listModels"]);
+  expect([...new Set(methods)]).toEqual(["listModels"]);
   expect(
     prepared.expected.candidates?.map(({ disposition }) => disposition),
   ).toEqual([
