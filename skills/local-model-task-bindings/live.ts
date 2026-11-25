@@ -1,3 +1,4 @@
+import {isDeepStrictEqual} from "node:util";
 import type {
   LocalTaskCandidate,
   LocalTaskInventoryRow,
@@ -84,25 +85,33 @@ export async function prepareLocalModelComparison(
       return { ref, row: row === null ? null : { ...row, errorMessage: null } };
     });
   }
-  const rows = await readback();
-  const byRef = new Map(rows.map(({ ref, row }) => [ref, row]));
+  const initialRows = await readback();
+  const observed=new Map(initialRows.map(({ref,row})=>[ref,row]));
   const inspected: string[] = [];
-  const candidates = rows.map(({ ref, row }) =>
-    referenceCandidate(request, ref, row),
-  );
-  const selected = candidates.find(({ handoff }) => handoff !== null);
-  const expected: LocalTaskReport = {
-    disposition: selected?.disposition ?? "no-candidate",
-    ref: selected?.ref ?? request.modelRef,
-    state: selected?.state ?? null,
-    receipt: null,
-    handoff: selected?.handoff ?? null,
-    candidates,
-  };
+  const observations:typeof initialRows=[];
+  function expectedReport(rows:typeof initialRows) {
+    const candidates = rows.map(({ ref, row }) =>
+      referenceCandidate(request, ref, row),
+    );
+    const selected = candidates.find(({ handoff }) => handoff !== null);
+    const expected: LocalTaskReport = {
+      disposition: selected?.disposition ?? "no-candidate",
+      ref: selected?.ref ?? request.modelRef,
+      state: selected?.state ?? null,
+      receipt: null,
+      handoff: selected?.handoff ?? null,
+      candidates,
+    };
 
-  function verify(report: LocalTaskReport | null, after: typeof rows) {
+    return {expected,candidates};
+  }
+
+  function verify(report: LocalTaskReport | null, after: typeof initialRows) {
+    const {expected,candidates}=expectedReport(after);
     const checks = {
-      stableInventory: JSON.stringify(after) === JSON.stringify(rows),
+      currentInventory: after.length===refs.length && refs.every(ref=>
+        after.filter(row=>row.ref===ref).length===1 && inspected.includes(ref) &&
+        isDeepStrictEqual(after.find(row=>row.ref===ref)!.row,observed.get(ref))),
       exactReads:
         refs.every(ref => inspected.includes(ref)),
       handoff:
@@ -127,8 +136,10 @@ export async function prepareLocalModelComparison(
     return {
       contextId,
       caseId: world.id,
-      rows,
-      inspected,
+      rows:structuredClone(after),
+      initialRows:structuredClone(initialRows),
+      inspected:[...inspected],
+      observations:structuredClone(observations),
       expected,
       checks,
       passed: Object.values(checks).every(Boolean),
@@ -137,16 +148,20 @@ export async function prepareLocalModelComparison(
 
   return {
     request,
-    expected,
+    get expected(){return expectedReport(refs.map(ref=>({ref,row:observed.get(ref)!}))).expected;},
     verify,
     readback,
     services: {
       localModelTaskInventory: {
         async inspect(ref: string) {
-          if (!byRef.has(ref))
+          if (!refs.includes(ref))
             throw new Error("Inspect only the assigned local candidates");
+          const latest=await readback();
+          const row=latest.find(row=>row.ref===ref)!.row;
+          observed.set(ref,row);
           inspected.push(ref);
-          return structuredClone(byRef.get(ref) ?? null);
+          observations.push({ref,row:structuredClone(row)});
+          return structuredClone(row);
         },
       },
     },
