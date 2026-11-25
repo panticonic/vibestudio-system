@@ -1,0 +1,7 @@
+# Planner value contracts
+
+Pre-edit inventory (2026-11-25): 80 selected planner candidates across Examples, Google Workspace, News, Personal, System and System Testing; expanded body/scope scan covered all 379 NL files in these six inputs. Full classification is committed in Personal meta/PLANNER_VALUE_CONTRACT_AUDIT.json, with exact frozen input refs and coordinator/type/manifest paths. Base and Spectrolite have independent owners.
+
+System defects: workTowardDiagnosticGoal/chooseCheckpoints receives catalog entries and returns IDs, yet asks to read an observation before selecting a fallback. The TS coordinator owns those initial reads and subsequent reconsideration. decideOutcome returns DiagnosticDecision.stage while the coordinator binds citations and calls stageHandoff; its staging imperative must instead describe the returned boolean. Build performance chooseFollowup returns {action, reason}, so future metric confirmation belongs in its reason, rather than asking this service-free helper to run a measurement.
+
+No service grants, return signatures, goals, task IDs, splits, strategy restrictions or effectful subroutine instructions are changed. Other System planners were clear classifiers, selectors, or authorized child-call orchestration. Examples, Google Workspace, News and System Testing did not reveal a matching defect; their scopes and caller bodies were inspected and are recorded in the shared inventory.
