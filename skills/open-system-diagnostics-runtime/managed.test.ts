@@ -16,7 +16,7 @@ async function fixture(){
  return {prepared,world,window,finding,artifact};
 }
 it("accepts a genuine differently worded, longer finding with a sufficient subset of actual citations for bound meaning review",async()=>{
- const f=await fixture();const report={finding:f.finding,coverage:[],artifact:f.artifact};
+ const f=await fixture();const report={finding:f.finding,artifact:f.artifact};
  const proof=await f.prepared.verify(report);
  expect(proof.passed).toBe(true);
  expect(proof.semanticReviewRequired).toBe(true);

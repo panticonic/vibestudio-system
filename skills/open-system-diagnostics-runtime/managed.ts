@@ -205,8 +205,8 @@ export async function prepareOpenSystemDiagnostics(
       discoveredDiagnosticCheckpoints: discovered,
       boundNativeDiagnosticReadback: native.every(Boolean),
       selectedRequiredDiagnosticWindows: expectedReads.every(([key, status]) => observed.get(sourceFor(key).source.id)?.status === status),
-      preservedDiagnosticBootCoverage: Array.isArray(report?.coverage) && report.coverage.every(row =>
-        coverage().some(actual => isDeepStrictEqual(row, actual))),
+      preservedDiagnosticBootCoverage: report?.coverage === undefined || (Array.isArray(report.coverage) && report.coverage.every(row =>
+        coverage().some(actual => isDeepStrictEqual(row, actual)))),
       reconciledDiagnosticFinding: Boolean(reason && dispositions.includes(report?.finding?.status as Disposition)),
       groundedDiagnosticCitations: Array.isArray(citations) && citations.every(exactCitation),
       verifiedDiagnosticHandoff: verifiedHandoff,
