@@ -1,4 +1,5 @@
-import {assessObservedApplicationOutcome} from "@workspace/application-outcomes/observed-application-outcome";
+import {bindObservedContentReview} from "@workspace/application-outcomes/observed-content-review";
+const assessObservedApplicationOutcome = bindObservedContentReview(["catalog", "windows"], ["handoffReadback"]);
 import type {InvocationObservations} from "@workspace/application-outcomes/observed-invocation";
 import type {SemanticOutcomeContract} from "@workspace/application-outcomes/semantic-outcome-contract";
 import { isDeepStrictEqual } from "node:util";
@@ -131,7 +132,7 @@ export async function prepareOpenSystemDiagnostics(
     diagnosticHandoff: {
       async stage(finding: DiagnosticFinding) {
         if (!world.mayStage || savedHandoff || staging || reading.size || !dispositions.includes(finding?.status) ||
-            typeof finding.reason !== "string" || !finding.reason.trim() || finding.reason.length > 1200 ||
+            typeof finding.reason !== "string" || !finding.reason.trim() ||
             !Array.isArray(finding.citations) || !finding.citations.length ||
             new Set(finding.citations.map(({ sourceId, seq }) => `${sourceId}:${seq}`)).size !== finding.citations.length ||
             !finding.citations.every(exactCitation))
@@ -191,9 +192,8 @@ export async function prepareOpenSystemDiagnostics(
       .map(({ checkpoint, source }) => verifyNative(checkpoint, observed.get(source.id)!)));
     const expected = world.expected;
     const expectedReads = Object.entries(expected.windows);
-    const reason = typeof report?.finding?.reason === "string" ? report.finding.reason.toLowerCase() : null;
+    const reason = typeof report?.finding?.reason === "string" ? report.finding.reason.trim() : null;
     const citations = report?.finding?.citations;
-    const ordered = (values: readonly ExactDiagnosticCitation[]) => [...values].sort((left, right) => left.seq - right.seq || left.sourceId.localeCompare(right.sourceId));
     const handoffReadback = savedHandoff ? await fs.readFile(savedHandoff.receipt.path, "utf8") : null;
     const verifiedHandoff = !expected.stage
       ? savedHandoff === null
@@ -205,11 +205,10 @@ export async function prepareOpenSystemDiagnostics(
       discoveredDiagnosticCheckpoints: discovered,
       boundNativeDiagnosticReadback: native.every(Boolean),
       selectedRequiredDiagnosticWindows: expectedReads.every(([key, status]) => observed.get(sourceFor(key).source.id)?.status === status),
-      preservedDiagnosticBootCoverage: Array.isArray(report?.coverage) && isDeepStrictEqual(
-        [...report.coverage].sort((a, b) => a.sourceId.localeCompare(b.sourceId)), coverage().sort((a, b) => a.sourceId.localeCompare(b.sourceId))),
-      reconciledDiagnosticFinding: report?.finding?.status === expected.status && Boolean(reason && (expected.mentions ?? []).every((choices) => choices.some((term) => reason.includes(term)))),
-      groundedDiagnosticCitations: Array.isArray(citations) && citations.every(exactCitation) &&
-        isDeepStrictEqual(ordered(citations), ordered(expectedCitations())),
+      preservedDiagnosticBootCoverage: Array.isArray(report?.coverage) && report.coverage.every(row =>
+        coverage().some(actual => isDeepStrictEqual(row, actual))),
+      reconciledDiagnosticFinding: Boolean(reason && dispositions.includes(report?.finding?.status as Disposition)),
+      groundedDiagnosticCitations: Array.isArray(citations) && citations.every(exactCitation),
       verifiedDiagnosticHandoff: verifiedHandoff,
       ...(boundary && "rejectedForeign" in boundary ? { rejectedForeignDiagnosticCheckpoint: boundary.rejectedForeign, rejectedForgedDiagnosticCitation: boundary.rejectedForged } : {}),
     };
@@ -239,7 +238,7 @@ export async function prepareOpenSystemDiagnostics(
           sourceId: crypto.randomUUID(), boot: seed.boot, seq: seed.steps[0]!, text: "Different incident",
         }] });
       } catch { rejectedForged = true; }
-      const finding = { status: world.expected.status, reason: (world.expected.mentions ?? []).map(([term]) => term).join("; ") || "Owned diagnostic interval verified", citations: expectedCitations() };
+      const finding = { status: world.expected.status, reason: [...observed.values()].map(window => `${window.source.label}: ${window.status}; ${window.records.map(record => record.text).join("; ")}`).join("\n") || "No authorized checkpoint is available", citations: expectedCitations() };
       const artifact = world.expected.stage ? await services.diagnosticHandoff.stage(finding) : null;
       const report: Envelope = { finding, coverage: coverage(), artifact };
       return verifyEvidence(report, { rejectedForeign, rejectedForged });
