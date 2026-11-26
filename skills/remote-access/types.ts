@@ -127,7 +127,6 @@ export type CliContinuation = {
   source: CliContextSource;
   contextId: string | null;
   status: CliContextStatus;
-  action: "run-assigned-command" | "ask-parent" | "repair-scope";
   gateway: RemoteGatewayIdentity;
 };
 export type RemoteRouteReview = {

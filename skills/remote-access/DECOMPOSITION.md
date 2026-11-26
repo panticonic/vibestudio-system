@@ -69,8 +69,9 @@ without issuing a new pairing, refreshing a reach, or changing a profile.
 `planCliContinuation` reads the authenticated gateway observed by the route
 review and the assigned CLI invocation. `selectContextSource` applies CLI
 selector precedence. `assessCliContext` checks the selected identity against
-the credential. `chooseCliAction` determines whether to continue with the
-paired device, ask the parent agent, or repair the selected scope. The caller
+the credential. The resulting value identifies the authenticated selected scope;
+it does not grant an operation or infer parent-only execution from agent identity.
+Actual operations retain their own native authority/admission checks. The caller
 supplies redacted coordinates and independently verifies the recommendation.
 
 ## Commissioning task bank

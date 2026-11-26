@@ -2,7 +2,7 @@
 import type { NatlangFunction, Folder as FolderStore, FolderHandle } from "@natlang/browser";
 /** A natlang `Folder` accepts a whole folder or a directory handle within one. */
 type Folder = FolderStore | FolderHandle;
-type RemoteLayer = | "healthy"
+type RemoteLayer = /** Which layer of a Vibestudio remote setup a failure belongs to. */ | "healthy"
   | "client-runtime"
   | "host-sandbox"
   | "server-deployment"
@@ -120,7 +120,6 @@ type CliContinuation = {
   source: CliContextSource;
   contextId: string | null;
   status: CliContextStatus;
-  action: "run-assigned-command" | "ask-parent" | "repair-scope";
   gateway: RemoteGatewayIdentity;
 };
 type RemoteRouteReview = {
@@ -129,5 +128,5 @@ type RemoteRouteReview = {
   layer: RemoteLayer;
   next: "accept-identity" | "verify-server-assignment" | "refresh-workspace-reach";
 };
-declare const fn: NatlangFunction<[request: RemoteRouteReviewRequest], CliContinuation> & { readonly assessCliContext: NatlangFunction<[choice: CliContextChoice, gateway: RemoteGatewayIdentity, credential: CliContextEvidence["credential"]], CliContextStatus>; readonly chooseCliAction: NatlangFunction<[status: CliContextStatus, credential: CliContextEvidence["credential"], operation: CliContextEvidence["operation"]], CliContinuation["action"]>; readonly selectContextSource: NatlangFunction<[selectors: CliContextEvidence["selectors"]], CliContextChoice> };
+declare const fn: NatlangFunction<[request: RemoteRouteReviewRequest], CliContinuation> & { readonly assessCliContext: NatlangFunction<[choice: CliContextChoice, gateway: RemoteGatewayIdentity, credential: CliContextEvidence["credential"]], CliContextStatus>; readonly selectContextSource: NatlangFunction<[selectors: CliContextEvidence["selectors"]], CliContextChoice> };
 export default fn;

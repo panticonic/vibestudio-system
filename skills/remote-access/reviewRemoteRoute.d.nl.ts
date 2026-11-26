@@ -3,7 +3,7 @@ import type { NatlangFunction, Folder as FolderStore, FolderHandle } from "@natl
 import type __uses_remoteLayer_0 from "./remoteLayer.nl";
 /** A natlang `Folder` accepts a whole folder or a directory handle within one. */
 type Folder = FolderStore | FolderHandle;
-type RemoteLayer = | "healthy"
+type RemoteLayer = /** Which layer of a Vibestudio remote setup a failure belongs to. */ | "healthy"
   | "client-runtime"
   | "host-sandbox"
   | "server-deployment"
@@ -121,7 +121,6 @@ type CliContinuation = {
   source: CliContextSource;
   contextId: string | null;
   status: CliContextStatus;
-  action: "run-assigned-command" | "ask-parent" | "repair-scope";
   gateway: RemoteGatewayIdentity;
 };
 type RemoteRouteReview = {
